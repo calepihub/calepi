@@ -1,0 +1,179 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Authenticated engineer or architect account profile stored privately per user UID.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Firebase Auth UID",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 200
+        },
+        "displayName": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "email", "createdAt", "updatedAt"]
+    },
+    "ProjectRecord": {
+      "title": "ProjectRecord",
+      "description": "Parametric BIM architectural, MEP, SINAPI-RJ budget, and CAD sheet project owned by an authenticated user.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "schemaVersion": { "type": "number" },
+        "code": { "type": "string", "minLength": 1, "maxLength": 48 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "status": { "type": "string", "enum": ["em_andamento", "concluido", "arquivado"] },
+        "stage": {
+          "type": "string",
+          "enum": [
+            "estudo_conceitual",
+            "estudo_preliminar",
+            "anteprojeto",
+            "aprovacao",
+            "executivo",
+            "dimensionado",
+            "revisado",
+            "validado_rt"
+          ]
+        },
+        "client": { "type": "string", "maxLength": 160 },
+        "owner": { "type": "string", "maxLength": 160 },
+        "address": { "type": "string", "maxLength": 240 },
+        "municipality": { "type": "string", "maxLength": 120 },
+        "state": { "type": "string", "maxLength": 8 },
+        "site": { "type": "object" },
+        "urbanRules": { "type": "array" },
+        "constructionMethod": { "type": "object" },
+        "floors": { "type": "array" },
+        "unitTypes": { "type": "array" },
+        "structuralElements": { "type": "array" },
+        "rainwaterElements": { "type": "array" },
+        "rainwaterConfig": { "type": "object" },
+        "electricalHeights": { "type": "object" },
+        "hydraulicConfig": { "type": "object" },
+        "professionals": { "type": "array" },
+        "budgetEntries": { "type": "array" },
+        "budgetSettings": { "type": "object" },
+        "normativeRefs": { "type": "array" },
+        "renderSettings": { "type": "object" },
+        "memorialOverrides": { "type": "object" },
+        "revisions": { "type": "array" },
+        "fireSafetyNotes": { "type": "object" },
+        "accessibilityConfig": { "type": "object" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "ownerId",
+        "schemaVersion",
+        "code",
+        "name",
+        "status",
+        "stage",
+        "client",
+        "owner",
+        "address",
+        "municipality",
+        "state",
+        "site",
+        "urbanRules",
+        "constructionMethod",
+        "floors",
+        "unitTypes",
+        "structuralElements",
+        "rainwaterElements",
+        "rainwaterConfig",
+        "electricalHeights",
+        "hydraulicConfig",
+        "professionals",
+        "budgetEntries",
+        "budgetSettings",
+        "normativeRefs",
+        "renderSettings",
+        "memorialOverrides",
+        "revisions",
+        "fireSafetyNotes",
+        "accessibilityConfig",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ProjectRender": {
+      "title": "ProjectRender",
+      "description": "Captured 3D architectural render image linked to a project's R01 executive sheet.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "projectId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "title": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "preset": { "type": "string", "maxLength": 40 },
+        "timeOfDay": { "type": "string", "maxLength": 24 },
+        "dataUrl": { "type": "string", "minLength": 1, "maxLength": 750000 },
+        "capturedAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "projectId", "title", "preset", "timeOfDay", "dataUrl", "capturedAt", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Private user account profile isolated by auth UID."
+    },
+    "/projects/{projectId}": {
+      "schema": { "$ref": "#/entities/ProjectRecord" },
+      "description": "User-owned parametric BIM and CAD projects."
+    },
+    "/projects/{projectId}/renders/{renderId}": {
+      "schema": { "$ref": "#/entities/ProjectRender" },
+      "description": "Saved 3D perspective renders for Sheet R01 stored separately to keep parent documents lightweight."
+    }
+  }
+}

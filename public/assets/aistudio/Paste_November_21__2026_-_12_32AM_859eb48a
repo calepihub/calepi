@@ -1,0 +1,2289 @@
+# PROJETO MASTER — KITNET PRO STUDIO
+## PLATAFORMA PROFISSIONAL DE PROJETOS ARQUITETÔNICOS, ENGENHARIA, BIM, RENDERIZAÇÃO E DOCUMENTAÇÃO EXECUTIVA PARA EMPREENDIMENTOS RESIDENCIAIS COMPACTOS
+
+---
+
+# 1. IDENTIDADE E PAPEL DO DESENVOLVEDOR
+
+Você deverá atuar simultaneamente como:
+
+- Arquiteto e urbanista sênior.
+- Engenheiro civil especializado em projetos residenciais.
+- Engenheiro estrutural.
+- Engenheiro eletricista.
+- Engenheiro hidráulico e sanitário.
+- Especialista em instalações prediais.
+- Especialista em BIM e modelagem paramétrica.
+- Desenvolvedor de software sênior.
+- Arquiteto de sistemas.
+- Especialista em interfaces profissionais de engenharia.
+- Especialista em visualização arquitetônica e renderização 3D.
+- Especialista em geração automatizada de documentação técnica.
+
+Sua missão é desenvolver um software profissional denominado:
+
+# KITNET PRO STUDIO
+
+Uma plataforma integrada para criação, dimensionamento, modelagem, documentação, visualização, orçamento e análise técnica de empreendimentos residenciais compactos, especialmente kitnets, studios, lofts, apartamentos compactos e edifícios multifamiliares.
+
+O sistema deverá permitir que o usuário defina livremente as características do terreno, quantidade de unidades, tipologias, dimensões, ambientes, métodos construtivos, materiais, acabamentos e instalações.
+
+A partir dessas informações, deverá gerar um modelo de empreendimento coerente, com plantas arquitetônicas, desenhos técnicos, modelo tridimensional, renderizações, projetos complementares, memoriais descritivos, quantitativos e relatórios.
+
+**Não desenvolver apenas um protótipo visual, uma landing page ou um dashboard demonstrativo. Desenvolver uma aplicação funcional, com operações reais, dados persistentes, cálculos implementados, mecanismos de validação e geração efetiva de arquivos.**
+
+---
+
+# 2. OBJETIVO PRINCIPAL
+
+Criar um sistema paramétrico especializado que permita transformar informações fornecidas pelo usuário em um projeto arquitetônico e de engenharia integrado.
+
+O usuário deverá poder criar desde uma única kitnet até empreendimentos com dezenas ou centenas de unidades, distribuídas em diferentes pavimentos e tipologias.
+
+O programa não deverá impor modelos de kitnets fixos.
+
+Todas as dimensões, quantidades, tipologias e características deverão ser configuráveis.
+
+Exemplo de entrada:
+
+- Terreno: 300 m².
+- Frente: 12 metros.
+- Profundidade: 25 metros.
+- Edificação: 2 pavimentos.
+- Quantidade: 12 kitnets.
+- Tipologias: 3.
+- Tipologia A: 4 unidades de 20 m².
+- Tipologia B: 4 unidades de 25 m².
+- Tipologia C: 4 unidades de 30 m².
+- Método construtivo: alvenaria convencional.
+- Paredes externas: 15 cm.
+- Paredes internas: 10 cm.
+- Pé-direito: configurável.
+- Cobertura: configurável.
+- Acabamentos: selecionáveis.
+- Instalações: configuradas individualmente por ambiente.
+
+Esses valores são apenas ilustrativos.
+
+O sistema deverá verificar a viabilidade geométrica da implantação, identificar incompatibilidades e apresentar os resultados.
+
+Não deverá afirmar que determinado empreendimento está legalmente aprovado apenas porque cabe geometricamente no terreno.
+
+---
+
+# 3. DIRETRIZES OBRIGATÓRIAS DE DESENVOLVIMENTO
+
+## 3.1. Aplicação real e funcional
+
+Não criar apenas telas ilustrativas.
+
+Todos os módulos apresentados na navegação deverão possuir funcionalidades reais ou estar claramente identificados como módulos ainda não implementados.
+
+Não utilizar botões decorativos.
+
+Não simular cálculos.
+
+Não exibir resultados fictícios como se fossem resultados técnicos efetivos.
+
+Não apresentar arquivos vazios ou documentos sem conteúdo.
+
+Não utilizar informações aleatórias nos memoriais e quantitativos.
+
+Os valores apresentados deverão vir dos dados cadastrados pelo usuário ou de cálculos implementados e documentados.
+
+## 3.2. Arquitetura tecnológica
+
+Utilizar preferencialmente:
+
+- React.
+- TypeScript.
+- Vite.
+- Componentes reutilizáveis.
+- Arquitetura modular.
+- Gerenciamento centralizado de estado.
+- Biblioteca geométrica apropriada.
+- SVG ou Canvas para desenhos técnicos 2D.
+- Three.js para visualização tridimensional.
+- IndexedDB para armazenamento local estruturado.
+- Exportadores especializados para PDF, DOCX, XLSX, DXF e JSON.
+- Bibliotecas adicionais somente quando necessárias e tecnicamente justificadas.
+
+A aplicação deverá ser executável no ambiente de desenvolvimento disponibilizado pelo Google AI Studio.
+
+Não depender de serviços externos pagos para executar as funcionalidades básicas.
+
+Não exigir que o usuário tenha conhecimento de programação.
+
+Não exigir autenticação Google para acessar as funcionalidades essenciais.
+
+A arquitetura deverá permitir expansão posterior para backend, banco de dados centralizado, compartilhamento de projetos e múltiplos usuários.
+
+## 3.3. Persistência
+
+Implementar armazenamento persistente.
+
+Deverá ser possível:
+
+- Criar projetos.
+- Salvar projetos.
+- Editar projetos.
+- Duplicar projetos.
+- Excluir projetos mediante confirmação.
+- Arquivar projetos.
+- Recuperar projetos.
+- Exportar backups.
+- Importar backups.
+- Reabrir projetos sem perda das configurações.
+
+Implementar salvamento automático e indicar visualmente o estado do salvamento.
+
+Criar sistema de revisões, com histórico das alterações relevantes.
+
+Cada empreendimento deverá possuir identificação própria.
+
+---
+
+# 4. IDENTIDADE VISUAL E EXPERIÊNCIA DO USUÁRIO
+
+Desenvolver uma interface de software profissional de engenharia e arquitetura.
+
+Referências de qualidade visual e organização: Autodesk Revit, Archicad, AutoCAD, SketchUp e softwares profissionais de BIM.
+
+Não copiar marcas, logotipos ou interfaces proprietárias.
+
+## 4.1. Identidade visual
+
+Nome: KITNET PRO STUDIO.
+
+Estilo:
+
+- Profissional.
+- Técnico.
+- Moderno.
+- Sofisticado.
+- Minimalista.
+- Organizado.
+- Direcionado a arquitetura e engenharia.
+
+Utilizar preferencialmente:
+
+- Fundo grafite ou cinza muito escuro no ambiente de trabalho.
+- Painéis em tons de cinza.
+- Branco para áreas de leitura e documentação.
+- Azul ou uma cor de destaque para comandos selecionados.
+- Verde para operações concluídas.
+- Amarelo para alertas.
+- Vermelho para erros críticos.
+
+A interface não deve ser excessivamente colorida.
+
+## 4.2. Usabilidade
+
+A aplicação deverá possuir:
+
+- Menu lateral.
+- Barra superior.
+- Painel de ferramentas contextual.
+- Área central ampla de trabalho.
+- Propriedades do elemento selecionado.
+- Painel de informações do projeto.
+- Navegação por disciplinas.
+- Ferramentas de zoom e enquadramento.
+- Indicadores de salvamento.
+- Alertas de inconsistências.
+- Tooltips explicativos.
+
+Utilizar fontes legíveis, com tamanho confortável.
+
+Não utilizar fontes excessivamente pequenas.
+
+Garantir boa experiência em computadores e notebooks.
+
+A área de desenho deverá ocupar a maior parte do espaço disponível.
+
+---
+
+# 5. MÓDULO DE GERENCIAMENTO DE EMPREENDIMENTOS
+
+Criar uma central de gerenciamento.
+
+O painel inicial deverá apresentar:
+
+- Novo empreendimento.
+- Projetos recentes.
+- Projetos em andamento.
+- Projetos concluídos.
+- Projetos arquivados.
+- Quantidade de unidades por projeto.
+- Área total construída.
+- Últimas alterações.
+- Estado dos projetos.
+- Acesso rápido aos módulos.
+
+Cada projeto deverá conter:
+
+1. Identificação.
+2. Proprietário ou contratante.
+3. Endereço.
+4. Município.
+5. Estado.
+6. Características do terreno.
+7. Dados urbanísticos.
+8. Características da edificação.
+9. Quantidade de pavimentos.
+10. Quantidade de unidades.
+11. Tipologias.
+12. Disciplinas técnicas.
+13. Documentação.
+14. Histórico de revisões.
+
+Permitir a duplicação de empreendimentos, preservando ou permitindo alterar seus parâmetros.
+
+---
+
+# 6. MÓDULO DE CADASTRO DO TERRENO
+
+Criar um módulo completo para cadastramento geométrico do terreno.
+
+Campos:
+
+- Área.
+- Frente.
+- Fundos.
+- Lateral direita.
+- Lateral esquerda.
+- Geometria.
+- Perímetro.
+- Coordenadas, quando disponíveis.
+- Orientação geográfica.
+- Topografia.
+- Níveis.
+- Desníveis.
+- Aclividade.
+- Declividade.
+- Confrontações.
+- Recuos configuráveis.
+- Áreas de servidão.
+- Restrições cadastradas.
+
+Permitir terrenos:
+
+- Retangulares.
+- Quadrados.
+- Trapezoidais.
+- Irregulares.
+- Poligonais.
+
+Criar editor geométrico para desenho ou edição do perímetro do terreno.
+
+Permitir informar medidas manualmente.
+
+Calcular automaticamente área e perímetro a partir da geometria cadastrada.
+
+Não utilizar apenas a área digitada quando já existir geometria definida: verificar eventual divergência.
+
+Criar representação 2D do terreno.
+
+Quando possível, permitir importação de arquivos de levantamento e desenhos compatíveis.
+
+---
+
+# 7. MÓDULO DE LEGISLAÇÃO E PARÂMETROS URBANÍSTICOS
+
+Criar um módulo específico para legislação municipal.
+
+Permitir cadastro de:
+
+- Código de Obras.
+- Plano Diretor.
+- Lei de Uso e Ocupação do Solo.
+- Zoneamento.
+- Recuos obrigatórios.
+- Taxa de ocupação.
+- Coeficiente de aproveitamento.
+- Taxa de permeabilidade.
+- Altura máxima.
+- Gabarito.
+- Vagas exigidas.
+- Requisitos de iluminação.
+- Requisitos de ventilação.
+- Afastamentos.
+- Exigências de acessibilidade.
+- Restrições específicas.
+
+Cada regra deverá possuir:
+
+- Descrição.
+- Município.
+- Fonte.
+- Identificação da norma ou lei.
+- Data de referência.
+- Vigência cadastrada.
+- Parâmetro.
+- Unidade.
+- Condição de aplicação.
+- Observações.
+
+Criar uma verificação urbanística preliminar.
+
+O sistema deverá apresentar:
+
+- Parâmetros cadastrados.
+- Parâmetros atendidos.
+- Parâmetros não atendidos.
+- Parâmetros não informados.
+- Itens que precisam de confirmação técnica.
+
+Não inventar leis, índices ou exigências municipais.
+
+Não declarar conformidade legal quando a legislação aplicável não estiver cadastrada ou validada.
+
+---
+
+# 8. MÓDULO DE TIPOLOGIAS DE KITNETS
+
+Criar um gerador totalmente paramétrico de unidades habitacionais.
+
+Permitir criar qualquer tipologia.
+
+Exemplos de modelos iniciais:
+
+- Kitnet compacta.
+- Kitnet padrão.
+- Kitnet ampliada.
+- Studio.
+- Loft.
+- Kitnet com quarto independente.
+- Kitnet com dois quartos.
+- Unidade com mezanino.
+- Unidade acessível.
+- Unidade personalizada.
+
+Esses modelos serão apenas pontos de partida editáveis.
+
+O usuário deverá definir:
+
+- Identificação da tipologia.
+- Área desejada.
+- Largura.
+- Comprimento.
+- Formato.
+- Quantidade de quartos.
+- Quantidade de banheiros.
+- Quantidade de cozinhas.
+- Existência de lavanderia.
+- Existência de varanda.
+- Pé-direito.
+- Mezanino.
+- Área útil.
+- Área construída.
+- Padrão de acabamento.
+
+Permitir a criação ilimitada de tipologias.
+
+Permitir:
+
+- Duplicar tipologia.
+- Espelhar.
+- Girar.
+- Alterar dimensões.
+- Modificar ambientes.
+- Reaproveitar layout.
+- Aplicar alterações a várias unidades.
+- Manter alterações individuais em unidades específicas.
+
+Cada tipologia deverá ter seu próprio cadastro técnico.
+
+---
+
+# 9. MÓDULO DE GERAÇÃO DE PLANTAS ARQUITETÔNICAS
+
+Este módulo será um dos núcleos principais do software.
+
+Desenvolver um editor gráfico 2D funcional.
+
+Não apresentar apenas uma imagem estática de uma planta.
+
+Implementar geometria vetorial real.
+
+## 9.1. Elementos de desenho
+
+Permitir desenhar:
+
+- Paredes.
+- Paredes internas.
+- Paredes externas.
+- Pilares.
+- Vigas representativas.
+- Portas.
+- Janelas.
+- Vãos.
+- Escadas.
+- Rampas.
+- Varandas.
+- Louças.
+- Bancadas.
+- Mobiliário.
+- Elementos construtivos.
+
+## 9.2. Ferramentas
+
+Implementar:
+
+- Selecionar.
+- Desenhar.
+- Mover.
+- Rotacionar.
+- Duplicar.
+- Espelhar.
+- Excluir.
+- Medir.
+- Cotar.
+- Alinhar.
+- Ajustar.
+- Agrupar.
+- Desagrupar.
+- Zoom.
+- Pan.
+- Snap.
+- Grid.
+- Layers.
+- Undo.
+- Redo.
+
+Permitir edição das propriedades de cada elemento.
+
+## 9.3. Dimensionamento
+
+Cada parede deverá possuir:
+
+- Comprimento.
+- Espessura.
+- Altura.
+- Material.
+- Método construtivo.
+- Identificação.
+- Posição.
+- Orientação.
+
+Cada porta deverá possuir:
+
+- Largura.
+- Altura.
+- Espessura.
+- Tipo.
+- Sentido de abertura.
+- Posição.
+- Material.
+
+Cada janela deverá possuir:
+
+- Largura.
+- Altura.
+- Peitoril.
+- Tipo.
+- Material.
+- Posição.
+- Forma de abertura.
+
+As dimensões deverão ser apresentadas tecnicamente.
+
+Criar cotas automáticas e cotas manuais.
+
+A geometria deverá respeitar escala e unidades reais.
+
+## 9.4. Geração automática de layout
+
+Criar mecanismo para gerar uma primeira proposta de organização dos ambientes a partir das dimensões informadas pelo usuário.
+
+O sistema poderá sugerir:
+
+- Posição dos cômodos.
+- Organização da cozinha.
+- Posição do banheiro.
+- Circulação.
+- Aberturas.
+- Aproveitamento da área.
+
+Entretanto, as propostas geradas deverão permanecer editáveis.
+
+Não considerar uma distribuição automaticamente válida apenas porque os cômodos cabem geometricamente.
+
+Verificar conflitos, acessibilidade, ventilação, iluminação e condições de utilização.
+
+---
+
+# 10. MÓDULO DE AMBIENTES E CÔMODOS
+
+Cada unidade deverá possuir cadastro individual de ambientes.
+
+Permitir criar qualquer quantidade de cômodos.
+
+Campos por ambiente:
+
+- Nome.
+- Identificação.
+- Tipo.
+- Comprimento.
+- Largura.
+- Área.
+- Pé-direito.
+- Perímetro.
+- Altura das paredes.
+- Revestimento do piso.
+- Revestimento das paredes.
+- Tipo de forro.
+- Pintura.
+- Rodapé.
+- Iluminação.
+- Ventilação.
+- Portas.
+- Janelas.
+- Mobiliário.
+- Equipamentos.
+- Pontos elétricos.
+- Pontos hidráulicos.
+- Pontos sanitários.
+
+Criar ficha técnica de cada ambiente.
+
+Atualizar automaticamente a área, perímetro e quantitativos sempre que a geometria for modificada.
+
+## 10.1. Biblioteca de ambientes
+
+Criar modelos editáveis de:
+
+- Sala.
+- Quarto.
+- Sala/quarto integrado.
+- Cozinha.
+- Banheiro.
+- Lavanderia.
+- Área de serviço.
+- Circulação.
+- Varanda.
+- Escritório.
+- Depósito.
+- Mezanino.
+- Ambientes personalizados.
+
+Não limitar o usuário a esses modelos.
+
+---
+
+# 11. MÓDULO DE MOBILIÁRIO E EQUIPAMENTOS
+
+Criar uma biblioteca de mobiliário dimensionado.
+
+Elementos:
+
+- Cama.
+- Guarda-roupa.
+- Sofá.
+- Mesa.
+- Cadeiras.
+- Bancada.
+- Geladeira.
+- Fogão.
+- Cooktop.
+- Micro-ondas.
+- Máquina de lavar.
+- Tanque.
+- Armários.
+- Gabinetes.
+- Box.
+- Vaso sanitário.
+- Lavatório.
+- Chuveiro.
+- Espelhos.
+- Luminárias.
+
+Permitir adicionar, remover, girar e posicionar objetos.
+
+Cada objeto deverá possuir dimensões editáveis.
+
+Verificar interferências entre mobiliários, portas, paredes e circulações.
+
+Permitir que o mobiliário apareça tanto na planta 2D quanto no modelo 3D.
+
+---
+
+# 12. MÓDULO DE INSTALAÇÕES ELÉTRICAS
+
+Desenvolver um módulo completo para criação e documentação das instalações elétricas.
+
+O usuário deverá cadastrar os pontos individualmente por ambiente.
+
+## 12.1. Categorias de pontos
+
+- Tomadas baixas.
+- Tomadas médias.
+- Tomadas altas.
+- Tomadas específicas.
+- Tomadas de uso geral.
+- Tomadas de uso específico.
+- Interruptores.
+- Pontos de iluminação.
+- Arandelas.
+- Luminárias de teto.
+- Pontos para ar-condicionado.
+- Pontos para chuveiro.
+- Pontos de forno.
+- Pontos de cooktop.
+- Pontos de máquina de lavar.
+- Pontos de geladeira.
+- Pontos de micro-ondas.
+- Pontos de coifa.
+- Rede de dados.
+- Campainha.
+- Televisão.
+- Interfone.
+- Outros pontos personalizados.
+
+## 12.2. Cadastro por ambiente
+
+Exemplo de cozinha:
+
+| Ponto | Quantidade |
+|---|---:|
+| Tomadas baixas | 2 |
+| Tomadas médias | 3 |
+| Tomadas altas | 1 |
+| Geladeira | 1 |
+| Micro-ondas | 1 |
+| Cooktop | Conforme equipamento |
+| Iluminação | 2 |
+| Interruptores | 1 |
+
+Essas quantidades são ilustrativas.
+
+O usuário poderá alterar os valores sem limitações artificiais.
+
+## 12.3. Configuração individual
+
+Cada ponto elétrico deverá ter:
+
+- Código.
+- Tipo.
+- Ambiente.
+- Coordenada X.
+- Coordenada Y.
+- Altura Z.
+- Parede de referência.
+- Distância de referência.
+- Potência prevista.
+- Tensão.
+- Corrente.
+- Circuito.
+- Condutor.
+- Eletroduto.
+- Proteção associada.
+- Observações.
+
+Permitir configurar alturas individualmente.
+
+Não impor alturas como regras universais.
+
+Criar cadastro de alturas-padrão editáveis.
+
+## 12.4. Dimensionamento elétrico
+
+Implementar mecanismos de cálculo para:
+
+- Levantamento de cargas.
+- Potência instalada.
+- Potência de demanda, quando aplicável.
+- Divisão de circuitos.
+- Dimensionamento de condutores.
+- Disjuntores.
+- Proteções diferenciais.
+- Proteção contra surtos.
+- Queda de tensão.
+- Eletrodutos.
+- Aterramento.
+- Quadros de distribuição.
+- Alimentadores.
+
+Todos os cálculos deverão possuir entradas, premissas, fórmulas, critérios e resultados identificáveis.
+
+Utilizar regras normativas verificadas.
+
+Não inventar fatores de demanda, capacidades, limites ou critérios.
+
+Quando faltarem informações, exibir pendência.
+
+## 12.5. Entregáveis elétricos
+
+Gerar:
+
+- Planta de tomadas.
+- Planta de iluminação.
+- Planta de pontos de força.
+- Planta de circuitos.
+- Planta de eletrodutos.
+- Diagrama unifilar.
+- Quadro de cargas.
+- Quadro de circuitos.
+- Lista de materiais.
+- Relatório de dimensionamento.
+
+---
+
+# 13. MÓDULO HIDRÁULICO
+
+Criar sistema de cadastro, posicionamento e dimensionamento de pontos de água.
+
+## 13.1. Categorias
+
+- Água fria.
+- Água quente.
+- Alimentação de lavatório.
+- Alimentação de pia.
+- Alimentação de chuveiro.
+- Alimentação de vaso sanitário.
+- Alimentação de tanque.
+- Alimentação de máquina de lavar.
+- Alimentação de equipamentos.
+- Pontos personalizados.
+
+## 13.2. Cadastro dos pontos
+
+Cada ponto deverá possuir:
+
+- Código.
+- Ambiente.
+- Equipamento.
+- Coordenada X.
+- Coordenada Y.
+- Altura Z.
+- Tipo de água.
+- Diâmetro.
+- Material.
+- Pressão disponível.
+- Alimentação.
+- Ramal associado.
+- Observações.
+
+## 13.3. Sistemas
+
+Permitir desenvolver:
+
+- Água fria.
+- Água quente.
+- Reservatórios.
+- Alimentadores.
+- Barriletes.
+- Colunas.
+- Ramais.
+- Sub-ramais.
+- Aquecimento.
+- Distribuição.
+
+## 13.4. Dimensionamento
+
+Implementar cálculos rastreáveis de:
+
+- Vazão.
+- Consumo provável.
+- Pressão.
+- Perda de carga.
+- Diâmetro.
+- Reservação.
+- Capacidade dos reservatórios.
+- Distribuição.
+- Verificações de funcionamento.
+
+Os critérios deverão ser configuráveis de acordo com as normas vigentes e características reais do empreendimento.
+
+## 13.5. Entregáveis hidráulicos
+
+Gerar:
+
+- Planta de água fria.
+- Planta de água quente.
+- Isométricos.
+- Esquemas verticais.
+- Detalhes de reservatórios.
+- Detalhes de barriletes.
+- Lista de tubulações.
+- Lista de conexões.
+- Relatório técnico.
+
+---
+
+# 14. MÓDULO SANITÁRIO E ESGOTO
+
+Implementar sistema completo de instalações sanitárias.
+
+Categorias:
+
+- Saída de pia.
+- Saída de lavatório.
+- Saída de vaso sanitário.
+- Saída de chuveiro.
+- Ralo.
+- Caixa sifonada.
+- Tanque.
+- Máquina de lavar.
+- Caixa de gordura.
+- Caixa de inspeção.
+- Tubo de queda.
+- Ventilação sanitária.
+- Ramal de descarga.
+- Ramal de esgoto.
+- Coletor predial.
+
+Cada elemento deverá possuir localização, diâmetro, material, conexão, inclinação e identificação.
+
+Criar modelagem da rede com conexão efetiva entre os elementos.
+
+Implementar cálculos e verificações de:
+
+- Diâmetros.
+- Declividades.
+- Vazões.
+- Escoamento.
+- Ventilação.
+- Dimensionamento de ramais.
+- Tubos de queda.
+- Caixas.
+- Coletores.
+- Interferências.
+- Ligações.
+
+Gerar:
+
+- Planta de esgoto.
+- Planta de ventilação.
+- Esquemas verticais.
+- Isométricos.
+- Lista de materiais.
+- Relatório de dimensionamento.
+
+Não apresentar uma rede apenas desenhada como se estivesse dimensionada e tecnicamente validada.
+
+---
+
+# 15. MÓDULO DE ÁGUAS PLUVIAIS
+
+Cadastrar:
+
+- Coberturas.
+- Calhas.
+- Condutores.
+- Ralos.
+- Caixas coletoras.
+- Tubos de descida.
+- Reservatórios pluviais.
+- Sistemas de aproveitamento.
+
+Calcular e verificar os sistemas conforme os dados pluviométricos e critérios técnicos aplicáveis.
+
+Não assumir índices de precipitação sem identificar sua origem, localidade e período de referência.
+
+Gerar planta, detalhes e quantitativos.
+
+---
+
+# 16. MÓDULO DE MÉTODOS CONSTRUTIVOS
+
+Criar biblioteca configurável de métodos construtivos.
+
+Métodos iniciais:
+
+1. Alvenaria convencional.
+2. Alvenaria estrutural.
+3. Light Steel Frame.
+4. Wood Frame.
+5. Concreto pré-moldado.
+6. Construção modular.
+7. Sistemas mistos.
+8. Outros sistemas cadastrados pelo usuário.
+
+Cada sistema deverá possuir suas próprias propriedades.
+
+## 16.1. Alvenaria convencional
+
+Configurar:
+
+- Blocos cerâmicos.
+- Blocos de concreto.
+- Espessuras.
+- Argamassa.
+- Revestimentos.
+- Estrutura de concreto.
+- Pilares.
+- Vigas.
+- Lajes.
+- Vergas.
+- Contravergas.
+
+## 16.2. Alvenaria estrutural
+
+Configurar:
+
+- Modulação.
+- Família de blocos.
+- Resistência.
+- Graute.
+- Armaduras.
+- Amarrações.
+- Vergas.
+- Contravergas.
+- Componentes estruturais.
+
+## 16.3. Light Steel Frame
+
+Configurar:
+
+- Perfis.
+- Espessura.
+- Espaçamento.
+- Guias.
+- Montantes.
+- Chapas.
+- Fechamentos.
+- Isolamento.
+- Barreira de umidade.
+- Revestimentos.
+- Ligações.
+
+## 16.4. Wood Frame
+
+Configurar:
+
+- Estrutura.
+- Espécie e propriedades da madeira.
+- Seções.
+- Chapas.
+- Contraventamentos.
+- Isolamento.
+- Proteção.
+- Revestimentos.
+
+## 16.5. Pré-fabricado e modular
+
+Configurar:
+
+- Painéis.
+- Elementos estruturais.
+- Dimensões.
+- Ligações.
+- Juntas.
+- Transporte.
+- Montagem.
+- Interfaces.
+- Instalações.
+
+O programa deverá compreender as particularidades de cada sistema.
+
+Não converter automaticamente um método construtivo em outro simplesmente alterando o material das paredes.
+
+Cada método deverá ter biblioteca de componentes, regras de modulação e processos próprios.
+
+---
+
+# 17. MÓDULO DE MODELAGEM ESTRUTURAL
+
+Criar módulo específico para modelagem estrutural.
+
+Elementos:
+
+- Fundação.
+- Sapatas.
+- Blocos.
+- Estacas.
+- Vigas baldrame.
+- Pilares.
+- Vigas.
+- Lajes.
+- Escadas.
+- Elementos metálicos.
+- Elementos pré-moldados.
+
+Permitir identificar e posicionar os elementos.
+
+Criar representação 2D e 3D.
+
+Preparar estruturas de dados para dimensionamento e memória de cálculo.
+
+Quando não existir motor de cálculo estrutural efetivo e validado, disponibilizar somente a modelagem conceitual, a geometria e os quantitativos claramente identificados.
+
+Não declarar que uma estrutura está dimensionada ou segura sem executar os cálculos pertinentes.
+
+Não inventar armaduras, seções estruturais ou fundações.
+
+O sistema deverá considerar informações geotécnicas, topográficas, cargas, materiais e sistema estrutural.
+
+---
+
+# 18. MÓDULO DE ACESSIBILIDADE
+
+Implementar verificações de acessibilidade.
+
+Verificar, conforme o enquadramento aplicável:
+
+- Rotas acessíveis.
+- Larguras de circulação.
+- Vãos de portas.
+- Áreas de manobra.
+- Rampas.
+- Desníveis.
+- Banheiros.
+- Barras de apoio.
+- Alcances.
+- Espaços de aproximação.
+- Sinalização.
+
+Permitir criar tipologia acessível.
+
+Criar relatórios com os itens:
+
+- Atendidos.
+- Não atendidos.
+- Não avaliados.
+- Pendentes.
+
+Utilizar a versão normativa aplicável e suas condições de enquadramento.
+
+---
+
+# 19. MÓDULO DE PREVENÇÃO E COMBATE A INCÊNDIO
+
+Criar módulo específico para:
+
+- Ocupação.
+- Pavimentos.
+- População.
+- Rotas de fuga.
+- Saídas de emergência.
+- Extintores.
+- Iluminação de emergência.
+- Sinalização.
+- Hidrantes, quando aplicáveis.
+- Alarme.
+- Detecção.
+- Compartimentação.
+- Sistemas de proteção exigíveis.
+
+Considerar legislação estadual e exigências do Corpo de Bombeiros competente.
+
+Não presumir requisitos sem identificar ocupação, área, altura, enquadramento e regulamentação aplicável.
+
+Gerar plantas e relatórios preliminares.
+
+---
+
+# 20. MÓDULO BIM E MODELO TRIDIMENSIONAL
+
+Este é um dos principais diferenciais do produto.
+
+Construir o modelo 3D a partir do mesmo banco de dados que alimenta as plantas 2D.
+
+Não criar um modelo 3D independente que não corresponda à documentação técnica.
+
+## 20.1. Modelagem
+
+Criar automaticamente:
+
+- Terreno.
+- Pavimentos.
+- Paredes.
+- Pilares.
+- Vigas.
+- Lajes.
+- Portas.
+- Janelas.
+- Escadas.
+- Coberturas.
+- Louças.
+- Bancadas.
+- Mobiliário.
+- Instalações.
+- Elementos construtivos.
+
+## 20.2. Navegação 3D
+
+Implementar:
+
+- Orbit.
+- Pan.
+- Zoom.
+- Visão frontal.
+- Visão lateral.
+- Visão superior.
+- Perspectiva.
+- Corte.
+- Seção.
+- Ocultação de elementos.
+- Exibição por disciplina.
+- Explosão do modelo.
+- Seleção de componentes.
+
+Permitir visualizar individualmente:
+
+- Arquitetura.
+- Estrutura.
+- Elétrica.
+- Hidráulica.
+- Sanitária.
+- Pluvial.
+- Equipamentos.
+- Mobiliário.
+
+## 20.3. Sincronização
+
+Alterações realizadas na planta deverão atualizar o modelo 3D.
+
+Alterações estruturadas no modelo deverão atualizar as representações 2D e os documentos correspondentes.
+
+Implementar uma arquitetura de fonte única de dados do projeto.
+
+---
+
+# 21. MÓDULO DE RENDERIZAÇÃO ARQUITETÔNICA
+
+Criar módulo de visualização de qualidade profissional.
+
+O usuário deverá conseguir produzir imagens para apresentação comercial e análise arquitetônica.
+
+## 21.1. Renderizações
+
+Gerar:
+
+- Fachada frontal.
+- Fachadas laterais.
+- Fachada posterior.
+- Vista aérea.
+- Perspectiva externa.
+- Perspectiva interna.
+- Sala/quarto.
+- Cozinha.
+- Banheiro.
+- Área de serviço.
+- Corredores.
+- Escadas.
+- Áreas comuns.
+- Paisagismo.
+- Cortes tridimensionais.
+
+## 21.2. Materiais
+
+Criar biblioteca de:
+
+- Porcelanatos.
+- Cerâmicas.
+- Madeiras.
+- Granitos.
+- Mármores.
+- Concretos.
+- Metais.
+- Vidros.
+- Pinturas.
+- Texturas.
+- Revestimentos.
+- Esquadrias.
+
+Permitir alterar cores, texturas, acabamentos, iluminação e materiais.
+
+## 21.3. Iluminação
+
+Permitir:
+
+- Luz natural.
+- Iluminação artificial.
+- Dia.
+- Noite.
+- Sol e sombras.
+- Temperatura de cor.
+- Intensidade.
+- Iluminação indireta.
+
+## 21.4. Regras de fidelidade
+
+A renderização deverá utilizar a geometria real do modelo.
+
+Não produzir imagens que inventem dimensões, janelas, portas ou ambientes inexistentes.
+
+Diferenciar claramente:
+
+1. Visualização técnica 3D.
+2. Renderização de apresentação.
+3. Imagem conceitual gerada por inteligência artificial.
+
+Quando uma imagem conceitual utilizar IA, identificá-la como referência visual, nunca como representação dimensional fiel.
+
+---
+
+# 22. MÓDULO DE MEMORIAIS DESCRITIVOS
+
+Criar gerador profissional de documentos técnicos.
+
+Não utilizar modelos fixos com textos genéricos.
+
+Todo conteúdo deverá ser construído a partir das características cadastradas.
+
+## 22.1. Memorial arquitetônico
+
+Incluir:
+
+1. Identificação.
+2. Objetivo.
+3. Localização.
+4. Caracterização do terreno.
+5. Descrição da edificação.
+6. Pavimentos.
+7. Quantidade de unidades.
+8. Tipologias.
+9. Quadro de áreas.
+10. Características dos ambientes.
+11. Esquadrias.
+12. Cobertura.
+13. Revestimentos.
+14. Acabamentos.
+15. Iluminação.
+16. Ventilação.
+17. Acessibilidade.
+18. Considerações técnicas.
+
+## 22.2. Memorial de materiais
+
+Gerar especificações por ambiente.
+
+Exemplo:
+
+COZINHA:
+- Piso.
+- Rodapé.
+- Parede.
+- Revestimento.
+- Bancada.
+- Cuba.
+- Torneira.
+- Armários.
+- Pontos elétricos.
+- Pontos hidráulicos.
+- Pontos sanitários.
+
+Repetir a estrutura para todos os cômodos.
+
+## 22.3. Memorial executivo
+
+Descrever:
+
+- Serviços preliminares.
+- Preparação do terreno.
+- Locação.
+- Fundação.
+- Estrutura.
+- Vedações.
+- Cobertura.
+- Impermeabilização.
+- Instalações.
+- Revestimentos.
+- Esquadrias.
+- Pintura.
+- Louças.
+- Metais.
+- Limpeza.
+- Entrega.
+
+## 22.4. Memoriais complementares
+
+Gerar:
+
+- Memorial elétrico.
+- Memorial hidráulico.
+- Memorial sanitário.
+- Memorial de águas pluviais.
+- Memorial estrutural, quando efetivamente dimensionado.
+- Memorial de acessibilidade.
+- Memorial de prevenção e combate a incêndio, conforme escopo.
+
+Não preencher automaticamente dados desconhecidos com informações fictícias.
+
+Exibir o marcador "NÃO INFORMADO" quando um campo necessário não estiver preenchido.
+
+Permitir edição manual do texto antes da emissão.
+
+---
+
+# 23. MÓDULO DE QUANTITATIVOS
+
+Criar motor de levantamento quantitativo com base na geometria e nos componentes efetivamente cadastrados.
+
+Calcular:
+
+- Área de paredes.
+- Área de pisos.
+- Área de revestimentos.
+- Área de pintura.
+- Área de forros.
+- Área de fachadas.
+- Comprimento de rodapés.
+- Volume de concreto.
+- Quantidade de aço, quando dimensionado.
+- Área de formas.
+- Quantidade de blocos.
+- Quantidade de tijolos.
+- Argamassa.
+- Portas.
+- Janelas.
+- Louças.
+- Metais.
+- Tubulações.
+- Conexões.
+- Eletrodutos.
+- Condutores.
+- Tomadas.
+- Interruptores.
+- Luminárias.
+- Mobiliário.
+
+Permitir configurar:
+
+- Unidade.
+- Critério de medição.
+- Fator de perda.
+- Consumo unitário.
+- Composição.
+- Observação.
+
+Exibir a memória de cálculo de cada quantitativo.
+
+Não utilizar coeficientes genéricos sem informar sua origem.
+
+Permitir visualizar os resultados:
+
+- Por ambiente.
+- Por unidade.
+- Por tipologia.
+- Por pavimento.
+- Por disciplina.
+- Por empreendimento.
+
+---
+
+# 24. MÓDULO DE ORÇAMENTO
+
+Criar sistema de orçamento integrado.
+
+Permitir cadastrar:
+
+- Materiais.
+- Mão de obra.
+- Equipamentos.
+- Serviços.
+- Composições.
+- Fornecedores.
+- Preços.
+- Descontos.
+- Perdas.
+- Custos indiretos.
+- BDI.
+
+Permitir inserir composições próprias e importar tabelas.
+
+Preparar integração com referências como SINAPI e outras bases de custos.
+
+Cada orçamento deverá informar:
+
+- Fonte dos preços.
+- Região.
+- Competência.
+- Data-base.
+- Encargos considerados.
+- Critério adotado.
+
+Gerar:
+
+- Orçamento sintético.
+- Orçamento analítico.
+- Composições.
+- Custo por metro quadrado.
+- Custo por tipologia.
+- Custo por unidade.
+- Custo total.
+- Comparação entre métodos construtivos.
+- Curva ABC.
+- Cronograma físico-financeiro.
+
+Não inventar preços atuais.
+
+Quando não houver base de preços, permitir orçamento manual e identificar os itens sem cotação.
+
+---
+
+# 25. MÓDULO COMPARADOR DE MÉTODOS CONSTRUTIVOS
+
+Criar um comparador específico.
+
+Permitir selecionar a mesma tipologia e comparar diferentes sistemas construtivos.
+
+Exemplo:
+
+Kitnet de 25 m²:
+
+- Alvenaria convencional.
+- Alvenaria estrutural.
+- Light Steel Frame.
+- Wood Frame.
+- Pré-moldado.
+
+Comparar:
+
+- Materiais.
+- Mão de obra.
+- Custos.
+- Prazo.
+- Peso estimado.
+- Consumo.
+- Perdas.
+- Desempenho térmico.
+- Desempenho acústico.
+- Manutenção.
+- Durabilidade.
+- Restrições.
+- Necessidade de mão de obra especializada.
+
+Quando não houver dados suficientes, apresentar "DADO NÃO DISPONÍVEL".
+
+Não inventar vantagens ou resultados quantitativos.
+
+Permitir gerar relatório comparativo.
+
+---
+
+# 26. MÓDULO DE COMPATIBILIZAÇÃO
+
+Criar mecanismo para análise de conflitos entre disciplinas.
+
+Comparar:
+
+- Arquitetura.
+- Estrutura.
+- Elétrica.
+- Hidráulica.
+- Sanitária.
+- Pluvial.
+- Climatização.
+- Incêndio.
+
+Identificar:
+
+- Tubulação atravessando elementos estruturais.
+- Tomada em posição incompatível com mobiliário.
+- Ponto hidráulico sem conexão prevista.
+- Interferência entre tubulações.
+- Porta conflitante com mobiliário.
+- Janela conflitante com elemento estrutural.
+- Eletroduto incompatível com geometria.
+- Equipamento sem alimentação.
+- Rede sanitária sem percurso adequado.
+
+Criar classificação:
+
+CRÍTICO:
+Interferência que exige correção antes da validação.
+
+ATENÇÃO:
+Possível incompatibilidade a ser investigada.
+
+INFORMATIVO:
+Recomendação de melhoria.
+
+Cada ocorrência deverá indicar:
+
+- Elementos envolvidos.
+- Localização.
+- Pavimento.
+- Ambiente.
+- Descrição.
+- Motivo.
+- Sugestão de correção.
+- Estado da pendência.
+
+Permitir selecionar um conflito e localizar os elementos correspondentes nas plantas e no modelo 3D.
+
+---
+
+# 27. MÓDULO DE VALIDAÇÃO TÉCNICA E NORMATIVA
+
+Criar biblioteca de referências normativas brasileiras.
+
+Considerar, conforme aplicabilidade, referências como:
+
+- ABNT NBR 6492.
+- ABNT NBR 16636.
+- ABNT NBR 9050.
+- ABNT NBR 5410.
+- ABNT NBR 5626.
+- ABNT NBR 8160.
+- ABNT NBR 10844.
+- ABNT NBR 15575.
+- ABNT NBR 6118.
+- ABNT NBR 6120.
+- ABNT NBR 6122.
+- ABNT NBR 8800.
+- ABNT NBR 9077.
+
+Essa lista é inicial e deverá ser ampliada conforme o escopo.
+
+Não assumir que as edições armazenadas permanecem atuais.
+
+Criar cadastro de:
+
+- Norma.
+- Edição.
+- Data.
+- Disciplina.
+- Aplicação.
+- Fonte.
+- Parâmetros.
+- Situação de atualização.
+- Responsável pela verificação.
+
+Não reproduzir automaticamente conteúdo normativo protegido.
+
+Utilizar regras e parâmetros que possam ser legalmente cadastrados e mantidos.
+
+Implementar validações com rastreabilidade.
+
+Cada validação deverá informar:
+
+- Regra aplicada.
+- Fonte técnica.
+- Edição de referência.
+- Parâmetro utilizado.
+- Valor encontrado.
+- Resultado.
+- Justificativa.
+
+Quando não houver regra verificada, classificar como "NÃO AVALIADO".
+
+Nunca afirmar que um projeto cumpre integralmente normas técnicas sem validação adequada.
+
+---
+
+# 28. MÓDULO DE DOCUMENTAÇÃO E PRANCHAS
+
+Criar editor e gerador de pranchas profissionais.
+
+Pranchas arquitetônicas mínimas:
+
+A01 — Situação e localização.
+
+A02 — Implantação.
+
+A03 — Plantas baixas.
+
+A04 — Planta de layout.
+
+A05 — Planta de cobertura.
+
+A06 — Plantas de cotas e níveis.
+
+A07 — Esquadrias.
+
+A08 — Fachadas.
+
+A09 — Cortes.
+
+A10 — Detalhes construtivos.
+
+A11 — Detalhes de áreas molhadas.
+
+A12 — Quadro de áreas.
+
+A13 — Acessibilidade.
+
+Pranchas elétricas:
+
+E01 — Iluminação.
+
+E02 — Tomadas e força.
+
+E03 — Circuitos.
+
+E04 — Quadros.
+
+E05 — Diagramas.
+
+Pranchas hidráulicas e sanitárias:
+
+H01 — Água fria.
+
+H02 — Água quente.
+
+H03 — Esgoto.
+
+H04 — Ventilação sanitária.
+
+H05 — Águas pluviais.
+
+H06 — Isométricos.
+
+Criar pranchas estruturais e de incêndio conforme os projetos efetivamente desenvolvidos.
+
+Cada prancha deverá possuir:
+
+- Carimbo.
+- Identificação.
+- Escala.
+- Data.
+- Revisão.
+- Responsáveis.
+- Legenda.
+- Cotas.
+- Símbolos.
+- Notas técnicas.
+- Numeração.
+
+Permitir formatos A0, A1, A2, A3 e A4, além de formatos personalizados.
+
+Permitir visualizar a prancha antes da exportação.
+
+---
+
+# 29. MÓDULO DE RESPONSABILIDADE TÉCNICA
+
+Criar cadastro de:
+
+- Contratante.
+- Proprietário.
+- Arquiteto.
+- Engenheiro civil.
+- Engenheiro eletricista.
+- Demais profissionais participantes.
+
+Campos:
+
+- Nome.
+- Profissão.
+- Conselho.
+- Número de registro.
+- Estado.
+- Atribuição.
+- Disciplina.
+- Identificação do responsável.
+
+Reservar áreas para identificação de ART, RRT e demais documentos aplicáveis.
+
+Não gerar registros, assinaturas, credenciais ou números fictícios.
+
+Permitir anexar documentos de responsabilidade técnica.
+
+O software deverá deixar explícito que a emissão, análise e aprovação dos projetos dependem dos profissionais habilitados e dos órgãos competentes.
+
+---
+
+# 30. MÓDULO DE EXPORTAÇÃO
+
+Criar sistema efetivo de exportação.
+
+Formatos prioritários:
+
+PDF:
+- Pranchas.
+- Memoriais.
+- Relatórios.
+- Orçamentos.
+
+DOCX:
+- Memoriais editáveis.
+- Relatórios técnicos.
+- Especificações.
+
+XLSX:
+- Quantitativos.
+- Orçamentos.
+- Quadros de cargas.
+- Relações de pontos.
+- Materiais.
+
+PNG/JPG:
+- Plantas.
+- Fachadas.
+- Perspectivas.
+- Renderizações.
+
+DXF:
+- Geometria vetorial e desenhos CAD.
+
+JSON:
+- Backup integral do projeto.
+- Dados paramétricos.
+- Histórico.
+- Configurações.
+
+IFC:
+Implementar exportação BIM somente com estrutura IFC real e válida.
+
+DWG:
+Implementar somente por biblioteca ou SDK apropriado e licenciado.
+
+Não renomear um DXF como DWG.
+
+Não produzir arquivos com extensão IFC que contenham apenas JSON ou imagens.
+
+O sistema deverá informar claramente quais exportações estão efetivamente implementadas.
+
+Criar opção:
+
+**EXPORTAR EMPREENDIMENTO COMPLETO**
+
+Organizar em pastas:
+
+01 — Arquitetura.
+
+02 — Elétrica.
+
+03 — Hidráulica.
+
+04 — Sanitária.
+
+05 — Estrutural.
+
+06 — Incêndio.
+
+07 — Memorial descritivo.
+
+08 — Quantitativos.
+
+09 — Orçamento.
+
+10 — Renderizações.
+
+11 — Documentação.
+
+12 — Backup do projeto.
+
+---
+
+# 31. INTELIGÊNCIA ARTIFICIAL INTEGRADA
+
+A IA deverá funcionar como assistente de projeto, nunca como substituta dos motores geométricos e de cálculo.
+
+Criar assistente denominado:
+
+**ASSISTENTE TÉCNICO KITNET PRO**
+
+Funções:
+
+- Interpretar solicitações do usuário.
+- Ajudar a configurar tipologias.
+- Sugerir organizações de ambientes.
+- Analisar aproveitamento de áreas.
+- Explicar incompatibilidades.
+- Sugerir melhorias.
+- Ajudar a preencher memoriais.
+- Interpretar relatórios.
+- Comparar alternativas.
+- Responder dúvidas sobre os módulos.
+
+Exemplo de solicitação:
+
+"Crie uma kitnet de 25 m², com banheiro de 3 m², cozinha integrada, dormitório, área de serviço e uma pequena varanda."
+
+O sistema deverá transformar a solicitação em uma proposta parametrizada e editável.
+
+Antes de aplicar alterações significativas, apresentar uma prévia e solicitar autorização.
+
+A IA não deverá inventar:
+
+- Dimensões técnicas.
+- Resultados estruturais.
+- Valores normativos.
+- Preços.
+- Dimensionamentos.
+- Condições legais.
+
+Resultados calculados deverão vir dos motores determinísticos.
+
+A IA poderá explicar os resultados existentes, mas não substituí-los.
+
+As funções principais do software deverão continuar disponíveis mesmo quando o serviço de IA estiver indisponível.
+
+---
+
+# 32. ESTRUTURA DE DADOS E ARQUITETURA INTERNA
+
+Criar modelo de dados organizado.
+
+Entidades principais:
+
+PROJECT
+- id
+- name
+- client
+- address
+- municipality
+- state
+- site
+- regulations
+- settings
+- revisions
+
+SITE
+- geometry
+- area
+- perimeter
+- topography
+- levels
+- setbacks
+- orientation
+
+BUILDING
+- id
+- projectId
+- floors
+- geometry
+- constructionSystem
+- totalArea
+
+FLOOR
+- id
+- buildingId
+- elevation
+- height
+- units
+- commonAreas
+
+UNIT_TYPE
+- id
+- projectId
+- name
+- targetArea
+- geometry
+- rooms
+- finishes
+- electricalPoints
+- waterPoints
+- drainagePoints
+
+UNIT_INSTANCE
+- id
+- unitTypeId
+- floorId
+- position
+- orientation
+- customOverrides
+
+ROOM
+- id
+- unitId
+- name
+- geometry
+- area
+- perimeter
+- ceilingHeight
+- finishes
+- openings
+- furniture
+- technicalPoints
+
+WALL
+- id
+- floorId
+- start
+- end
+- thickness
+- height
+- material
+- system
+- openings
+
+OPENING
+- id
+- wallId
+- type
+- width
+- height
+- sillHeight
+- position
+- openingDirection
+
+ELECTRICAL_POINT
+- id
+- roomId
+- type
+- position
+- height
+- power
+- voltage
+- circuit
+- conductor
+- protection
+
+WATER_POINT
+- id
+- roomId
+- type
+- position
+- height
+- pipeDiameter
+- material
+- supply
+
+DRAINAGE_POINT
+- id
+- roomId
+- type
+- position
+- pipeDiameter
+- slope
+- material
+- connection
+
+MATERIAL
+- id
+- name
+- category
+- dimensions
+- unit
+- consumption
+- cost
+- supplier
+
+CALCULATION
+- id
+- discipline
+- inputs
+- assumptions
+- methodology
+- results
+- warnings
+- references
+- revision
+
+DOCUMENT
+- id
+- projectId
+- discipline
+- type
+- revision
+- fileReference
+- generationDate
+
+Criar identificadores únicos e relacionamentos consistentes.
+
+Não duplicar informações desnecessariamente.
+
+As geometrias deverão utilizar coordenadas reais e unidades padronizadas internamente.
+
+Criar mecanismos de migração do modelo de dados para futuras atualizações.
+
+---
+
+# 33. MOTOR GEOMÉTRICO E DE CÁLCULO
+
+Este motor é fundamental.
+
+Criar uma camada de lógica independente da interface.
+
+Responsabilidades:
+
+- Cálculo de áreas.
+- Cálculo de perímetros.
+- Cálculo de volumes.
+- Geometria de paredes.
+- Aberturas.
+- Interseções.
+- Distâncias.
+- Áreas de ambientes.
+- Verificação de colisões.
+- Geração de pranchas.
+- Quantitativos.
+- Relação entre pontos e ambientes.
+- Atualização da geometria 3D.
+- Cálculos de engenharia.
+
+Não implementar cálculos complexos diretamente dentro dos componentes visuais.
+
+Cada motor deverá ter testes automatizados.
+
+Manter unidades coerentes e conversões explícitas.
+
+Armazenar resultados e suas premissas.
+
+---
+
+# 34. TESTE DE ACEITAÇÃO OBRIGATÓRIO
+
+O sistema deverá ser testado utilizando um empreendimento demonstrativo.
+
+Dados do exemplo:
+
+Terreno:
+- 12 m de frente.
+- 25 m de profundidade.
+- 300 m².
+- Topografia inicialmente plana.
+
+Edificação:
+- 2 pavimentos.
+- 12 unidades.
+- 3 tipologias.
+
+Tipologia A:
+- 4 unidades.
+- 20 m² cada.
+
+Tipologia B:
+- 4 unidades.
+- 25 m² cada.
+
+Tipologia C:
+- 4 unidades.
+- 30 m² cada.
+
+O exemplo deverá permitir:
+
+1. Criar o empreendimento.
+2. Cadastrar o terreno.
+3. Configurar pavimentos.
+4. Criar as três tipologias.
+5. Criar as unidades.
+6. Configurar os ambientes.
+7. Definir dimensões.
+8. Cadastrar portas e janelas.
+9. Configurar mobiliário.
+10. Inserir tomadas altas, médias e baixas.
+11. Informar alturas de cada ponto.
+12. Inserir pontos de iluminação.
+13. Configurar circuitos.
+14. Cadastrar pontos de água fria e quente.
+15. Cadastrar pontos de esgoto.
+16. Gerar as plantas.
+17. Visualizar o modelo 3D.
+18. Alterar uma dimensão e verificar a atualização.
+19. Gerar quantitativos.
+20. Gerar memorial.
+21. Exportar PDF.
+22. Exportar XLSX.
+23. Salvar e reabrir o projeto.
+
+O sistema deverá preservar as configurações após fechar e reabrir a aplicação.
+
+Não apresentar o exemplo como se todos os parâmetros urbanísticos e estruturais estivessem aprovados.
+
+---
+
+# 35. ORGANIZAÇÃO DO DESENVOLVIMENTO
+
+O desenvolvimento deverá ser dividido em etapas controladas.
+
+Não tentar construir todos os módulos de forma superficial em uma única implementação.
+
+A prioridade será construir uma base funcional e integrada.
+
+## FASE 1 — FUNDAÇÃO DO SOFTWARE
+
+Implementar:
+
+- Estrutura da aplicação.
+- Identidade visual.
+- Navegação.
+- Gerenciamento de projetos.
+- Persistência.
+- Cadastro do terreno.
+- Cadastro dos pavimentos.
+- Cadastro de tipologias.
+- Cadastro de ambientes.
+- Geometria paramétrica básica.
+
+Critério de conclusão: criar, salvar, editar e reabrir um projeto real.
+
+## FASE 2 — DESENHO ARQUITETÔNICO
+
+Implementar:
+
+- Editor 2D.
+- Paredes.
+- Portas.
+- Janelas.
+- Cotas.
+- Ambientes.
+- Layout.
+- Mobiliário.
+- Biblioteca de componentes.
+- Plantas por pavimento.
+
+Critério de conclusão: construir e modificar uma planta tecnicamente dimensionada.
+
+## FASE 3 — INSTALAÇÕES
+
+Implementar:
+
+- Elétrica.
+- Hidráulica.
+- Sanitária.
+- Pontos individualizados.
+- Alturas.
+- Coordenadas.
+- Conexões.
+- Diagramas.
+- Tabelas.
+- Cálculos implementados.
+
+Critério de conclusão: cadastrar e documentar as instalações de uma unidade real.
+
+## FASE 4 — MODELAGEM 3D
+
+Implementar:
+
+- Geometria tridimensional.
+- Pavimentos.
+- Paredes.
+- Aberturas.
+- Coberturas.
+- Mobiliário.
+- Materiais.
+- Visualização.
+- Sincronização com a planta.
+
+Critério de conclusão: modelo 3D coerente com o projeto 2D.
+
+## FASE 5 — DOCUMENTAÇÃO
+
+Implementar:
+
+- Plantas.
+- Cortes.
+- Fachadas.
+- Pranchas.
+- Memorial.
+- Relatórios.
+- Quantitativos.
+- Exportações.
+
+Critério de conclusão: gerar documentação com informações reais do projeto.
+
+## FASE 6 — ENGENHARIA AVANÇADA
+
+Implementar progressivamente:
+
+- Estrutura.
+- Acessibilidade.
+- Incêndio.
+- Compatibilização.
+- Orçamento.
+- Cronograma.
+- Comparador construtivo.
+- Legislação.
+
+Critério de conclusão: módulos tecnicamente documentados, testados e com limitações explícitas.
+
+## FASE 7 — ACABAMENTO PROFISSIONAL
+
+Implementar:
+
+- Testes.
+- Otimização.
+- Correções.
+- Histórico.
+- Revisões.
+- Backup.
+- Recuperação.
+- Documentação de uso.
+- Melhorias de desempenho.
+
+---
+
+# 36. REGRAS DE QUALIDADE DE SOFTWARE
+
+Obrigatórias:
+
+1. Código organizado e modular.
+2. TypeScript com tipagem adequada.
+3. Componentes reutilizáveis.
+4. Separação entre interface e lógica técnica.
+5. Validação de entradas.
+6. Tratamento de erros.
+7. Salvamento seguro.
+8. Testes automatizados.
+9. Controle de revisões.
+10. Código legível.
+11. Ausência de funções duplicadas desnecessariamente.
+12. Ausência de botões sem ação.
+13. Ausência de telas que prometem funções inexistentes.
+14. Ausência de dados fictícios apresentados como reais.
+15. Ausência de cálculos sem metodologia.
+16. Ausência de arquivos simulados.
+17. Compatibilidade entre módulos.
+18. Identificação de funcionalidades incompletas.
+
+Criar mensagens de erro úteis e compreensíveis para usuários não programadores.
+
+Criar estados vazios, estados de carregamento e confirmações de operações.
+
+Não esconder erros no console.
+
+Não utilizar valores fixos de demonstração nos cálculos do projeto real.
+
+---
+
+# 37. PRINCÍPIO DE RESPONSABILIDADE TÉCNICA
+
+O KITNET PRO STUDIO é uma ferramenta de apoio à atividade profissional de arquitetura e engenharia.
+
+O programa deverá diferenciar:
+
+- Estudo conceitual.
+- Estudo preliminar.
+- Anteprojeto.
+- Projeto para aprovação.
+- Projeto executivo.
+- Projeto efetivamente dimensionado.
+- Projeto revisado.
+- Projeto validado pelo responsável técnico.
+
+Não afirmar que uma obra está liberada para execução somente porque o sistema gerou documentos.
+
+Os projetos deverão ser avaliados e assinados pelos profissionais legalmente habilitados, conforme as atribuições aplicáveis.
+
+Toda informação normativa, cálculo e parâmetro deverá possuir rastreabilidade.
+
+---
+
+# 38. INSTRUÇÃO FINAL DE EXECUÇÃO
+
+INICIE AGORA O DESENVOLVIMENTO DO KITNET PRO STUDIO.
+
+Não responda apenas com uma análise da arquitetura do sistema.
+
+Não devolva somente uma lista de funcionalidades.
+
+Não apresente apenas um protótipo visual.
+
+Crie a aplicação funcional no ambiente do Google AI Studio.
+
+Comece pela FASE 1 e construa uma base sólida, com estrutura preparada para todas as demais fases.
+
+Implemente as funcionalidades previstas na etapa em andamento antes de avançar.
+
+Ao concluir cada fase:
+
+1. Verifique se os módulos funcionam.
+2. Teste as operações principais.
+3. Corrija erros.
+4. Verifique persistência.
+5. Verifique sincronização.
+6. Preserve todo o trabalho anterior.
+7. Informe o que foi implementado.
+8. Identifique o que ainda está pendente.
+9. Continue para a próxima fase quando a anterior estiver estável.
+
+Não descarte funcionalidades já implementadas durante atualizações.
+
+Não substitua uma funcionalidade real por uma tela ilustrativa para acelerar o desenvolvimento.
+
+Não reescreva toda a aplicação desnecessariamente.
+
+Quando o contexto de desenvolvimento não for suficiente para implementar todos os módulos, preserve a estrutura existente e continue a partir do último ponto concluído, sem eliminar arquivos ou funcionalidades anteriores.
+
+A prioridade absoluta é:
+
+**GEOMETRIA CORRETA + DADOS PERSISTENTES + DESENHOS TÉCNICOS REAIS + CÁLCULOS RASTREÁVEIS + MODELO 3D SINCRONIZADO + DOCUMENTAÇÃO FIEL AO PROJETO.**
+
+O resultado deverá ser um software de engenharia e arquitetura profissional, especializado em empreendimentos de kitnets, capaz de evoluir progressivamente para uma plataforma BIM completa.

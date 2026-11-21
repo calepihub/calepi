@@ -1,0 +1,6 @@
+{
+  "name": "KITNET PRO STUDIO",
+  "description": "Plataforma profissional de projetos arquitetônicos, engenharia, BIM 3D, compatibilização, quantitativos, orçamento e documentação executiva para empreendimentos residenciais compactos.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
