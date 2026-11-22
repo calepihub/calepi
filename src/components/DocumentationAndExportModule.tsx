@@ -17,6 +17,7 @@ import {
   TECHNICAL_SHEETS,
   generateCompleteProjectZIPBlob,
   generateMemorialDOCXBlob,
+  generateMemorialPDFBlob,
   generateProjectDXF,
   generateProjectJSON,
   generateProjectXLSXBuffer,
@@ -35,6 +36,7 @@ import type { Project, ProjectStage, TechnicalProfessional } from '../types/proj
 interface DocumentationAndExportModuleProps {
   project: Project;
   onUpdateProject: (updater: (prev: Project) => Project, revisionNote?: string) => void;
+  onDeleteRenderFromCloud?: (renderId: string) => void;
 }
 
 const STAGES: Array<{ id: ProjectStage; label: string }> = [
@@ -51,6 +53,7 @@ const STAGES: Array<{ id: ProjectStage; label: string }> = [
 export const DocumentationAndExportModule: React.FC<DocumentationAndExportModuleProps> = ({
   project,
   onUpdateProject,
+  onDeleteRenderFromCloud,
 }) => {
   const [subTab, setSubTab] = useState<'pranchas' | 'memoriais' | 'rt' | 'exportacao'>(
     'pranchas',
@@ -93,6 +96,7 @@ export const DocumentationAndExportModule: React.FC<DocumentationAndExportModule
       }),
       'Vista 3D removida da prancha R01',
     );
+    onDeleteRenderFromCloud?.(renderId);
   };
 
   const handleDownloadDOCX = async () => {
@@ -103,6 +107,11 @@ export const DocumentationAndExportModule: React.FC<DocumentationAndExportModule
     } finally {
       setBusyMessage(null);
     }
+  };
+
+  const handleDownloadMemorialPDF = () => {
+    const blob = generateMemorialPDFBlob(project);
+    triggerBrowserDownload(blob, `${project.code}_Memorial_Descritivo.pdf`);
   };
 
   const handleDownloadXLSX = () => {
@@ -484,14 +493,24 @@ export const DocumentationAndExportModule: React.FC<DocumentationAndExportModule
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={handleDownloadDOCX}
-                className="flex w-full items-center justify-center gap-2 rounded-md bg-[#2F7CF6] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#2567d4]"
-              >
-                <FileText className="h-4 w-4" />
-                Exportar Todos Memoriais (.docx)
-              </button>
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  onClick={handleDownloadDOCX}
+                  className="flex w-full items-center justify-center gap-2 rounded-md bg-[#2F7CF6] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#2567d4]"
+                >
+                  <FileText className="h-4 w-4" />
+                  Exportar Memoriais (.docx)
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDownloadMemorialPDF}
+                  className="flex w-full items-center justify-center gap-2 rounded-md border border-[#2F7CF6] bg-[#14161A] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#2F7CF6]/15"
+                >
+                  <Download className="h-4 w-4 text-[#2F7CF6]" />
+                  Exportar Memorial Executivo (.pdf)
+                </button>
+              </div>
             </div>
 
             <div className="rounded-lg border border-slate-800 bg-[#1B1E24] p-4 lg:col-span-8">
@@ -736,7 +755,23 @@ export const DocumentationAndExportModule: React.FC<DocumentationAndExportModule
                     Memoriais Descritivos (.docx)
                   </div>
                   <div className="mt-1 text-xs text-slate-400">
-                    Documento Word editável contendo todas as 10 disciplinas.
+                    Documento Word estruturado com quadros de áreas, acabamentos, 10 disciplinas e RT.
+                  </div>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleDownloadMemorialPDF}
+                className="flex items-start gap-3 rounded-lg border border-slate-800 bg-[#1B1E24] p-4 text-left hover:border-slate-700"
+              >
+                <Download className="mt-0.5 h-5 w-5 shrink-0 text-sky-400" />
+                <div>
+                  <div className="text-sm font-semibold text-white">
+                    Memorial Descritivo Executivo (.pdf)
+                  </div>
+                  <div className="mt-1 text-xs text-slate-400">
+                    Relatório A4 paginado com identificação técnica, quadro de áreas e especificações.
                   </div>
                 </div>
               </button>
@@ -752,7 +787,7 @@ export const DocumentationAndExportModule: React.FC<DocumentationAndExportModule
                     Quantitativos & Orçamento (.xlsx)
                   </div>
                   <div className="mt-1 text-xs text-slate-400">
-                    Planilha Excel com 5 abas: Resumo, Quantitativos, Orçamento, Quadro de Cargas e Pontos MEP.
+                    Planilha Excel com 7 abas: Resumo Executivo, Quantitativos, Orçamento Analítico SINAPI-RJ, Curva ABC, Cronograma, Cargas e MEP.
                   </div>
                 </div>
               </button>

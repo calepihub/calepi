@@ -67,7 +67,7 @@ export const ProjectHub: React.FC<ProjectHubProps> = ({
   const [newName, setNewName] = useState('');
   const [newClient, setNewClient] = useState('');
   const [newMunicipality, setNewMunicipality] = useState('');
-  const [newState, setNewState] = useState('RJ');
+  const [newState, setNewState] = useState('');
   const [newFront, setNewFront] = useState(12);
   const [newDepth, setNewDepth] = useState(25);
   const [newFloors, setNewFloors] = useState(2);
@@ -156,7 +156,7 @@ export const ProjectHub: React.FC<ProjectHubProps> = ({
             Central de Empreendimentos
           </h1>
           <p className="text-sm text-[#949BA8] mt-1">
-            Gerenciamento de projetos BIM, terrenos, tipologias, revisões e backups locais persistentes.
+            Gerenciamento de projetos BIM, terrenos, tipologias e revisões sincronizados na sua conta via Firebase Firestore (sem cache local).
           </p>
         </div>
 
@@ -219,36 +219,13 @@ export const ProjectHub: React.FC<ProjectHubProps> = ({
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={() => onNavigateModule('terreno')}
-                className="px-3 py-1.5 text-xs font-medium rounded border border-[#323844] bg-[#22262E] text-[#E6E9EF] hover:border-[#2F7CF6] transition-colors whitespace-nowrap shrink-0"
-              >
-                Terreno
-              </button>
-              <button
-                type="button"
-                onClick={() => onNavigateModule('planta2d')}
-                className="px-3 py-1.5 text-xs font-medium rounded border border-[#323844] bg-[#22262E] text-[#E6E9EF] hover:border-[#2F7CF6] transition-colors whitespace-nowrap shrink-0"
-              >
-                Editor Planta 2D
-              </button>
-              <button
-                type="button"
-                onClick={() => onNavigateModule('bim3d')}
-                className="px-3 py-1.5 text-xs font-medium rounded border border-[#323844] bg-[#22262E] text-[#E6E9EF] hover:border-[#2F7CF6] transition-colors whitespace-nowrap shrink-0"
-              >
-                Modelo BIM 3D
-              </button>
-              <button
-                type="button"
-                onClick={() => onNavigateModule('documentacao')}
-                className="px-3 py-1.5 text-xs font-medium rounded border border-[#323844] bg-[#22262E] text-[#E6E9EF] hover:border-[#2F7CF6] transition-colors whitespace-nowrap shrink-0"
-              >
-                Pranchas & Exportação
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={() => onNavigateModule('planta2d')}
+              className="px-3.5 py-1.5 text-xs font-medium rounded bg-[#2F7CF6] text-white hover:bg-[#2569D6] transition-colors whitespace-nowrap shrink-0"
+            >
+              Abrir no Estúdio
+            </button>
           </div>
         </div>
       )}
@@ -495,9 +472,10 @@ export const ProjectHub: React.FC<ProjectHubProps> = ({
                   <input
                     type="text"
                     maxLength={2}
+                    placeholder="Ex: RJ"
                     value={newState}
                     onChange={(e) => setNewState(e.target.value.toUpperCase())}
-                    className="w-full px-3 py-2 text-xs rounded bg-[#14161A] border border-[#2A2F38] text-white focus:border-[#2F7CF6] focus:outline-none"
+                    className="w-full px-3 py-2 text-xs rounded bg-[#14161A] border border-[#2A2F38] text-white uppercase focus:border-[#2F7CF6] focus:outline-none"
                   />
                 </div>
               </div>
@@ -596,7 +574,7 @@ export const ProjectHub: React.FC<ProjectHubProps> = ({
           <div className="w-full max-w-md rounded-lg border border-[#323844] bg-[#1B1E24] p-6 space-y-4">
             <h3 className="text-base font-semibold text-white">Confirmar Exclusão</h3>
             <p className="text-xs text-[#C4C9D4]">
-              Deseja excluir permanentemente o empreendimento selecionado do armazenamento local? Esta ação não pode ser desfeita.
+              Deseja excluir permanentemente o empreendimento selecionado do banco de dados Firebase Firestore? Esta ação não pode ser desfeita.
             </p>
             <div className="flex justify-end gap-2 pt-2">
               <button

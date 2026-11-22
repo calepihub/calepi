@@ -1,7 +1,11 @@
 import React, { useState } from 'react';
-import { Copy, FlipHorizontal2, Plus, Trash2, Wand2 } from 'lucide-react';
+import { Copy, FlipHorizontal2, LayoutGrid, Plus, Trash2, Wand2 } from 'lucide-react';
 import { getRoomArea, getRoomPerimeter, getUnitUsefulArea, round2 } from '../engine/geometry';
-import { generateParametricUnitLayout, nextId } from '../engine/parametricGenerator';
+import {
+  autoDistributeUnitsAcrossFloors,
+  generateParametricUnitLayout,
+  nextId,
+} from '../engine/parametricGenerator';
 import type { Project, Room, RoomCategory, UnitType } from '../types/project';
 
 interface TypologiesModuleProps {
@@ -39,6 +43,23 @@ export const TypologiesModule: React.FC<TypologiesModuleProps> = ({
   const [newLaundry, setNewLaundry] = useState(true);
   const [newBalcony, setNewBalcony] = useState(false);
   const [newAcc, setNewAcc] = useState(false);
+  const [distNotice, setDistNotice] = useState<string | null>(null);
+
+  const handleAutoDistribute = () => {
+    if (!activeUt) return;
+    let totalPlaced = 0;
+    onUpdateProject((prev) => {
+      const next = autoDistributeUnitsAcrossFloors(prev, activeUt.id);
+      totalPlaced = next.floors.reduce((s, f) => s + f.units.length, 0);
+      return next;
+    }, `Distribuição automática da tipologia ${activeUt.code} nos pavimentos`);
+    setDistNotice(
+      totalPlaced > 0
+        ? `Unidades da tipologia ${activeUt.code} posicionadas nos pavimentos vazios respeitando os recuos.`
+        : 'Todos os pavimentos já possuem unidades posicionadas ou não comportam a largura desta tipologia.',
+    );
+    setTimeout(() => setDistNotice(null), 5000);
+  };
 
   const handleCreateTypology = (e: React.FormEvent) => {
     e.preventDefault();
@@ -165,15 +186,31 @@ export const TypologiesModule: React.FC<TypologiesModuleProps> = ({
           </p>
         </div>
         {activeUt && (
-          <button
-            type="button"
-            onClick={onOpen2DEditor}
-            className="px-4 py-2 text-xs font-semibold rounded bg-[#2F7CF6] text-white hover:bg-[#2569D6]"
-          >
-            Editar {activeUt.code} na Planta 2D
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={handleAutoDistribute}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded border border-emerald-500/50 bg-emerald-600/20 text-emerald-200 hover:bg-emerald-600/35 whitespace-nowrap"
+            >
+              <LayoutGrid className="w-3.5 h-3.5" />
+              Distribuir Unidades nos Pavimentos
+            </button>
+            <button
+              type="button"
+              onClick={onOpen2DEditor}
+              className="px-4 py-2 text-xs font-semibold rounded bg-[#2F7CF6] text-white hover:bg-[#2569D6] whitespace-nowrap"
+            >
+              Editar {activeUt.code} na Planta 2D
+            </button>
+          </div>
         )}
       </div>
+
+      {distNotice && (
+        <div className="rounded-lg border border-emerald-500/40 bg-emerald-950/30 px-4 py-2.5 text-xs text-emerald-200">
+          {distNotice}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Left: Typologies list & Generator */}

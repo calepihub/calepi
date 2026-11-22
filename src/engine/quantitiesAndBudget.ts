@@ -4,7 +4,12 @@ import {
   getWallLength,
   round2,
 } from './geometry';
-import { getSinapiRJItem, getSinapiRJWallBenchmarkPerM2 } from './sinapiRJ';
+import {
+  SINAPI_RJ_METADATA,
+  getSinapiRJItem,
+  getSinapiRJWallBenchmarkPerM2,
+  type ConstructionStageName,
+} from './sinapiRJ';
 import type {
   BudgetEntry,
   ConstructionMethodId,
@@ -61,6 +66,7 @@ export function calculateQuantities(project: Project): QuantitiesReport {
   let totalExternalWallNetAreaM2 = 0;
   let totalInternalWallNetAreaM2 = 0;
   let totalFloorAreaM2 = 0;
+  let totalWetFloorAreaM2 = 0;
   let totalWetWallTileM2 = 0;
   let totalPaintAreaM2 = 0;
   let totalCeilingAreaM2 = 0;
@@ -117,6 +123,7 @@ export function calculateQuantities(project: Project): QuantitiesReport {
       totalCeilingAreaM2 += area * count;
       if (r.category === 'banheiro' || r.category === 'cozinha' || r.category === 'area_servico') {
         // Wet wall tiles up to ceilingHeight in bath, 1.5m/ceiling in kitchen/AS
+        totalWetFloorAreaM2 += area * count;
         totalWetWallTileM2 += perim * r.ceilingHeight * 0.65 * count;
         totalPaintAreaM2 += area * count; // ceiling paint
       } else {
@@ -192,8 +199,68 @@ export function calculateQuantities(project: Project): QuantitiesReport {
   const totalDrainPipeM = round2(totalDrainagePoints * 2.8);
 
   const totalBuiltAreaM2 = round2(totalPrivateAreaM2 + totalCommonAreaM2);
+  const groundFloor = project.floors[0];
+  const groundFloorProjectionM2 = groundFloor
+    ? round2(
+        groundFloor.units.reduce((sum, inst) => {
+          const ut = project.unitTypes.find((t) => t.id === inst.unitTypeId);
+          return sum + (ut ? ut.width * ut.depth : 0);
+        }, 0) + (groundFloor.commonAreaM2 || 0),
+      )
+    : 0;
+  const tapumeAreaM2 = totalUnits > 0 ? round2(Math.max(4, project.site.front) * 2.2) : 0;
+  const foundationConcreteM3 = totalUnits > 0 ? round2(groundFloorProjectionM2 * 0.085) : 0;
+  const waterproofingAreaM2 =
+    totalUnits > 0 ? round2(totalWetFloorAreaM2 + groundFloorProjectionM2 * 0.25) : 0;
+  const roofAreaM2 = totalUnits > 0 ? round2(groundFloorProjectionM2 * 1.08) : 0;
 
   const items: QuantityItem[] = [
+    ...(totalUnits > 0
+      ? [
+          {
+            id: 'q-pre-loc',
+            code: 'PRE-01',
+            discipline: 'Arquitetura' as const,
+            description: 'Locação Convencional de Obra / Gabarito de Tábuas e Pontaletes',
+            unit: 'm²',
+            netQuantity: groundFloorProjectionM2,
+            lossFactorPercent: 0,
+            grossQuantity: groundFloorProjectionM2,
+            measurementCriterion: 'Projeção da edificação no pavimento térreo (área privativa + comum)',
+            sourceOrigin: 'Implantação do pavimento térreo sobre o terreno',
+            calculationMemory: `Projeção térreo = ${groundFloorProjectionM2} m²`,
+            unitTypeBreakdown: {},
+          },
+          {
+            id: 'q-pre-tap',
+            code: 'PRE-02',
+            discipline: 'Arquitetura' as const,
+            description: 'Tapume Provisório em Compensado 6mm + Placa de Obra e Ligações',
+            unit: 'm²',
+            netQuantity: tapumeAreaM2,
+            lossFactorPercent: 5,
+            grossQuantity: round2(tapumeAreaM2 * 1.05),
+            measurementCriterion: 'Testada frontal do terreno × altura padrão 2,20m',
+            sourceOrigin: 'Dimensão frontal do lote cadastrado',
+            calculationMemory: `${project.site.front} m × 2,20 m = ${tapumeAreaM2} m²`,
+            unitTypeBreakdown: {},
+          },
+          {
+            id: 'q-fun-bald',
+            code: 'FUN-01',
+            discipline: 'Estrutura' as const,
+            description: 'Infraestrutura / Vigas Baldrame e Sapatas (Estimativa Conceitual)',
+            unit: 'm³',
+            netQuantity: foundationConcreteM3,
+            lossFactorPercent: 5,
+            grossQuantity: round2(foundationConcreteM3 * 1.05),
+            measurementCriterion: 'Estimativa conceitual de 0,085 m³/m² de projeção térrea (aguarda sondagem SPT)',
+            sourceOrigin: 'Projeção da edificação no térreo',
+            calculationMemory: `${groundFloorProjectionM2} m² × 0,085 m³/m² = ${foundationConcreteM3} m³`,
+            unitTypeBreakdown: {},
+          },
+        ]
+      : []),
     {
       id: 'q-wall-ext',
       code: 'ARQ-01',
@@ -286,6 +353,38 @@ export function calculateQuantities(project: Project): QuantitiesReport {
       calculationMemory: `Σ(P_molhado × H × 0,65) = ${round2(totalWetWallTileM2)} m²`,
       unitTypeBreakdown: {},
     },
+    ...(totalUnits > 0
+      ? [
+          {
+            id: 'q-imp-wet',
+            code: 'IMP-01',
+            discipline: 'Arquitetura' as const,
+            description: 'Impermeabilização de Áreas Molhadas e Baldrames (Argamassa Polimérica)',
+            unit: 'm²',
+            netQuantity: waterproofingAreaM2,
+            lossFactorPercent: 5,
+            grossQuantity: round2(waterproofingAreaM2 * 1.05),
+            measurementCriterion: 'Pisos de BWC/Cozinha/A.S. + faixa de 25% da projeção térrea nos baldrames',
+            sourceOrigin: 'Ambientes molhados das tipologias e projeção térrea',
+            calculationMemory: `${round2(totalWetFloorAreaM2)} m² (molhados) + ${round2(groundFloorProjectionM2 * 0.25)} m² (baldrames) = ${waterproofingAreaM2} m²`,
+            unitTypeBreakdown: {},
+          },
+          {
+            id: 'q-cob-roof',
+            code: 'COB-01',
+            discipline: 'Arquitetura' as const,
+            description: `Cobertura com Telha Termoacústica (${project.constructionMethod.roofType.replace(/_/g, ' ')})`,
+            unit: 'm²',
+            netQuantity: roofAreaM2,
+            lossFactorPercent: 5,
+            grossQuantity: round2(roofAreaM2 * 1.05),
+            measurementCriterion: 'Projeção da edificação no térreo × 1,08 (inclinação e beirais)',
+            sourceOrigin: 'Projeção da edificação e método de cobertura cadastrado',
+            calculationMemory: `${groundFloorProjectionM2} m² × 1,08 = ${roofAreaM2} m²`,
+            unitTypeBreakdown: {},
+          },
+        ]
+      : []),
     {
       id: 'q-paint',
       code: 'PIN-01',
@@ -583,9 +682,33 @@ export function syncBudgetWithQuantities(
   quantities: QuantitiesReport,
 ): BudgetEntry[] {
   const existingByCode = new Map(project.budgetEntries.map((e) => [e.code, e]));
+  const regime = project.budgetSettings.sinapiRegime;
+  const autoApplySinapi = regime === 'desonerado' || regime === 'nao_desonerado';
+
   const synced: BudgetEntry[] = quantities.items.map((q) => {
     const prev = existingByCode.get(q.code);
     const sinapiRef = getSinapiRJItem(q.code);
+    const shouldFillSinapiPrice =
+      autoApplySinapi &&
+      Boolean(sinapiRef) &&
+      (!prev || (prev.unitPrice === null && (!prev.supplier || prev.supplier.startsWith('SINAPI-RJ'))));
+
+    const unitPrice = shouldFillSinapiPrice && sinapiRef
+      ? regime === 'desonerado'
+        ? sinapiRef.priceDesoneradoRJ
+        : sinapiRef.priceNaoDesoneradoRJ
+      : (prev?.unitPrice ?? null);
+
+    const supplier = shouldFillSinapiPrice
+      ? regime === 'desonerado'
+        ? 'SINAPI-RJ Deson.'
+        : 'SINAPI-RJ S/Des.'
+      : (prev?.supplier ?? '');
+
+    const sourceBase = shouldFillSinapiPrice && sinapiRef
+      ? `SINAPI-RJ ${sinapiRef.sinapiCode}`
+      : (prev?.sourceBase ?? project.budgetSettings.sourceBase);
+
     return {
       id: prev?.id ?? `bdg-${q.code}`,
       code: q.code,
@@ -595,10 +718,10 @@ export function syncBudgetWithQuantities(
       category: prev?.category ?? sinapiRef?.category ?? 'servico',
       unit: q.unit,
       quantity: q.netQuantity,
-      unitPrice: prev?.unitPrice ?? null,
+      unitPrice,
       lossFactorPercent: prev?.lossFactorPercent ?? q.lossFactorPercent,
-      supplier: prev?.supplier ?? '',
-      sourceBase: prev?.sourceBase ?? project.budgetSettings.sourceBase,
+      supplier,
+      sourceBase,
       notes: prev?.notes ?? sinapiRef?.sinapiDescription ?? '',
     };
   });
@@ -611,6 +734,213 @@ export function syncBudgetWithQuantities(
     }
   }
   return synced;
+}
+
+export interface AnalyticalStageSummary {
+  stageName: ConstructionStageName | '09. Serviços Complementares';
+  itemsCount: number;
+  materialTotal: number;
+  laborTotal: number;
+  directTotal: number;
+  withBdiTotal: number;
+  sharePercent: number;
+}
+
+export interface AnalyticalBudgetDetails {
+  totalMaterialCost: number;
+  totalLaborCost: number;
+  socialChargesRatePercent: number;
+  socialChargesImpliedValue: number;
+  stageSummaries: AnalyticalStageSummary[];
+  lineDetails: Array<{
+    code: string;
+    stageName: ConstructionStageName | '09. Serviços Complementares';
+    materialUnitPrice: number | null;
+    laborUnitPrice: number | null;
+    materialSubtotal: number | null;
+    laborSubtotal: number | null;
+    sharePercent: number;
+  }>;
+}
+
+export function calculateAnalyticalBreakdown(
+  budget: BudgetSummaryReport,
+  project: Project,
+): AnalyticalBudgetDetails {
+  const bdiMultiplier =
+    (1 + (project.budgetSettings.indirectCostsPercent || 0) / 100) *
+    (1 + (project.budgetSettings.bdiPercent || 0) / 100) *
+    (1 - (project.budgetSettings.discountPercent || 0) / 100);
+
+  const stageMap = new Map<
+    ConstructionStageName | '09. Serviços Complementares',
+    { itemsCount: number; materialTotal: number; laborTotal: number; directTotal: number }
+  >();
+
+  let totalMaterialCost = 0;
+  let totalLaborCost = 0;
+
+  const lineDetails = budget.lines.map((line) => {
+    const ref = getSinapiRJItem(line.code);
+    const stageName: ConstructionStageName | '09. Serviços Complementares' =
+      ref?.stageGroup ?? '09. Serviços Complementares';
+    const matRatio =
+      ref?.materialRatio ?? (line.category === 'material' ? 1 : line.category === 'equipamento' ? 0.75 : 0.55);
+
+    const materialUnitPrice = line.unitPrice !== null ? round2(line.unitPrice * matRatio) : null;
+    const laborUnitPrice = line.unitPrice !== null ? round2(line.unitPrice - (materialUnitPrice ?? 0)) : null;
+    const materialSubtotal = line.subtotal !== null ? round2(line.subtotal * matRatio) : null;
+    const laborSubtotal = line.subtotal !== null ? round2(line.subtotal - (materialSubtotal ?? 0)) : null;
+    const sharePercent =
+      budget.directTotalCost > 0 && line.subtotal !== null
+        ? round2((line.subtotal / budget.directTotalCost) * 100)
+        : 0;
+
+    if (materialSubtotal !== null && laborSubtotal !== null && line.subtotal !== null) {
+      totalMaterialCost += materialSubtotal;
+      totalLaborCost += laborSubtotal;
+      const cur = stageMap.get(stageName) ?? {
+        itemsCount: 0,
+        materialTotal: 0,
+        laborTotal: 0,
+        directTotal: 0,
+      };
+      cur.itemsCount += 1;
+      cur.materialTotal = round2(cur.materialTotal + materialSubtotal);
+      cur.laborTotal = round2(cur.laborTotal + laborSubtotal);
+      cur.directTotal = round2(cur.directTotal + line.subtotal);
+      stageMap.set(stageName, cur);
+    }
+
+    return {
+      code: line.code,
+      stageName,
+      materialUnitPrice,
+      laborUnitPrice,
+      materialSubtotal,
+      laborSubtotal,
+      sharePercent,
+    };
+  });
+
+  const stageSummaries: AnalyticalStageSummary[] = Array.from(stageMap.entries())
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([stageName, st]) => ({
+      stageName,
+      itemsCount: st.itemsCount,
+      materialTotal: st.materialTotal,
+      laborTotal: st.laborTotal,
+      directTotal: st.directTotal,
+      withBdiTotal: round2(st.directTotal * bdiMultiplier),
+      sharePercent:
+        budget.directTotalCost > 0 ? round2((st.directTotal / budget.directTotalCost) * 100) : 0,
+    }));
+
+  const regime = project.budgetSettings.sinapiRegime;
+  const socialChargesRatePercent =
+    project.budgetSettings.socialChargesPercent ??
+    (regime === 'nao_desonerado'
+      ? SINAPI_RJ_METADATA.encargosNaoDesoneradoPercent
+      : SINAPI_RJ_METADATA.encargosDesoneradoPercent);
+
+  const laborBaseWithoutCharges =
+    totalLaborCost > 0 ? round2(totalLaborCost / (1 + socialChargesRatePercent / 100)) : 0;
+  const socialChargesImpliedValue = round2(Math.max(0, totalLaborCost - laborBaseWithoutCharges));
+
+  return {
+    totalMaterialCost: round2(totalMaterialCost),
+    totalLaborCost: round2(totalLaborCost),
+    socialChargesRatePercent,
+    socialChargesImpliedValue,
+    stageSummaries,
+    lineDetails,
+  };
+}
+
+export interface ScheduleStageRow {
+  code: string;
+  name: string;
+  weightPercent: number;
+  startMonth: number;
+  endMonth: number;
+  totalValue: number;
+  monthlyValues: number[];
+}
+
+export interface ConstructionScheduleReport {
+  months: number;
+  stages: ScheduleStageRow[];
+  monthlyTotals: number[];
+  monthlyPercents: number[];
+  cumulativeTotals: number[];
+  cumulativePercents: number[];
+}
+
+export function buildConstructionSchedule(
+  grandTotalCost: number,
+  requestedMonths = 6,
+): ConstructionScheduleReport {
+  const months = Math.max(2, Math.min(24, Math.round(requestedMonths) || 6));
+  const stageDefs = [
+    { code: 'ET-01', name: 'Serviços Preliminares e Locação', weight: 0.06, startRatio: 0.0, endRatio: 0.18 },
+    { code: 'ET-02', name: 'Infraestrutura e Fundações', weight: 0.13, startRatio: 0.08, endRatio: 0.34 },
+    { code: 'ET-03', name: 'Superestrutura e Lajes', weight: 0.21, startRatio: 0.2, endRatio: 0.56 },
+    { code: 'ET-04', name: 'Alvenaria, Vedações e Cobertura', weight: 0.19, startRatio: 0.35, endRatio: 0.72 },
+    { code: 'ET-05', name: 'Instalações Elétricas, Especiais e Hidrossanitárias', weight: 0.17, startRatio: 0.45, endRatio: 0.86 },
+    { code: 'ET-06', name: 'Impermeabilização, Revestimentos e Esquadrias', weight: 0.18, startRatio: 0.6, endRatio: 0.96 },
+    { code: 'ET-07', name: 'Pintura Final, Louças e Entrega', weight: 0.06, startRatio: 0.8, endRatio: 1.0 },
+  ];
+
+  const monthlyTotals = Array.from({ length: months }, () => 0);
+
+  const stages: ScheduleStageRow[] = stageDefs.map((st) => {
+    const startMonth = Math.max(1, Math.min(months, Math.floor(st.startRatio * months) + 1));
+    const endMonth = Math.max(startMonth, Math.min(months, Math.ceil(st.endRatio * months)));
+    const spanMonths = endMonth - startMonth + 1;
+    const totalValue = round2(grandTotalCost * st.weight);
+    const monthlySlice = spanMonths > 0 ? round2(totalValue / spanMonths) : 0;
+
+    const monthlyValues = Array.from({ length: months }, (_, idx) => {
+      const m = idx + 1;
+      if (m < startMonth || m > endMonth) return 0;
+      const val = m === endMonth ? round2(totalValue - monthlySlice * (spanMonths - 1)) : monthlySlice;
+      monthlyTotals[idx] = round2(monthlyTotals[idx] + val);
+      return val;
+    });
+
+    return {
+      code: st.code,
+      name: st.name,
+      weightPercent: round2(st.weight * 100),
+      startMonth,
+      endMonth,
+      totalValue,
+      monthlyValues,
+    };
+  });
+
+  let running = 0;
+  const cumulativeTotals: number[] = [];
+  const monthlyPercents: number[] = [];
+  const cumulativePercents: number[] = [];
+
+  for (let i = 0; i < months; i++) {
+    running = round2(running + monthlyTotals[i]);
+    cumulativeTotals.push(running);
+    const mPct = grandTotalCost > 0 ? round2((monthlyTotals[i] / grandTotalCost) * 100) : 0;
+    const cPct = grandTotalCost > 0 ? round2((running / grandTotalCost) * 100) : 0;
+    monthlyPercents.push(mPct);
+    cumulativePercents.push(cPct);
+  }
+
+  return {
+    months,
+    stages,
+    monthlyTotals,
+    monthlyPercents,
+    cumulativeTotals,
+    cumulativePercents,
+  };
 }
 
 export function calculateBudgetSummary(

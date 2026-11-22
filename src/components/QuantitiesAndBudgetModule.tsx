@@ -10,15 +10,17 @@ import {
   Trash2,
 } from 'lucide-react';
 import {
+  buildConstructionSchedule,
+  calculateAnalyticalBreakdown,
   calculateBudgetSummary,
   calculateQuantities,
   syncBudgetWithQuantities,
 } from '../engine/quantitiesAndBudget';
 import {
+  generateAnalyticalBudgetAndSchedulePDFBlob,
   generateProjectXLSXBuffer,
   triggerBrowserDownload,
 } from '../engine/exporters';
-import { round2 } from '../engine/geometry';
 import { nextId } from '../engine/parametricGenerator';
 import {
   applySinapiRJToBudget,
@@ -57,6 +59,10 @@ export const QuantitiesAndBudgetModule: React.FC<QuantitiesAndBudgetModuleProps>
   const budget = useMemo(
     () => calculateBudgetSummary(project, quantities),
     [project, quantities],
+  );
+  const analytical = useMemo(
+    () => calculateAnalyticalBreakdown(budget, project),
+    [budget, project],
   );
 
   const filteredQuantities = useMemo(() => {
@@ -155,37 +161,24 @@ export const QuantitiesAndBudgetModule: React.FC<QuantitiesAndBudgetModuleProps>
     [quantities.items],
   );
 
-  const scheduleRows = useMemo(() => {
-    const months = Math.max(2, Math.min(24, scheduleMonths));
-    const stages = [
-      { name: 'Serviços Preliminares e Locação', weight: 0.08 },
-      { name: 'Infraestrutura / Fundações', weight: 0.14 },
-      { name: 'Superestrutura e Lajes', weight: 0.22 },
-      { name: 'Vedações / Alvenaria / Cobertura', weight: 0.18 },
-      { name: 'Instalações Elétricas e Hidrossanitárias', weight: 0.16 },
-      { name: 'Revestimentos, Esquadrias e Pintura', weight: 0.17 },
-      { name: 'Limpeza Final e Entrega', weight: 0.05 },
-    ];
-    return stages.map((st, idx) => {
-      const startMonth = Math.min(months, Math.floor((idx / stages.length) * months) + 1);
-      const endMonth = Math.min(months, Math.ceil(((idx + 1) / stages.length) * months));
-      return {
-        ...st,
-        startMonth,
-        endMonth,
-        value: round2(budget.grandTotalCost * st.weight),
-      };
-    });
-  }, [budget.grandTotalCost, scheduleMonths]);
+  const schedulePlan = useMemo(
+    () => buildConstructionSchedule(budget.grandTotalCost, scheduleMonths),
+    [budget.grandTotalCost, scheduleMonths],
+  );
 
   const handleExportXLSX = () => {
-    const buffer = generateProjectXLSXBuffer(project);
+    const buffer = generateProjectXLSXBuffer(project, scheduleMonths);
     triggerBrowserDownload(
       new Blob([buffer.slice().buffer], {
         type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       }),
       `${project.code}_Quantitativos_Orcamento.xlsx`,
     );
+  };
+
+  const handleExportBudgetPDF = () => {
+    const blob = generateAnalyticalBudgetAndSchedulePDFBlob(project, scheduleMonths);
+    triggerBrowserDownload(blob, `${project.code}_Orcamento_Analitico_Cronograma.pdf`);
   };
 
   return (
@@ -244,11 +237,19 @@ export const QuantitiesAndBudgetModule: React.FC<QuantitiesAndBudgetModuleProps>
             </button>
             <button
               type="button"
+              onClick={handleExportBudgetPDF}
+              className="inline-flex items-center gap-1.5 rounded-md border border-[#2F7CF6] bg-[#14161A] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#2F7CF6]/20 whitespace-nowrap shrink-0"
+            >
+              <Download className="h-3.5 w-3.5 text-[#2F7CF6]" />
+              Exportar PDF Executivo
+            </button>
+            <button
+              type="button"
               onClick={handleExportXLSX}
               className="inline-flex items-center gap-1.5 rounded-md bg-[#2F7CF6] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#2567d4] whitespace-nowrap shrink-0"
             >
               <Download className="h-3.5 w-3.5" />
-              Exportar XLSX
+              Exportar XLSX (7 Abas)
             </button>
           </div>
         </div>
@@ -552,6 +553,88 @@ export const QuantitiesAndBudgetModule: React.FC<QuantitiesAndBudgetModuleProps>
               </div>
             </div>
 
+            {/* Analytical Breakdown: Material vs Mão de Obra + Encargos RJ + WBS */}
+            <div className="grid gap-4 lg:grid-cols-12">
+              <div className="rounded-lg border border-slate-800 bg-[#1B1E24] p-4 space-y-2.5 lg:col-span-4">
+                <div className="text-xs font-semibold uppercase tracking-wider text-slate-300">
+                  Composição Analítica Direta
+                </div>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-slate-400">Materiais e Equipamentos</span>
+                  <span className="font-mono font-semibold tabular-nums text-white">
+                    {brl(analytical.totalMaterialCost)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-slate-400">Mão de Obra + Encargos RJ</span>
+                  <span className="font-mono font-semibold tabular-nums text-white">
+                    {brl(analytical.totalLaborCost)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-[11px] text-slate-400 border-t border-slate-800 pt-2">
+                  <span>Encargos Sociais RJ ({analytical.socialChargesRatePercent}%)</span>
+                  <span className="font-mono tabular-nums text-sky-300">
+                    {brl(analytical.socialChargesImpliedValue)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-xs border-t border-slate-800 pt-2">
+                  <span className="font-medium text-slate-200">Custo Direto Total</span>
+                  <span className="font-mono font-semibold tabular-nums text-emerald-400">
+                    {brl(budget.directTotalCost)}
+                  </span>
+                </div>
+              </div>
+
+              <div className="overflow-hidden rounded-lg border border-slate-800 bg-[#1B1E24] lg:col-span-8">
+                <div className="border-b border-slate-800 bg-[#14161A] px-3.5 py-2 text-xs font-semibold text-slate-300">
+                  Resumo Orçamentário por Etapa Construtiva (WBS SINAPI-RJ)
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-[11.5px]">
+                    <thead className="border-b border-slate-800 text-slate-400">
+                      <tr>
+                        <th className="px-3 py-2 font-medium">Etapa</th>
+                        <th className="px-3 py-2 text-right font-medium">Material</th>
+                        <th className="px-3 py-2 text-right font-medium">M.O. + Enc.</th>
+                        <th className="px-3 py-2 text-right font-medium">Custo Direto</th>
+                        <th className="px-3 py-2 text-right font-medium">Com BDI</th>
+                        <th className="px-3 py-2 text-right font-medium">% Part.</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/70">
+                      {analytical.stageSummaries.map((st) => (
+                        <tr key={st.stageName}>
+                          <td className="px-3 py-1.5 text-slate-200">{st.stageName}</td>
+                          <td className="px-3 py-1.5 text-right font-mono tabular-nums text-slate-300">
+                            {brl(st.materialTotal)}
+                          </td>
+                          <td className="px-3 py-1.5 text-right font-mono tabular-nums text-slate-300">
+                            {brl(st.laborTotal)}
+                          </td>
+                          <td className="px-3 py-1.5 text-right font-mono tabular-nums text-white">
+                            {brl(st.directTotal)}
+                          </td>
+                          <td className="px-3 py-1.5 text-right font-mono tabular-nums text-emerald-300">
+                            {brl(st.withBdiTotal)}
+                          </td>
+                          <td className="px-3 py-1.5 text-right font-mono tabular-nums text-slate-400">
+                            {st.sharePercent.toFixed(1)}%
+                          </td>
+                        </tr>
+                      ))}
+                      {analytical.stageSummaries.length === 0 && (
+                        <tr>
+                          <td colSpan={6} className="px-3 py-3 text-center text-slate-500">
+                            Posicione unidades nos pavimentos para detalhar as etapas construtivas.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
             <div className="overflow-hidden rounded-lg border border-slate-800 bg-[#1B1E24]">
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs">
@@ -730,10 +813,10 @@ export const QuantitiesAndBudgetModule: React.FC<QuantitiesAndBudgetModuleProps>
             <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-slate-800 bg-[#1B1E24] p-4">
               <div>
                 <h2 className="text-sm font-semibold text-white">
-                  Cronograma Físico-Financeiro Preliminar
+                  Cronograma Físico-Financeiro Executivo
                 </h2>
                 <p className="text-xs text-slate-400">
-                  Distribuição percentual de desembolso aplicada sobre o total cotado (requer cronograma executivo após definição de equipes e frentes de serviço).
+                  Distribuição mensal de desembolso aplicada sobre o orçamento total cotado com avanço físico acumulado.
                 </p>
               </div>
               <label className="flex items-center gap-2 text-xs text-slate-300">
@@ -743,7 +826,7 @@ export const QuantitiesAndBudgetModule: React.FC<QuantitiesAndBudgetModuleProps>
                   min={2}
                   max={24}
                   value={scheduleMonths}
-                  onChange={(e) => setScheduleMonths(Number(e.target.value) || 6)}
+                  onChange={(e) => setScheduleMonths(Math.max(2, Math.min(24, Number(e.target.value) || 6)))}
                   className="w-20 rounded border border-slate-700 bg-[#14161A] px-2.5 py-1 font-mono text-sm tabular-nums text-white"
                 />
               </label>
@@ -761,21 +844,24 @@ export const QuantitiesAndBudgetModule: React.FC<QuantitiesAndBudgetModuleProps>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/70">
-                  {scheduleRows.map((row) => {
-                    const leftPct = ((row.startMonth - 1) / scheduleMonths) * 100;
+                  {schedulePlan.stages.map((row) => {
+                    const leftPct = ((row.startMonth - 1) / schedulePlan.months) * 100;
                     const widthPct =
-                      ((row.endMonth - row.startMonth + 1) / scheduleMonths) * 100;
+                      ((row.endMonth - row.startMonth + 1) / schedulePlan.months) * 100;
                     return (
-                      <tr key={row.name}>
-                        <td className="px-4 py-3 font-medium text-white">{row.name}</td>
+                      <tr key={row.code}>
+                        <td className="px-4 py-3 font-medium text-white">
+                          <span className="mr-2 font-mono text-[11px] text-slate-400">{row.code}</span>
+                          {row.name}
+                        </td>
                         <td className="px-4 py-3 font-mono tabular-nums text-slate-300">
                           Mês {row.startMonth} – {row.endMonth}
                         </td>
                         <td className="px-4 py-3 text-right font-mono tabular-nums text-slate-300">
-                          {Math.round(row.weight * 100)}%
+                          {row.weightPercent}%
                         </td>
                         <td className="px-4 py-3 text-right font-mono tabular-nums text-emerald-300">
-                          {budget.grandTotalCost > 0 ? brl(row.value) : 'SEM COTAÇÃO'}
+                          {budget.grandTotalCost > 0 ? brl(row.totalValue) : 'SEM COTAÇÃO'}
                         </td>
                         <td className="px-4 py-3">
                           <div className="relative h-3 w-full rounded bg-[#14161A]">
@@ -790,6 +876,48 @@ export const QuantitiesAndBudgetModule: React.FC<QuantitiesAndBudgetModuleProps>
                   })}
                 </tbody>
               </table>
+            </div>
+
+            <div className="overflow-hidden rounded-lg border border-slate-800 bg-[#1B1E24]">
+              <div className="border-b border-slate-800 bg-[#14161A] px-4 py-2.5 text-xs font-semibold text-slate-300">
+                Fluxo de Desembolso Mensal e Avanço Acumulado ({schedulePlan.months} meses)
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="border-b border-slate-800 text-slate-400">
+                    <tr>
+                      <th className="px-4 py-2 font-medium">Mês</th>
+                      <th className="px-4 py-2 text-right font-medium">Desembolso Mensal</th>
+                      <th className="px-4 py-2 text-right font-medium">% Mês</th>
+                      <th className="px-4 py-2 text-right font-medium">Acumulado</th>
+                      <th className="px-4 py-2 text-right font-medium">% Avanço Acumulado</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/70">
+                    {schedulePlan.monthlyTotals.map((mVal, idx) => (
+                      <tr key={idx}>
+                        <td className="px-4 py-2 font-mono text-white">
+                          Mês {String(idx + 1).padStart(2, '0')}
+                        </td>
+                        <td className="px-4 py-2 text-right font-mono tabular-nums text-slate-200">
+                          {budget.grandTotalCost > 0 ? brl(mVal) : 'SEM COTAÇÃO'}
+                        </td>
+                        <td className="px-4 py-2 text-right font-mono tabular-nums text-slate-400">
+                          {schedulePlan.monthlyPercents[idx].toFixed(1)}%
+                        </td>
+                        <td className="px-4 py-2 text-right font-mono tabular-nums text-emerald-300">
+                          {budget.grandTotalCost > 0
+                            ? brl(schedulePlan.cumulativeTotals[idx])
+                            : 'SEM COTAÇÃO'}
+                        </td>
+                        <td className="px-4 py-2 text-right font-mono tabular-nums text-sky-300">
+                          {schedulePlan.cumulativePercents[idx].toFixed(1)}%
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         )}

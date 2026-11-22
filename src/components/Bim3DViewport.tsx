@@ -41,6 +41,7 @@ import type {
 interface Bim3DViewportProps {
   project: Project;
   onUpdateProject: (updater: (prev: Project) => Project, revisionNote?: string) => void;
+  onSaveRender?: (render: CapturedRender) => void;
 }
 
 type LayerVisibility = {
@@ -159,6 +160,7 @@ function buildWallWithOpeningsGeometry(
 export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
   project,
   onUpdateProject,
+  onSaveRender,
 }) => {
   const mountRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -1543,19 +1545,28 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
     if (!renderer || !scene || !cam) return null;
     renderer.render(scene, cam);
     const srcCanvas = renderer.domElement;
-    // Scale down to max 960px width so storage in IndexedDB/PDF/ZIP remains fast & crisp
-    const maxW = 960;
-    if (srcCanvas.width <= maxW) {
-      return srcCanvas.toDataURL('image/png');
+
+    const encodeAtWidth = (maxW: number, mime: 'image/png' | 'image/jpeg', quality?: number) => {
+      const targetW = Math.min(maxW, srcCanvas.width);
+      const scale = targetW / srcCanvas.width;
+      const off = document.createElement('canvas');
+      off.width = targetW;
+      off.height = Math.max(1, Math.round(srcCanvas.height * scale));
+      const ctx = off.getContext('2d');
+      if (!ctx) return srcCanvas.toDataURL(mime, quality);
+      ctx.drawImage(srcCanvas, 0, 0, off.width, off.height);
+      return off.toDataURL(mime, quality);
+    };
+
+    // Keep under Firestore's 750 KB dataUrl limit with PNG first, JPEG fallback if dense
+    let out = encodeAtWidth(920, 'image/png');
+    if (out.length > 680000) {
+      out = encodeAtWidth(920, 'image/jpeg', 0.85);
     }
-    const scale = maxW / srcCanvas.width;
-    const off = document.createElement('canvas');
-    off.width = maxW;
-    off.height = Math.round(srcCanvas.height * scale);
-    const ctx = off.getContext('2d');
-    if (!ctx) return srcCanvas.toDataURL('image/png');
-    ctx.drawImage(srcCanvas, 0, 0, off.width, off.height);
-    return off.toDataURL('image/png');
+    if (out.length > 680000) {
+      out = encodeAtWidth(760, 'image/jpeg', 0.78);
+    }
+    return out;
   };
 
   const handleCapturePNG = () => {
@@ -1601,7 +1612,8 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
       }),
       `Renderização arquitetônica salva na prancha R01 (${renderEntry.title})`,
     );
-    setRenderNotice('Render salvo na Prancha R01 (Pranchas & Exportar) e no pacote ZIP!');
+    onSaveRender?.(renderEntry);
+    setRenderNotice('Render salvo na Prancha R01 (Firebase Firestore) e no pacote ZIP!');
     setTimeout(() => setRenderNotice(null), 4500);
   };
 

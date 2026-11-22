@@ -2163,7 +2163,7 @@ export function createBlankProject(params: {
   const front = Math.max(4, params.front);
   const depth = Math.max(6, params.depth);
   const vertices = buildSiteVerticesFromDimensions(front, front, depth, depth);
-  const uf = (params.state || 'RJ').trim().toUpperCase();
+  const uf = (params.state || '').trim().toUpperCase();
 
   const floors: Floor[] = [];
   for (let i = 0; i < Math.max(1, params.floorsCount); i++) {
@@ -2207,7 +2207,7 @@ export function createBlankProject(params: {
     owner: clientSafe,
     address: 'Não informado',
     municipality: muniSafe,
-    state: uf || 'RJ',
+    state: uf,
     createdAt: now,
     updatedAt: now,
     site: {
@@ -2282,20 +2282,17 @@ export function createBlankProject(params: {
     professionals: [],
     budgetEntries: [],
     budgetSettings: {
-      sourceBase:
-        uf === 'RJ'
-          ? 'SINAPI-RJ (CAIXA/IBGE) — Com Desoneração'
-          : 'SINAPI-RJ / Orçamento Manual',
-      region: uf === 'RJ' ? 'Rio de Janeiro (RJ)' : uf || 'Rio de Janeiro (RJ)',
-      sinapiRegime: uf === 'RJ' ? 'desonerado' : 'manual',
+      sourceBase: 'SINAPI-RJ (CAIXA/IBGE) — Com Desoneração',
+      region: uf === 'RJ' || !uf ? 'Rio de Janeiro (RJ)' : `${uf} (Ref. SINAPI-RJ)`,
+      sinapiRegime: 'desonerado',
       competence: new Date().toISOString().slice(0, 7),
       referenceDate: new Date().toISOString().slice(0, 10),
-      socialChargesPercent: uf === 'RJ' ? 86.87 : null,
+      socialChargesPercent: 86.87,
       bdiPercent: 22,
       indirectCostsPercent: 5,
       discountPercent: 0,
       criteriaNotes:
-        'A criação começa do zero. Aplique a tabela SINAPI-RJ (Com/Sem Desoneração) ou informe preços locais.',
+        'Composições unitárias referenciais SINAPI-RJ aplicadas automaticamente com e sem desoneração (encargos sociais RJ). Todos os custos permanecem editáveis.',
     },
     normativeRefs: getDefaultNormativeReferences(),
     renderSettings: {
@@ -2342,5 +2339,73 @@ export function createBlankProject(params: {
       minCorridorWidthM: 1.2,
       turningCircleDiameterM: 1.5,
     },
+  };
+}
+
+/**
+ * Distribui automaticamente a tipologia selecionada (ou as tipologias do projeto)
+ * dentro da área edificável respeitando os recuos de todos os pavimentos vazios.
+ */
+export function autoDistributeUnitsAcrossFloors(
+  project: Project,
+  preferredUnitTypeId?: string,
+): Project {
+  if (project.unitTypes.length === 0 || project.floors.length === 0) return project;
+  const ut =
+    project.unitTypes.find((t) => t.id === preferredUnitTypeId) ?? project.unitTypes[0];
+
+  const front = Math.max(4, project.site.front);
+  const depth = Math.max(6, project.site.leftDepth);
+  const bx = project.site.setbacks.left;
+  const by = project.site.setbacks.front;
+  const bWidth = Math.max(0.5, front - project.site.setbacks.left - project.site.setbacks.right);
+  const bDepth = Math.max(0.5, depth - project.site.setbacks.front - project.site.setbacks.back);
+
+  const updatedFloors = project.floors.map((fl) => {
+    if (fl.units.length > 0) return fl;
+    const corridorW = Math.max(1.2, fl.corridorWidth || 1.5);
+    const twoColumnsFit = ut.width * 2 + corridorW <= bWidth + 0.05;
+    const rowsPerCol = Math.max(1, Math.floor(bDepth / ut.depth));
+    const generated: UnitInstance[] = [];
+    let seq = 1;
+
+    for (let r = 0; r < rowsPerCol; r++) {
+      const yPos = round2(by + r * ut.depth);
+      if (yPos + ut.depth > by + bDepth + 0.05) break;
+      generated.push({
+        id: nextId('inst'),
+        unitNumber: `${fl.levelIndex + 1}${String(seq++).padStart(2, '0')}`,
+        unitTypeId: ut.id,
+        floorId: fl.id,
+        x: round2(bx),
+        y: yPos,
+        rotationDeg: 0,
+        mirrored: false,
+      });
+      if (twoColumnsFit) {
+        generated.push({
+          id: nextId('inst'),
+          unitNumber: `${fl.levelIndex + 1}${String(seq++).padStart(2, '0')}`,
+          unitTypeId: ut.id,
+          floorId: fl.id,
+          x: round2(bx + ut.width + corridorW),
+          y: yPos,
+          rotationDeg: 0,
+          mirrored: true,
+        });
+      }
+    }
+
+    const nextCommon = round2(corridorW * Math.min(bDepth, rowsPerCol * ut.depth));
+    return {
+      ...fl,
+      units: generated,
+      commonAreaM2: Math.max(fl.commonAreaM2, nextCommon),
+    };
+  });
+
+  return {
+    ...project,
+    floors: updatedFloors,
   };
 }

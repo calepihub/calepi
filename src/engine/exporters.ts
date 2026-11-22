@@ -1,6 +1,19 @@
 import { jsPDF } from 'jspdf';
 import * as XLSX from 'xlsx';
-import { Document, HeadingLevel, Packer, Paragraph, TextRun } from 'docx';
+import {
+  AlignmentType,
+  BorderStyle,
+  Document,
+  HeadingLevel,
+  Packer,
+  Paragraph,
+  ShadingType,
+  Table,
+  TableCell,
+  TableRow,
+  TextRun,
+  WidthType,
+} from 'docx';
 import JSZip from 'jszip';
 import {
   analyzeSiteGeometry,
@@ -24,6 +37,8 @@ import {
   runCompatibilityAnalysis,
 } from './engineering';
 import {
+  buildConstructionSchedule,
+  calculateAnalyticalBreakdown,
   calculateBudgetSummary,
   calculateQuantities,
 } from './quantitiesAndBudget';
@@ -418,37 +433,86 @@ export function generateProjectDXF(project: Project, floorIndex = 0): string {
 }
 
 // ============================================================================
-// 3. EXCEL XLSX EXPORTER (Multi-sheet workbook with SINAPI-RJ code)
+// 3. EXCEL XLSX EXPORTER (7-sheet executive workbook with SINAPI-RJ analytical split)
 // ============================================================================
-export function generateProjectXLSXBuffer(project: Project): Uint8Array {
+function setSheetCols(ws: XLSX.WorkSheet, widths: number[]) {
+  ws['!cols'] = widths.map((wch) => ({ wch }));
+}
+
+export function generateProjectXLSXBuffer(
+  project: Project,
+  scheduleMonths = 6,
+): Uint8Array {
   const quantities = calculateQuantities(project);
   const budget = calculateBudgetSummary(project, quantities);
+  const analytical = calculateAnalyticalBreakdown(budget, project);
+  const schedule = buildConstructionSchedule(budget.grandTotalCost, scheduleMonths);
   const elec = calculateElectricalSizing(project);
+  const siteCheck = analyzeSiteGeometry(project.site);
+  const detailByCode = new Map(analytical.lineDetails.map((d) => [d.code, d]));
   const wb = XLSX.utils.book_new();
 
-  // Sheet 1: Resumo do Empreendimento
-  const siteCheck = analyzeSiteGeometry(project.site);
-  const summaryRows = [
-    ['KITNET PRO STUDIO — RESUMO TÉCNICO DO EMPREENDIMENTO'],
+  // Sheet 1: Resumo Executivo
+  const summaryRows: Array<Array<string | number>> = [
+    ['KITNET PRO STUDIO — RESUMO EXECUTIVO DE ENGENHARIA E ORÇAMENTO'],
     ['Empreendimento', project.name],
     ['Código', project.code],
-    ['Contratante', project.client],
-    ['Município / UF', `${project.municipality} / ${project.state}`],
+    ['Contratante / Proprietário', project.client],
+    ['Município / UF', `${project.municipality}${project.state ? ` / ${project.state}` : ''}`],
     ['Etapa', project.stage],
     ['Sistema Construtivo', project.constructionMethod.name],
     ['Base Orçamentária', project.budgetSettings.sourceBase],
-    ['Área do Terreno (Geometria)', `${siteCheck.calculatedArea} m²`],
+    ['Região de Referência', project.budgetSettings.region],
+    ['Encargos Sociais RJ (%)', analytical.socialChargesRatePercent],
+    ['Área do Terreno (m²)', siteCheck.calculatedArea],
     ['Pavimentos', project.floors.length],
     ['Total de Unidades', quantities.summary.totalUnits],
-    ['Área Privativa Total', `${quantities.summary.totalPrivateAreaM2} m²`],
-    ['Área Comum Total', `${quantities.summary.totalCommonAreaM2} m²`],
-    ['Área Construída Total', `${quantities.summary.totalBuiltAreaM2} m²`],
+    ['Área Privativa Total (m²)', quantities.summary.totalPrivateAreaM2],
+    ['Área Comum Total (m²)', quantities.summary.totalCommonAreaM2],
+    ['Área Construída Total (m²)', quantities.summary.totalBuiltAreaM2],
+    [],
+    ['RESUMO FINANCEIRO CONSOLIDADO (R$)'],
+    ['Material Total Estimado (R$)', analytical.totalMaterialCost],
+    ['Mão de Obra + Encargos RJ (R$)', analytical.totalLaborCost],
+    ['  └─ Parcela Implícita de Encargos Sociais (R$)', analytical.socialChargesImpliedValue],
+    ['Custo Direto Total Cotado (R$)', budget.directTotalCost],
+    [`Custos Indiretos (${project.budgetSettings.indirectCostsPercent}%)`, budget.indirectCost],
+    [`BDI Aplicado (${project.budgetSettings.bdiPercent}%)`, budget.bdiValue],
+    ['TOTAL GERAL DO EMPREENDIMENTO (R$)', budget.grandTotalCost],
+    ['Custo Médio por m² Construído (R$/m²)', budget.costPerM2 ?? 0],
+    ['Custo Médio por Unidade Habitacional (R$/un)', budget.costPerUnit ?? 0],
+    ['Itens Sem Cotação', budget.unquotedCount],
+    [],
+    ['RESUMO POR ETAPA CONSTRUTIVA (WBS)'],
+    ['Etapa', 'Itens', 'Material (R$)', 'Mão de Obra (R$)', 'Custo Direto (R$)', 'Com BDI (R$)', '% Participação'],
+    ...analytical.stageSummaries.map((st) => [
+      st.stageName,
+      st.itemsCount,
+      st.materialTotal,
+      st.laborTotal,
+      st.directTotal,
+      st.withBdiTotal,
+      st.sharePercent,
+    ]),
   ];
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryRows), 'Resumo');
+  const wsSummary = XLSX.utils.aoa_to_sheet(summaryRows);
+  setSheetCols(wsSummary, [44, 24, 18, 18, 18, 18, 16]);
+  XLSX.utils.book_append_sheet(wb, wsSummary, 'Resumo Executivo');
 
   // Sheet 2: Quantitativos
   const qtyRows = [
-    ['Código', 'Disciplina', 'Descrição', 'Unidade', 'Qtd Líquida', 'Perda (%)', 'Qtd c/ Perda', 'Critério de Medição', 'Memória de Cálculo'],
+    [
+      'Código',
+      'Disciplina',
+      'Descrição',
+      'Unidade',
+      'Qtd Líquida',
+      'Perda (%)',
+      'Qtd Bruta c/ Perda',
+      'Critério de Medição',
+      'Origem no Modelo',
+      'Memória de Cálculo',
+    ],
     ...quantities.items.map((q) => [
       q.code,
       q.discipline,
@@ -458,36 +522,113 @@ export function generateProjectXLSXBuffer(project: Project): Uint8Array {
       q.lossFactorPercent,
       q.grossQuantity,
       q.measurementCriterion,
+      q.sourceOrigin,
       q.calculationMemory,
     ]),
   ];
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(qtyRows), 'Quantitativos');
+  const wsQty = XLSX.utils.aoa_to_sheet(qtyRows);
+  setSheetCols(wsQty, [12, 16, 48, 10, 14, 12, 16, 44, 38, 48]);
+  XLSX.utils.book_append_sheet(wb, wsQty, 'Quantitativos');
 
-  // Sheet 3: Orçamento (with SINAPI-RJ code)
-  const bdgRows = [
-    ['Código', 'Código SINAPI-RJ', 'Descrição', 'Disciplina', 'Unid.', 'Qtd Efetiva', 'Preço Unit. (R$)', 'Subtotal (R$)', 'Classe ABC', 'Base / Fornecedor'],
-    ...budget.lines.map((l) => [
+  // Sheet 3: Orçamento Analítico (Material vs Mão de Obra + Encargos + SINAPI-RJ)
+  const bdgRows: Array<Array<string | number>> = [
+    [
+      'Etapa WBS',
+      'Código',
+      'SINAPI-RJ',
+      'Descrição',
+      'Unid.',
+      'Qtd Efetiva',
+      'Unit. Material (R$)',
+      'Unit. Mão de Obra (R$)',
+      'Unit. Total (R$)',
+      'Total Material (R$)',
+      'Total Mão de Obra (R$)',
+      'Subtotal Direto (R$)',
+      '% Part.',
+      'ABC',
+      'Base / Fornecedor',
+    ],
+    ...budget.lines.map((l) => {
+      const det = detailByCode.get(l.code);
+      return [
+        det?.stageName ?? '09. Serviços Complementares',
+        l.code,
+        l.sinapiCode || '—',
+        l.description,
+        l.unit,
+        l.effectiveQuantity,
+        det?.materialUnitPrice ?? 'SEM COTAÇÃO',
+        det?.laborUnitPrice ?? 'SEM COTAÇÃO',
+        l.unitPrice !== null ? l.unitPrice : 'SEM COTAÇÃO',
+        det?.materialSubtotal ?? 'SEM COTAÇÃO',
+        det?.laborSubtotal ?? 'SEM COTAÇÃO',
+        l.subtotal !== null ? l.subtotal : 'SEM COTAÇÃO',
+        det?.sharePercent ?? 0,
+        l.abcClass,
+        `${l.sourceBase}${l.supplier ? ` (${l.supplier})` : ''}`,
+      ];
+    }),
+    [],
+    ['Total Material (R$)', analytical.totalMaterialCost],
+    ['Total Mão de Obra c/ Encargos RJ (R$)', analytical.totalLaborCost],
+    ['Custo Direto Total Cotado (R$)', budget.directTotalCost],
+    [`Custos Indiretos (${project.budgetSettings.indirectCostsPercent}%)`, budget.indirectCost],
+    [`BDI (${project.budgetSettings.bdiPercent}%)`, budget.bdiValue],
+    ['TOTAL GERAL COM BDI (R$)', budget.grandTotalCost],
+    ['Itens Sem Cotação', budget.unquotedCount],
+  ];
+  const wsBudget = XLSX.utils.aoa_to_sheet(bdgRows);
+  setSheetCols(wsBudget, [34, 10, 12, 46, 8, 12, 16, 18, 16, 16, 18, 16, 10, 10, 28]);
+  XLSX.utils.book_append_sheet(wb, wsBudget, 'Orçamento Analítico');
+
+  // Sheet 4: Curva ABC
+  const abcSorted = [...budget.lines]
+    .filter((l) => l.subtotal !== null)
+    .sort((a, b) => (b.subtotal ?? 0) - (a.subtotal ?? 0));
+  const abcRows = [
+    ['Ordem', 'Código', 'SINAPI-RJ', 'Descrição', 'Unid.', 'Qtd Efetiva', 'Subtotal (R$)', '% Item', '% Acumulado', 'Classe ABC'],
+    ...abcSorted.map((l, idx) => [
+      idx + 1,
       l.code,
       l.sinapiCode || '—',
       l.description,
-      l.discipline,
       l.unit,
       l.effectiveQuantity,
-      l.unitPrice !== null ? l.unitPrice : 'SEM COTAÇÃO',
-      l.subtotal !== null ? l.subtotal : 'SEM COTAÇÃO',
+      l.subtotal ?? 0,
+      budget.directTotalCost > 0 ? round2(((l.subtotal ?? 0) / budget.directTotalCost) * 100) : 0,
+      l.cumulativePercent ?? 0,
       l.abcClass,
-      `${l.sourceBase} ${l.supplier ? `(${l.supplier})` : ''}`,
+    ]),
+  ];
+  const wsAbc = XLSX.utils.aoa_to_sheet(abcRows);
+  setSheetCols(wsAbc, [8, 10, 12, 48, 8, 14, 16, 12, 14, 12]);
+  XLSX.utils.book_append_sheet(wb, wsAbc, 'Curva ABC');
+
+  // Sheet 5: Cronograma Físico-Financeiro
+  const monthHeaders = Array.from({ length: schedule.months }, (_, i) => `Mês ${i + 1} (R$)`);
+  const schedRows: Array<Array<string | number>> = [
+    ['Código', 'Etapa da Obra', 'Peso (%)', 'Início', 'Término', 'Total Etapa (R$)', ...monthHeaders],
+    ...schedule.stages.map((st) => [
+      st.code,
+      st.name,
+      st.weightPercent,
+      `Mês ${st.startMonth}`,
+      `Mês ${st.endMonth}`,
+      st.totalValue,
+      ...st.monthlyValues,
     ]),
     [],
-    ['Custo Direto Cotado (R$)', budget.directTotalCost],
-    [`Custos Indiretos (${project.budgetSettings.indirectCostsPercent}%)`, budget.indirectCost],
-    [`BDI (${project.budgetSettings.bdiPercent}%)`, budget.bdiValue],
-    ['Total Geral Cotado (R$)', budget.grandTotalCost],
-    ['Itens Sem Cotação', budget.unquotedCount],
+    ['', 'DESEMBOLSO MENSAL (R$)', 100, '', '', budget.grandTotalCost, ...schedule.monthlyTotals],
+    ['', 'PERCENTUAL MENSAL (%)', '', '', '', 100, ...schedule.monthlyPercents],
+    ['', 'DESEMBOLSO ACUMULADO (R$)', '', '', '', budget.grandTotalCost, ...schedule.cumulativeTotals],
+    ['', 'AVANÇO FÍSICO-FINANCEIRO ACUMULADO (%)', '', '', '', '', ...schedule.cumulativePercents],
   ];
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(bdgRows), 'Orçamento');
+  const wsSched = XLSX.utils.aoa_to_sheet(schedRows);
+  setSheetCols(wsSched, [10, 44, 10, 10, 10, 18, ...Array(schedule.months).fill(14)]);
+  XLSX.utils.book_append_sheet(wb, wsSched, 'Cronograma Físico-Fin');
 
-  // Sheet 4: Quadro de Cargas Elétricas
+  // Sheet 6: Quadro de Cargas Elétricas
   const elecRows = [
     ['Tipologia', 'Circuito', 'Tensão (V)', 'Potência (VA)', 'Corrente (A)', 'Disjuntor Rec. (A)', 'Condutor (mm²)', 'Eletroduto (mm)', 'Queda Tensão (%)', 'Metodologia'],
     ...elec.byUnitType.flatMap((u) =>
@@ -505,9 +646,11 @@ export function generateProjectXLSXBuffer(project: Project): Uint8Array {
       ]),
     ),
   ];
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(elecRows), 'Quadro de Cargas');
+  const wsElec = XLSX.utils.aoa_to_sheet(elecRows);
+  setSheetCols(wsElec, [30, 14, 12, 14, 14, 16, 14, 14, 16, 36]);
+  XLSX.utils.book_append_sheet(wb, wsElec, 'Quadro de Cargas');
 
-  // Sheet 5: Pontos Elétricos, Hidráulicos e Sanitários
+  // Sheet 7: Pontos Elétricos, Hidráulicos e Sanitários
   const ptsRows = [
     ['Tipologia', 'Disciplina', 'Código', 'Descrição / Equipamento', 'X (m)', 'Y (m)', 'Altura Z (m)', 'Especificação'],
     ...project.unitTypes.flatMap((ut) => [
@@ -516,50 +659,458 @@ export function generateProjectXLSXBuffer(project: Project): Uint8Array {
       ...ut.drainagePoints.map((p) => [ut.code, 'Sanitária', p.code, p.category, p.x, p.y, 0, `Ø${p.diameterMm}mm i=${p.slopePercent}% UHC=${p.uhc}`]),
     ]),
   ];
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ptsRows), 'Pontos MEP');
+  const wsPts = XLSX.utils.aoa_to_sheet(ptsRows);
+  setSheetCols(wsPts, [12, 14, 12, 34, 10, 10, 12, 36]);
+  XLSX.utils.book_append_sheet(wb, wsPts, 'Pontos MEP');
 
   const out = XLSX.write(wb, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer;
   return new Uint8Array(out);
 }
 
 // ============================================================================
-// 4. EDITABLE DOCX MEMORIAL EXPORTER
+// 4. EDITABLE DOCX MEMORIAL EXPORTER (Structured Executive Word Report)
 // ============================================================================
+function docxCell(text: string, bold = false, shaded = false): TableCell {
+  return new TableCell({
+    shading: shaded ? { type: ShadingType.CLEAR, fill: 'EEF2F7', color: 'auto' } : undefined,
+    borders: {
+      top: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+      bottom: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+      left: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+      right: { style: BorderStyle.SINGLE, size: 4, color: 'CBD5E1' },
+    },
+    children: [
+      new Paragraph({
+        children: [new TextRun({ text, bold, size: 20 })],
+      }),
+    ],
+  });
+}
+
+function buildDocxTable(headers: string[], rows: string[][]): Table {
+  return new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    rows: [
+      new TableRow({
+        tableHeader: true,
+        children: headers.map((h) => docxCell(h, true, true)),
+      }),
+      ...rows.map(
+        (r) =>
+          new TableRow({
+            children: r.map((cell) => docxCell(cell, false, false)),
+          }),
+      ),
+    ],
+  });
+}
+
 export async function generateMemorialDOCXBlob(project: Project): Promise<Blob> {
   const sections = generateAllMemorials(project);
-  const children: Paragraph[] = [
+  const quantities = calculateQuantities(project);
+  const siteCheck = analyzeSiteGeometry(project.site);
+  const today = new Date().toLocaleDateString('pt-BR');
+
+  const idTable = buildDocxTable(
+    ['Parâmetro Técnico', 'Especificação do Empreendimento'],
+    [
+      ['Empreendimento', `${project.name} (${project.code})`],
+      ['Contratante / Proprietário', project.client || 'Não informado'],
+      ['Localização / Município / UF', `${project.address || 'Não informado'} — ${project.municipality}${project.state ? `/${project.state}` : ''}`],
+      ['Sistema Construtivo', project.constructionMethod.name],
+      ['Etapa / Revisão', `${project.stage} · ${project.revisions[project.revisions.length - 1]?.revisionCode ?? 'R00'} (${today})`],
+      ['Terreno / Pavimentos / Unidades', `${siteCheck.calculatedArea} m² · ${project.floors.length} pavimento(s) · ${quantities.summary.totalUnits} unidade(s)`],
+      ['Áreas (Privativa / Comum / Construída)', `${quantities.summary.totalPrivateAreaM2} m² / ${quantities.summary.totalCommonAreaM2} m² / ${quantities.summary.totalBuiltAreaM2} m²`],
+    ],
+  );
+
+  const finishesRows: string[][] = [];
+  for (const ut of project.unitTypes) {
+    for (const r of ut.rooms) {
+      finishesRows.push([
+        ut.code,
+        `${r.code} — ${r.name} (${getRoomArea(r)} m²)`,
+        r.finishes.floor,
+        r.finishes.wall,
+        r.finishes.ceiling,
+      ]);
+    }
+  }
+
+  const rtRows =
+    project.professionals.length > 0
+      ? project.professionals.map((p) => [
+          p.name || 'NÃO INFORMADO',
+          p.profession,
+          `${p.council} ${p.registrationNumber || 'N/I'}`,
+          p.artRrtCode || 'Pendente',
+        ])
+      : [['RT NÃO INFORMADO', 'Arquiteto / Engenheiro Responsável', 'CAU / CREA', 'Pendente']];
+
+  const children: Array<Paragraph | Table> = [
     new Paragraph({
-      text: `KITNET PRO STUDIO — MEMORIAIS DESCRITIVOS E ESPECIFICAÇÕES TÉCNICAS`,
+      text: 'MEMORIAL DESCRITIVO EXECUTIVO E ESPECIFICAÇÕES TÉCNICAS',
       heading: HeadingLevel.TITLE,
+      alignment: AlignmentType.CENTER,
     }),
     new Paragraph({
+      alignment: AlignmentType.CENTER,
       children: [
-        new TextRun({ text: `Empreendimento: ${project.name} (${project.code})`, bold: true }),
+        new TextRun({
+          text: `${project.name} · Código ${project.code} · KITNET PRO STUDIO`,
+          bold: true,
+          size: 22,
+        }),
       ],
     }),
-    new Paragraph({
-      text: `Município/UF: ${project.municipality}/${project.state} | Etapa: ${project.stage} | Data: ${new Date().toLocaleDateString('pt-BR')}`,
-    }),
+    new Paragraph({ text: '' }),
+    new Paragraph({ text: '1. IDENTIFICAÇÃO E QUADRO GERAL DE ÁREAS', heading: HeadingLevel.HEADING_1 }),
+    idTable,
     new Paragraph({ text: '' }),
   ];
+
+  if (finishesRows.length > 0) {
+    children.push(
+      new Paragraph({ text: '2. QUADRO DE ACABAMENTOS POR AMBIENTE', heading: HeadingLevel.HEADING_1 }),
+      buildDocxTable(['Tipologia', 'Ambiente', 'Piso', 'Parede', 'Teto / Forro'], finishesRows),
+      new Paragraph({ text: '' }),
+    );
+  }
 
   for (const sec of sections) {
     children.push(
       new Paragraph({
-        text: `${sec.title} (${sec.discipline})`,
+        text: `${sec.title} — ${sec.discipline}`,
         heading: HeadingLevel.HEADING_1,
       }),
     );
     for (const line of sec.content.split('\n')) {
-      children.push(new Paragraph({ text: line }));
+      const trimmed = line.trim();
+      const isHeadingLine =
+        trimmed.endsWith(':') || /^\d+\.\s/.test(trimmed) || trimmed.startsWith('===');
+      children.push(
+        new Paragraph({
+          children: [new TextRun({ text: line, bold: isHeadingLine, size: 21 })],
+        }),
+      );
     }
     children.push(new Paragraph({ text: '' }));
   }
+
+  children.push(
+    new Paragraph({ text: 'RESPONSABILIDADE TÉCNICA (CAU / CREA)', heading: HeadingLevel.HEADING_1 }),
+    buildDocxTable(['Profissional', 'Especialidade', 'Registro', 'ART / RRT'], rtRows),
+  );
 
   const doc = new Document({
     sections: [{ children }],
   });
   return Packer.toBlob(doc);
+}
+
+// ============================================================================
+// 4B. EXECUTIVE PDF EXPORTERS (Orçamento Analítico + Cronograma & Memorial)
+// ============================================================================
+const fmtBRL = (val: number | null) =>
+  val === null ? 'SEM COTAÇÃO' : val.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
+export function generateAnalyticalBudgetAndSchedulePDFBlob(
+  project: Project,
+  scheduleMonths = 6,
+): Blob {
+  const quantities = calculateQuantities(project);
+  const budget = calculateBudgetSummary(project, quantities);
+  const analytical = calculateAnalyticalBreakdown(budget, project);
+  const schedule = buildConstructionSchedule(budget.grandTotalCost, scheduleMonths);
+  const detailByCode = new Map(analytical.lineDetails.map((d) => [d.code, d]));
+
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const pageW = 210;
+  const margin = 12;
+  const contentW = pageW - margin * 2;
+  const today = new Date().toLocaleDateString('pt-BR');
+
+  const drawHeader = (subtitle: string) => {
+    doc.setFillColor(15, 23, 42);
+    doc.rect(margin, 10, contentW, 16, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(11);
+    doc.text('ORÇAMENTO ANALÍTICO SINAPI-RJ & CRONOGRAMA FÍSICO-FINANCEIRO', margin + 4, 17);
+    doc.setFontSize(7.5);
+    doc.setTextColor(203, 213, 225);
+    doc.text(`${project.name} (${project.code}) · ${subtitle} · Emissão: ${today}`, margin + 4, 23);
+  };
+
+  drawHeader(project.budgetSettings.sourceBase);
+
+  // Executive KPI Grid
+  let y = 31;
+  doc.setDrawColor(203, 213, 225);
+  doc.setFillColor(248, 250, 252);
+  doc.rect(margin, y, contentW, 24, 'FD');
+  doc.setTextColor(15, 23, 42);
+  doc.setFontSize(8);
+  doc.text(`Terreno / Área Construída: ${analyzeSiteGeometry(project.site).calculatedArea} m² / ${quantities.summary.totalBuiltAreaM2} m² (${quantities.summary.totalUnits} unid.)`, margin + 3, y + 6);
+  doc.text(`Regime / Encargos RJ: ${project.budgetSettings.sourceBase} (Encargos: ${analytical.socialChargesRatePercent}%)`, margin + 3, y + 11.5);
+  doc.text(`Material: ${fmtBRL(analytical.totalMaterialCost)}  |  Mão de Obra c/ Enc.: ${fmtBRL(analytical.totalLaborCost)}  |  Custo Direto: ${fmtBRL(budget.directTotalCost)}`, margin + 3, y + 17);
+  doc.setFontSize(8.5);
+  doc.text(`Indiretos (${project.budgetSettings.indirectCostsPercent}%): ${fmtBRL(budget.indirectCost)}  |  BDI (${project.budgetSettings.bdiPercent}%): ${fmtBRL(budget.bdiValue)}  |  TOTAL GERAL: ${fmtBRL(budget.grandTotalCost)}  (${fmtBRL(budget.costPerM2)}/m²)`, margin + 3, y + 22);
+
+  y += 29;
+  doc.setFontSize(9.5);
+  doc.setTextColor(15, 23, 42);
+  doc.text('1. RESUMO ANALÍTICO POR ETAPA CONSTRUTIVA (WBS)', margin, y);
+  y += 3;
+
+  const drawStageHeader = () => {
+    doc.setFillColor(226, 232, 240);
+    doc.rect(margin, y, contentW, 6.5, 'FD');
+    doc.setFontSize(7);
+    doc.setTextColor(15, 23, 42);
+    doc.text('ETAPA CONSTRUTIVA', margin + 2, y + 4.5);
+    doc.text('MAT. (R$)', margin + 88, y + 4.5, { align: 'right' });
+    doc.text('M.O.+ENC (R$)', margin + 118, y + 4.5, { align: 'right' });
+    doc.text('DIRETO (R$)', margin + 148, y + 4.5, { align: 'right' });
+    doc.text('C/ BDI (R$)', margin + 174, y + 4.5, { align: 'right' });
+    doc.text('%', margin + contentW - 2, y + 4.5, { align: 'right' });
+    y += 6.5;
+  };
+  drawStageHeader();
+
+  for (const st of analytical.stageSummaries) {
+    doc.setDrawColor(226, 232, 240);
+    doc.rect(margin, y, contentW, 6);
+    doc.setFontSize(7);
+    doc.setTextColor(30, 41, 59);
+    doc.text(st.stageName.slice(0, 40), margin + 2, y + 4.2);
+    doc.text(fmtBRL(st.materialTotal), margin + 88, y + 4.2, { align: 'right' });
+    doc.text(fmtBRL(st.laborTotal), margin + 118, y + 4.2, { align: 'right' });
+    doc.text(fmtBRL(st.directTotal), margin + 148, y + 4.2, { align: 'right' });
+    doc.text(fmtBRL(st.withBdiTotal), margin + 174, y + 4.2, { align: 'right' });
+    doc.text(`${st.sharePercent.toFixed(1)}%`, margin + contentW - 2, y + 4.2, { align: 'right' });
+    y += 6;
+  }
+
+  y += 7;
+  doc.setFontSize(9.5);
+  doc.setTextColor(15, 23, 42);
+  doc.text('2. PLANILHA ANALÍTICA DE COMPOSIÇÕES UNITÁRIAS (SINAPI-RJ)', margin, y);
+  y += 3;
+
+  const drawItemTableHeader = () => {
+    doc.setFillColor(226, 232, 240);
+    doc.rect(margin, y, contentW, 6.5, 'FD');
+    doc.setFontSize(6.5);
+    doc.setTextColor(15, 23, 42);
+    doc.text('CÓD / SINAPI', margin + 2, y + 4.5);
+    doc.text('DESCRIÇÃO DO SERVIÇO / INSUMO', margin + 25, y + 4.5);
+    doc.text('UN', margin + 104, y + 4.5);
+    doc.text('QTD EF.', margin + 123, y + 4.5, { align: 'right' });
+    doc.text('MAT+MO UNIT.', margin + 148, y + 4.5, { align: 'right' });
+    doc.text('SUBTOTAL (R$)', margin + 174, y + 4.5, { align: 'right' });
+    doc.text('ABC', margin + contentW - 2, y + 4.5, { align: 'right' });
+    y += 6.5;
+  };
+  drawItemTableHeader();
+
+  for (const line of budget.lines) {
+    if (y > 272) {
+      doc.addPage('a4', 'portrait');
+      drawHeader('Planilha Analítica (Continuação)');
+      y = 32;
+      drawItemTableHeader();
+    }
+    const det = detailByCode.get(line.code);
+    doc.setDrawColor(226, 232, 240);
+    doc.rect(margin, y, contentW, 6.2);
+    doc.setFontSize(6.5);
+    doc.setTextColor(15, 23, 42);
+    doc.text(`${line.code} / ${line.sinapiCode || '—'}`, margin + 2, y + 4.3);
+    doc.text(line.description.slice(0, 48), margin + 25, y + 4.3);
+    doc.text(line.unit, margin + 104, y + 4.3);
+    doc.text(String(line.effectiveQuantity), margin + 123, y + 4.3, { align: 'right' });
+    doc.text(fmtBRL(line.unitPrice), margin + 148, y + 4.3, { align: 'right' });
+    doc.text(fmtBRL(line.subtotal), margin + 174, y + 4.3, { align: 'right' });
+    doc.text(
+      line.abcClass === 'SEM_COTACAO' ? '—' : `${line.abcClass} (${det?.sharePercent ?? 0}%)`,
+      margin + contentW - 2,
+      y + 4.3,
+      { align: 'right' },
+    );
+    y += 6.2;
+  }
+
+  // Page for Curva ABC + Cronograma Físico-Financeiro
+  doc.addPage('a4', 'portrait');
+  drawHeader(`Curva ABC & Cronograma Físico-Financeiro (${schedule.months} meses)`);
+  y = 33;
+
+  doc.setFontSize(9.5);
+  doc.setTextColor(15, 23, 42);
+  doc.text('3. CRONOGRAMA FÍSICO-FINANCEIRO DE DESEMBOLSO', margin, y);
+  y += 3.5;
+
+  doc.setFillColor(226, 232, 240);
+  doc.rect(margin, y, contentW, 6.5, 'FD');
+  doc.setFontSize(7);
+  doc.text('ETAPA DA OBRA', margin + 2, y + 4.5);
+  doc.text('PERÍODO', margin + 96, y + 4.5);
+  doc.text('PESO', margin + 122, y + 4.5, { align: 'right' });
+  doc.text('DESEMBOLSO (R$)', margin + 156, y + 4.5, { align: 'right' });
+  doc.text('BARRA DE EXECUÇÃO', margin + 160, y + 4.5);
+  y += 6.5;
+
+  for (const st of schedule.stages) {
+    doc.setDrawColor(226, 232, 240);
+    doc.rect(margin, y, contentW, 7);
+    doc.setFontSize(7);
+    doc.setTextColor(30, 41, 59);
+    doc.text(`${st.code} — ${st.name.slice(0, 42)}`, margin + 2, y + 4.8);
+    doc.text(`Mês ${st.startMonth} a ${st.endMonth}`, margin + 96, y + 4.8);
+    doc.text(`${st.weightPercent.toFixed(0)}%`, margin + 122, y + 4.8, { align: 'right' });
+    doc.text(fmtBRL(st.totalValue), margin + 156, y + 4.8, { align: 'right' });
+    const barX = margin + 160;
+    const barW = contentW - 163;
+    doc.setFillColor(241, 245, 249);
+    doc.rect(barX, y + 2, barW, 3, 'F');
+    const segL = ((st.startMonth - 1) / schedule.months) * barW;
+    const segW = Math.max(2, ((st.endMonth - st.startMonth + 1) / schedule.months) * barW);
+    doc.setFillColor(37, 99, 235);
+    doc.rect(barX + segL, y + 2, segW, 3, 'F');
+    y += 7;
+  }
+
+  y += 8;
+  doc.setFontSize(9.5);
+  doc.setTextColor(15, 23, 42);
+  doc.text('4. FLUXO MENSAL DE DESEMBOLSO E AVANÇO ACUMULADO', margin, y);
+  y += 3.5;
+
+  doc.setFillColor(226, 232, 240);
+  doc.rect(margin, y, contentW, 6.5, 'FD');
+  doc.setFontSize(7);
+  doc.text('MÊS', margin + 3, y + 4.5);
+  doc.text('DESEMBOLSO MENSAL (R$)', margin + 62, y + 4.5, { align: 'right' });
+  doc.text('% MÊS', margin + 92, y + 4.5, { align: 'right' });
+  doc.text('ACUMULADO (R$)', margin + 144, y + 4.5, { align: 'right' });
+  doc.text('% ACUMULADO', margin + contentW - 3, y + 4.5, { align: 'right' });
+  y += 6.5;
+
+  for (let i = 0; i < schedule.months; i++) {
+    if (y > 272) {
+      doc.addPage('a4', 'portrait');
+      drawHeader('Fluxo Mensal (Continuação)');
+      y = 32;
+    }
+    doc.setDrawColor(226, 232, 240);
+    doc.rect(margin, y, contentW, 6);
+    doc.setFontSize(7);
+    doc.setTextColor(30, 41, 59);
+    doc.text(`Mês ${String(i + 1).padStart(2, '0')}`, margin + 3, y + 4.2);
+    doc.text(fmtBRL(schedule.monthlyTotals[i]), margin + 62, y + 4.2, { align: 'right' });
+    doc.text(`${schedule.monthlyPercents[i].toFixed(1)}%`, margin + 92, y + 4.2, { align: 'right' });
+    doc.text(fmtBRL(schedule.cumulativeTotals[i]), margin + 144, y + 4.2, { align: 'right' });
+    doc.text(`${schedule.cumulativePercents[i].toFixed(1)}%`, margin + contentW - 3, y + 4.2, { align: 'right' });
+    y += 6;
+  }
+
+  // Page numbering
+  const totalPages = doc.getNumberOfPages();
+  for (let p = 1; p <= totalPages; p++) {
+    doc.setPage(p);
+    doc.setFontSize(7);
+    doc.setTextColor(100, 116, 139);
+    doc.text(
+      `KITNET PRO STUDIO · Orçamento Analítico SINAPI-RJ · Página ${p} de ${totalPages}`,
+      pageW / 2,
+      289,
+      { align: 'center' },
+    );
+  }
+
+  return doc.output('blob');
+}
+
+export function generateMemorialPDFBlob(project: Project): Blob {
+  const sections = generateAllMemorials(project);
+  const quantities = calculateQuantities(project);
+  const siteCheck = analyzeSiteGeometry(project.site);
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const pageW = 210;
+  const margin = 14;
+  const contentW = pageW - margin * 2;
+  const today = new Date().toLocaleDateString('pt-BR');
+
+  const drawHeader = () => {
+    doc.setFillColor(15, 23, 42);
+    doc.rect(margin, 10, contentW, 15, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(10.5);
+    doc.text('MEMORIAL DESCRITIVO EXECUTIVO E ESPECIFICAÇÕES TÉCNICAS', margin + 4, 16.5);
+    doc.setFontSize(7.5);
+    doc.setTextColor(203, 213, 225);
+    doc.text(`${project.name} (${project.code}) · ${project.municipality}${project.state ? `/${project.state}` : ''} · ${today}`, margin + 4, 22);
+  };
+
+  drawHeader();
+  let y = 31;
+
+  // Identification summary box
+  doc.setDrawColor(203, 213, 225);
+  doc.setFillColor(248, 250, 252);
+  doc.rect(margin, y, contentW, 20, 'FD');
+  doc.setTextColor(15, 23, 42);
+  doc.setFontSize(8);
+  doc.text(`Contratante: ${project.client || 'Não informado'}  |  Sistema Construtivo: ${project.constructionMethod.name}`, margin + 3, y + 6);
+  doc.text(`Terreno: ${siteCheck.calculatedArea} m²  |  Pavimentos: ${project.floors.length}  |  Unidades: ${quantities.summary.totalUnits}  |  Área Construída: ${quantities.summary.totalBuiltAreaM2} m²`, margin + 3, y + 11.5);
+  const rt = project.professionals.find((p) => p.name.trim());
+  doc.text(`Responsável Técnico: ${rt ? `${rt.name} (${rt.council} ${rt.registrationNumber})` : 'RT NÃO INFORMADO'}`, margin + 3, y + 17);
+  y += 26;
+
+  for (const sec of sections) {
+    if (y > 258) {
+      doc.addPage('a4', 'portrait');
+      drawHeader();
+      y = 32;
+    }
+    doc.setFillColor(226, 232, 240);
+    doc.rect(margin, y, contentW, 7, 'F');
+    doc.setFontSize(9);
+    doc.setTextColor(15, 23, 42);
+    doc.text(`${sec.title.toUpperCase()} (${sec.discipline})`, margin + 3, y + 4.8);
+    y += 11;
+
+    doc.setFontSize(8);
+    doc.setTextColor(51, 65, 85);
+    for (const rawLine of sec.content.split('\n')) {
+      const wrapped = doc.splitTextToSize(rawLine || ' ', contentW - 4) as string[];
+      for (const wLine of wrapped) {
+        if (y > 276) {
+          doc.addPage('a4', 'portrait');
+          drawHeader();
+          y = 32;
+        }
+        doc.text(wLine, margin + 2, y);
+        y += 4.3;
+      }
+    }
+    y += 4;
+  }
+
+  const totalPages = doc.getNumberOfPages();
+  for (let p = 1; p <= totalPages; p++) {
+    doc.setPage(p);
+    doc.setFontSize(7);
+    doc.setTextColor(100, 116, 139);
+    doc.text(
+      `KITNET PRO STUDIO · Memorial Descritivo Executivo · Página ${p} de ${totalPages}`,
+      pageW / 2,
+      289,
+      { align: 'center' },
+    );
+  }
+
+  return doc.output('blob');
 }
 
 // ============================================================================
@@ -808,7 +1359,8 @@ export function generateTechnicalSheetPDFBlob(
         const rx = 20 + col * (boxW + 8);
         const ry = 36 + row * (boxH + 14);
         try {
-          doc.addImage(r.dataUrl, 'PNG', rx, ry, boxW, boxH);
+          const imgFormat = r.dataUrl.startsWith('data:image/jpeg') ? 'JPEG' : 'PNG';
+          doc.addImage(r.dataUrl, imgFormat, rx, ry, boxW, boxH);
         } catch {
           doc.rect(rx, ry, boxW, boxH);
         }
@@ -1089,6 +1641,7 @@ export async function generateCompleteProjectZIPBlob(project: Project): Promise<
   // 07 — Memorial descritivo
   const f07 = zip.folder('07 — Memorial descritivo')!;
   f07.file('Memoriais_Descritivos.docx', await generateMemorialDOCXBlob(project));
+  f07.file('Memorial_Descritivo_Executivo.pdf', generateMemorialPDFBlob(project));
   f07.file(
     'Memoriais_Texto_Completo.txt',
     memorials.map((m) => `### ${m.title}\n\n${m.content}`).join('\n\n---\n\n'),
@@ -1100,6 +1653,7 @@ export async function generateCompleteProjectZIPBlob(project: Project): Promise<
 
   // 09 — Orçamento
   const f09 = zip.folder('09 — Orçamento')!;
+  f09.file('Orcamento_Analitico_Cronograma_SINAPI_RJ.pdf', generateAnalyticalBudgetAndSchedulePDFBlob(project));
   f09.file('Orcamento_Analitico_SINAPI_RJ_Resumo.json', JSON.stringify(budget, null, 2));
 
   // 10 — Renderizações
@@ -1108,7 +1662,8 @@ export async function generateCompleteProjectZIPBlob(project: Project): Promise<
   const renders = project.capturedRenders ?? [];
   if (renders.length > 0) {
     renders.forEach((r, idx) => {
-      f10.file(`Render_${String(idx + 1).padStart(2, '0')}_${r.preset}.png`, dataUrlToBase64(r.dataUrl), {
+      const ext = r.dataUrl.startsWith('data:image/jpeg') ? 'jpg' : 'png';
+      f10.file(`Render_${String(idx + 1).padStart(2, '0')}_${r.preset}.${ext}`, dataUrlToBase64(r.dataUrl), {
         base64: true,
       });
     });

@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import * as XLSX from 'xlsx';
+import JSZip from 'jszip';
 import {
   analyzeSiteGeometry,
   buildSiteVerticesFromDimensions,
@@ -8,6 +10,7 @@ import {
   checkImplantationFeasibility,
 } from './geometry';
 import {
+  autoDistributeUnitsAcrossFloors,
   createBlankProject,
   createDefaultDemoProject,
   generateParametricUnitLayout,
@@ -22,14 +25,24 @@ import {
   runCompatibilityAnalysis,
 } from './engineering';
 import {
+  buildConstructionSchedule,
+  calculateAnalyticalBreakdown,
   calculateBudgetSummary,
   calculateQuantities,
   compareConstructionMethodsForTypology,
   syncBudgetWithQuantities,
 } from './quantitiesAndBudget';
-import { applySinapiRJToBudget } from './sinapiRJ';
+import { applySinapiRJToBudget, SINAPI_RJ_CATALOG } from './sinapiRJ';
 import { buildElevationData, buildJoinerySchedule, buildSpecialSystemsSummary } from './cadDrawings';
-import { generateProjectDXF, TECHNICAL_SHEETS } from './exporters';
+import {
+  generateAnalyticalBudgetAndSchedulePDFBlob,
+  generateCompleteProjectZIPBlob,
+  generateMemorialDOCXBlob,
+  generateMemorialPDFBlob,
+  generateProjectDXF,
+  generateProjectXLSXBuffer,
+  TECHNICAL_SHEETS,
+} from './exporters';
 import { generateAllMemorials } from './memorialGenerator';
 
 test('Geometry: Shoelace polygon area & perimeter for 12x25m site', () => {
@@ -246,3 +259,91 @@ test('Clash detection catches furniture overlap and missing power', () => {
   const clashes = runCompatibilityAnalysis(project);
   assert.ok(clashes.some((c) => c.severity === 'CRITICO' && c.disciplines.includes('Mobiliário')));
 });
+
+test('Blank project auto-prices with SINAPI-RJ after distributing units and generates analytical WBS, 7-sheet XLSX, PDFs, DOCX, and ZIP', async () => {
+  const blank = createBlankProject({
+    name: 'Residencial Zero Test',
+    client: '',
+    municipality: '',
+    state: '',
+    front: 12,
+    depth: 25,
+    floorsCount: 2,
+    methodId: 'alvenaria_convencional',
+  });
+
+  // Blank UF stays empty (never forced to RJ) while budget regime defaults to SINAPI-RJ desonerado
+  assert.equal(blank.state, '');
+  assert.equal(blank.budgetSettings.sinapiRegime, 'desonerado');
+
+  const ut = generateParametricUnitLayout({
+    code: 'TIPO-A',
+    name: 'Kitnet 20m2',
+    width: 4.0,
+    depth: 5.0,
+    ceilingHeight: 2.8,
+    bedrooms: 0,
+    hasLaundry: true,
+    hasBalcony: false,
+    hasMezzanine: false,
+    accessible: false,
+    extWallThickness: 0.15,
+    intWallThickness: 0.1,
+    constructionSystem: 'alvenaria_convencional',
+  });
+
+  const withUnits = autoDistributeUnitsAcrossFloors(
+    { ...blank, unitTypes: [ut] },
+    ut.id,
+  );
+  const placedCount = withUnits.floors.reduce((s, f) => s + f.units.length, 0);
+  assert.ok(placedCount > 0);
+
+  const qty = calculateQuantities(withUnits);
+  for (const requiredCode of ['PRE-01', 'PRE-02', 'FUN-01', 'IMP-01', 'COB-01']) {
+    assert.ok(qty.items.some((i) => i.code === requiredCode), `Missing ${requiredCode}`);
+    assert.ok(SINAPI_RJ_CATALOG[requiredCode], `Missing SINAPI_RJ_CATALOG entry for ${requiredCode}`);
+  }
+
+  const budget = calculateBudgetSummary(withUnits, qty);
+  assert.equal(budget.unquotedCount, 0);
+  assert.ok(budget.grandTotalCost > 0);
+
+  const analytical = calculateAnalyticalBreakdown(budget, withUnits);
+  assert.ok(analytical.totalMaterialCost > 0);
+  assert.ok(analytical.totalLaborCost > 0);
+  assert.ok(Math.abs(analytical.totalMaterialCost + analytical.totalLaborCost - budget.directTotalCost) < 1);
+  assert.ok(analytical.stageSummaries.length >= 4);
+
+  const schedule = buildConstructionSchedule(budget.grandTotalCost, 6);
+  assert.equal(schedule.months, 6);
+  assert.ok(Math.abs(schedule.cumulativeTotals[5] - budget.grandTotalCost) < 0.1);
+
+  const xlsxBuf = generateProjectXLSXBuffer(withUnits, 6);
+  const wb = XLSX.read(xlsxBuf, { type: 'array' });
+  assert.deepEqual(wb.SheetNames, [
+    'Resumo Executivo',
+    'Quantitativos',
+    'Orçamento Analítico',
+    'Curva ABC',
+    'Cronograma Físico-Fin',
+    'Quadro de Cargas',
+    'Pontos MEP',
+  ]);
+
+  const budgetPdf = generateAnalyticalBudgetAndSchedulePDFBlob(withUnits, 6);
+  assert.ok(budgetPdf.size > 2000);
+
+  const memorialPdf = generateMemorialPDFBlob(withUnits);
+  assert.ok(memorialPdf.size > 2000);
+
+  const memorialDocx = await generateMemorialDOCXBlob(withUnits);
+  assert.ok(memorialDocx.size > 3000);
+
+  const zipBlob = await generateCompleteProjectZIPBlob(withUnits);
+  const zip = await JSZip.loadAsync(await zipBlob.arrayBuffer());
+  const files = Object.keys(zip.files);
+  assert.ok(files.some((f) => f.includes('09 — Orçamento/Orcamento_Analitico_Cronograma_SINAPI_RJ.pdf')));
+  assert.ok(files.some((f) => f.includes('07 — Memorial descritivo/Memorial_Descritivo_Executivo.pdf')));
+});
+
