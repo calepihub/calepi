@@ -64,7 +64,8 @@ export function calculateQuantities(project: Project): QuantitiesReport {
   let totalPrivateAreaM2 = 0;
   let totalWallNetAreaM2 = 0;
   let totalExternalWallNetAreaM2 = 0;
-  let totalInternalWallNetAreaM2 = 0;
+  let totalInternalAlvenariaNetAreaM2 = 0;
+  let totalInternalDrywallNetAreaM2 = 0;
   let totalFloorAreaM2 = 0;
   let totalWetFloorAreaM2 = 0;
   let totalWetWallTileM2 = 0;
@@ -73,6 +74,9 @@ export function calculateQuantities(project: Project): QuantitiesReport {
   let totalBaseboardM = 0;
   let totalDoors = 0;
   let totalWindows = 0;
+  let totalVitros = 0;
+  let totalMezzanineAreaM2 = 0;
+  let totalMezzanineStairs = 0;
   let totalOutlets = 0;
   let totalSwitches = 0;
   let totalLuminaires = 0;
@@ -81,6 +85,19 @@ export function calculateQuantities(project: Project): QuantitiesReport {
   let totalWaterPoints = 0;
   let totalDrainagePoints = 0;
   let totalFurniture = 0;
+
+  const isWallDrywall = (w: UnitType['walls'][number], ut: UnitType): boolean => {
+    if (w.isExternal) return false;
+    const mat = (w.material || '').toLowerCase();
+    return mat.includes('drywall') || mat.includes('gesso acartonado') || ut.internalPartitionType === 'drywall';
+  };
+
+  const isOpeningVitro = (op: UnitType['openings'][number]): boolean =>
+    op.openingKind === 'vitro_basculante' ||
+    op.openingKind === 'vitro_maxim_ar' ||
+    op.openingKind === 'vitro_fixo' ||
+    op.subtype.toLowerCase().includes('vitrô') ||
+    op.subtype.toLowerCase().includes('basculante');
 
   const breakdownByUt = (fn: (ut: UnitType) => number): Record<string, number> => {
     const out: Record<string, number> = {};
@@ -96,6 +113,10 @@ export function calculateQuantities(project: Project): QuantitiesReport {
     if (count === 0) continue;
 
     totalPrivateAreaM2 += ut.width * ut.depth * count;
+    if (ut.hasMezzanine && ut.mezzanine?.enabled && ut.ceilingHeight >= 3.0) {
+      totalMezzanineAreaM2 += round2(ut.mezzanine.width * ut.mezzanine.depth) * count;
+    }
+    totalMezzanineStairs += ut.furniture.filter((f) => f.category === 'escada').length * count;
 
     // Openings map by wallId
     const openingAreaByWall = new Map<string, number>();
@@ -103,7 +124,10 @@ export function calculateQuantities(project: Project): QuantitiesReport {
       const area = op.width * op.height;
       openingAreaByWall.set(op.wallId, (openingAreaByWall.get(op.wallId) ?? 0) + area);
       if (op.type === 'porta') totalDoors += count;
-      if (op.type === 'janela') totalWindows += count;
+      if (op.type === 'janela') {
+        if (isOpeningVitro(op)) totalVitros += count;
+        else totalWindows += count;
+      }
     }
 
     for (const w of ut.walls) {
@@ -112,8 +136,13 @@ export function calculateQuantities(project: Project): QuantitiesReport {
       const opArea = openingAreaByWall.get(w.id) ?? 0;
       const net = Math.max(0, gross - opArea);
       totalWallNetAreaM2 += net * count;
-      if (w.isExternal) totalExternalWallNetAreaM2 += net * count;
-      else totalInternalWallNetAreaM2 += net * count;
+      if (w.isExternal) {
+        totalExternalWallNetAreaM2 += net * count;
+      } else if (isWallDrywall(w, ut)) {
+        totalInternalDrywallNetAreaM2 += net * count;
+      } else {
+        totalInternalAlvenariaNetAreaM2 += net * count;
+      }
     }
 
     for (const r of ut.rooms) {
@@ -183,13 +212,14 @@ export function calculateQuantities(project: Project): QuantitiesReport {
         .reduce((sum, s) => sum + 2 * (s.width + s.depth) * s.height, 0),
   );
 
-  // Masonry blocks estimate (only meaningful for masonry systems, with explicit consumption source)
+  // Masonry blocks estimate (only on masonry walls, excluding Drywall partitions)
   const isMasonry =
     project.constructionMethod.methodId === 'alvenaria_convencional' ||
     project.constructionMethod.methodId === 'alvenaria_estrutural';
+  const masonryWallNetAreaM2 = totalExternalWallNetAreaM2 + totalInternalAlvenariaNetAreaM2;
   const blocksPerM2 = 25; // 19x19cm block nominal 25 un/m2 (10% loss)
-  const blockCount = isMasonry ? Math.ceil(totalWallNetAreaM2 * blocksPerM2 * 1.1) : 0;
-  const mortarVolumeM3 = isMasonry ? round2(totalWallNetAreaM2 * 0.018 * 1.15) : 0;
+  const blockCount = isMasonry ? Math.ceil(masonryWallNetAreaM2 * blocksPerM2 * 1.1) : 0;
+  const mortarVolumeM3 = isMasonry ? round2(masonryWallNetAreaM2 * 0.018 * 1.15) : 0;
 
   // Estimated conduit and wire lengths based on unit perimeter + ceiling drops
   const avgConduitPerPoint = 4.2; // m per point (geometric average drop + horizontal run)
@@ -277,23 +307,47 @@ export function calculateQuantities(project: Project): QuantitiesReport {
         ut.walls.filter((w) => w.isExternal).reduce((s, w) => s + getWallLength(w) * w.height, 0),
       ),
     },
-    {
-      id: 'q-wall-int',
-      code: 'ARQ-02',
-      discipline: 'Arquitetura',
-      description: `Paredes Internas (e=${Math.round(project.constructionMethod.internalWallThickness * 100)}cm)`,
-      unit: 'm²',
-      netQuantity: round2(totalInternalWallNetAreaM2),
-      lossFactorPercent: 5,
-      grossQuantity: round2(totalInternalWallNetAreaM2 * 1.05),
-      measurementCriterion: 'Área líquida descontando portas internas',
-      sourceOrigin: 'Geometria direta das paredes internas',
-      calculationMemory: `Σ(L_parede_int × H − A_vãos) × N_unid = ${round2(totalInternalWallNetAreaM2)} m²`,
-      unitTypeBreakdown: breakdownByUt((ut) =>
-        ut.walls.filter((w) => !w.isExternal).reduce((s, w) => s + getWallLength(w) * w.height, 0),
-      ),
-    },
-    ...(isMasonry
+    ...(totalInternalAlvenariaNetAreaM2 > 0
+      ? [
+          {
+            id: 'q-wall-int',
+            code: 'ARQ-02',
+            discipline: 'Arquitetura' as const,
+            description: `Paredes Internas Alvenaria (e=${Math.round(project.constructionMethod.internalWallThickness * 100)}cm)`,
+            unit: 'm²',
+            netQuantity: round2(totalInternalAlvenariaNetAreaM2),
+            lossFactorPercent: 5,
+            grossQuantity: round2(totalInternalAlvenariaNetAreaM2 * 1.05),
+            measurementCriterion: 'Área líquida descontando portas internas (alvenaria)',
+            sourceOrigin: 'Geometria direta das paredes internas em alvenaria',
+            calculationMemory: `Σ(L_parede_int × H − A_vãos) × N_unid = ${round2(totalInternalAlvenariaNetAreaM2)} m²`,
+            unitTypeBreakdown: breakdownByUt((ut) =>
+              ut.walls.filter((w) => !w.isExternal && !isWallDrywall(w, ut)).reduce((s, w) => s + getWallLength(w) * w.height, 0),
+            ),
+          },
+        ]
+      : []),
+    ...(totalInternalDrywallNetAreaM2 > 0
+      ? [
+          {
+            id: 'q-wall-int-dry',
+            code: 'ARQ-03',
+            discipline: 'Arquitetura' as const,
+            description: 'Divisórias Internas Drywall Gesso Acartonado ST/RU (9,5cm) + Lã Mineral',
+            unit: 'm²',
+            netQuantity: round2(totalInternalDrywallNetAreaM2),
+            lossFactorPercent: 5,
+            grossQuantity: round2(totalInternalDrywallNetAreaM2 * 1.05),
+            measurementCriterion: 'Área líquida de chapas e montantes descontando portas internas',
+            sourceOrigin: 'Geometria direta das paredes internas configuradas em Drywall',
+            calculationMemory: `Σ(L_drywall × H − A_vãos) × N_unid = ${round2(totalInternalDrywallNetAreaM2)} m²`,
+            unitTypeBreakdown: breakdownByUt((ut) =>
+              ut.walls.filter((w) => !w.isExternal && isWallDrywall(w, ut)).reduce((s, w) => s + getWallLength(w) * w.height, 0),
+            ),
+          },
+        ]
+      : []),
+    ...(isMasonry && masonryWallNetAreaM2 > 0
       ? [
           {
             id: 'q-blocks',
@@ -301,12 +355,12 @@ export function calculateQuantities(project: Project): QuantitiesReport {
             discipline: 'Arquitetura' as const,
             description: `Blocos/Tijolos (${project.constructionMethod.masonryBlockType ?? '19x19cm'})`,
             unit: 'un',
-            netQuantity: Math.ceil(totalWallNetAreaM2 * blocksPerM2),
+            netQuantity: Math.ceil(masonryWallNetAreaM2 * blocksPerM2),
             lossFactorPercent: 10,
             grossQuantity: blockCount,
-            measurementCriterion: `Consumo nominal ${blocksPerM2} un/m² (bloco 19x19cm c/ junta 1cm) + 10% quebra`,
-            sourceOrigin: 'Área líquida de alvenaria × coeficiente nominal de bloco 19x19cm',
-            calculationMemory: `${round2(totalWallNetAreaM2)} m² × ${blocksPerM2} un/m² × 1,10 = ${blockCount} un`,
+            measurementCriterion: `Consumo nominal ${blocksPerM2} un/m² (somente paredes em alvenaria) + 10% quebra`,
+            sourceOrigin: 'Área líquida de alvenaria (exclui Drywall) × coeficiente nominal',
+            calculationMemory: `${round2(masonryWallNetAreaM2)} m² × ${blocksPerM2} un/m² × 1,10 = ${blockCount} un`,
             unitTypeBreakdown: {},
           },
           {
@@ -315,12 +369,12 @@ export function calculateQuantities(project: Project): QuantitiesReport {
             discipline: 'Arquitetura' as const,
             description: 'Argamassa de assentamento',
             unit: 'm³',
-            netQuantity: round2(totalWallNetAreaM2 * 0.018),
+            netQuantity: round2(masonryWallNetAreaM2 * 0.018),
             lossFactorPercent: 15,
             grossQuantity: mortarVolumeM3,
             measurementCriterion: 'Consumo estimado 0,018 m³/m² (junta 1,0–1,5cm) + 15% perda',
-            sourceOrigin: 'Área líquida de alvenaria',
-            calculationMemory: `${round2(totalWallNetAreaM2)} m² × 0,018 m³/m² × 1,15 = ${mortarVolumeM3} m³`,
+            sourceOrigin: 'Área líquida de alvenaria (exclui Drywall)',
+            calculationMemory: `${round2(masonryWallNetAreaM2)} m² × 0,018 m³/m² × 1,15 = ${mortarVolumeM3} m³`,
             unitTypeBreakdown: {},
           },
         ]
@@ -431,7 +485,7 @@ export function calculateQuantities(project: Project): QuantitiesReport {
       id: 'q-doors',
       code: 'ESQ-01',
       discipline: 'Arquitetura',
-      description: 'Portas Completas (Folha, Batente e Ferragens)',
+      description: 'Portas Completas (Entrada 0,80m, Quarto 0,70m, Banheiro 0,60m)',
       unit: 'un',
       netQuantity: totalDoors,
       lossFactorPercent: 0,
@@ -441,20 +495,86 @@ export function calculateQuantities(project: Project): QuantitiesReport {
       calculationMemory: `Contagem direta × N_unid = ${totalDoors} un`,
       unitTypeBreakdown: breakdownByUt((ut) => ut.openings.filter((o) => o.type === 'porta').length),
     },
-    {
-      id: 'q-windows',
-      code: 'ESQ-02',
-      discipline: 'Arquitetura',
-      description: 'Janelas e Esquadrias Externas',
-      unit: 'un',
-      netQuantity: totalWindows,
-      lossFactorPercent: 0,
-      grossQuantity: totalWindows,
-      measurementCriterion: 'Contagem unitária de janelas cadastradas',
-      sourceOrigin: 'Aberturas tipo "janela" nas paredes',
-      calculationMemory: `Contagem direta × N_unid = ${totalWindows} un`,
-      unitTypeBreakdown: breakdownByUt((ut) => ut.openings.filter((o) => o.type === 'janela').length),
-    },
+    ...(totalWindows > 0
+      ? [
+          {
+            id: 'q-windows',
+            code: 'ESQ-02',
+            discipline: 'Arquitetura' as const,
+            description: 'Janelas de Correr / Esquadrias Externas',
+            unit: 'un',
+            netQuantity: totalWindows,
+            lossFactorPercent: 0,
+            grossQuantity: totalWindows,
+            measurementCriterion: 'Contagem unitária de janelas cadastradas (exceto vitrôs)',
+            sourceOrigin: 'Aberturas tipo "janela" padrão nas paredes',
+            calculationMemory: `Contagem direta × N_unid = ${totalWindows} un`,
+            unitTypeBreakdown: breakdownByUt((ut) =>
+              ut.openings.filter((o) => o.type === 'janela' && !isOpeningVitro(o)).length,
+            ),
+          },
+        ]
+      : []),
+    ...(totalVitros > 0
+      ? [
+          {
+            id: 'q-vitros',
+            code: 'ESQ-03',
+            discipline: 'Arquitetura' as const,
+            description: 'Vitrôs Basculantes / Maxim-Ar (Banheiro e Áreas Técnicas)',
+            unit: 'un',
+            netQuantity: totalVitros,
+            lossFactorPercent: 0,
+            grossQuantity: totalVitros,
+            measurementCriterion: 'Contagem unitária de vitrôs basculantes/maxim-ar',
+            sourceOrigin: 'Aberturas classificadas como vitrô nas paredes',
+            calculationMemory: `Contagem direta × N_unid = ${totalVitros} un`,
+            unitTypeBreakdown: breakdownByUt((ut) =>
+              ut.openings.filter((o) => o.type === 'janela' && isOpeningVitro(o)).length,
+            ),
+          },
+        ]
+      : []),
+    ...(totalMezzanineAreaM2 > 0
+      ? [
+          {
+            id: 'q-mezzanine',
+            code: 'MEZ-01',
+            discipline: 'Estrutura' as const,
+            description: 'Plataforma de Mezanino (Estrutura + Deck + Guarda-Corpo h=1,05m)',
+            unit: 'm²',
+            netQuantity: round2(totalMezzanineAreaM2),
+            lossFactorPercent: 5,
+            grossQuantity: round2(totalMezzanineAreaM2 * 1.05),
+            measurementCriterion: 'Área da plataforma do mezanino (não computado como pavimento)',
+            sourceOrigin: 'Mezaninos habilitados em tipologias com pé-direito >= 3,00m',
+            calculationMemory: `Σ(A_mezanino × N_unid) = ${round2(totalMezzanineAreaM2)} m² (+5% = ${round2(totalMezzanineAreaM2 * 1.05)} m²)`,
+            unitTypeBreakdown: breakdownByUt((ut) =>
+              ut.hasMezzanine && ut.mezzanine?.enabled ? round2(ut.mezzanine.width * ut.mezzanine.depth) : 0,
+            ),
+          },
+        ]
+      : []),
+    ...(totalMezzanineStairs > 0
+      ? [
+          {
+            id: 'q-stairs',
+            code: 'ESC-01',
+            discipline: 'Estrutura' as const,
+            description: 'Escada Interna Planejada p/ Mezanino c/ Corrimão (Blondel)',
+            unit: 'un',
+            netQuantity: totalMezzanineStairs,
+            lossFactorPercent: 0,
+            grossQuantity: totalMezzanineStairs,
+            measurementCriterion: 'Contagem unitária de escadas planejadas de acesso ao mezanino',
+            sourceOrigin: 'Mobiliário/circulação categoria escada nas tipologias',
+            calculationMemory: `Contagem direta × N_unid = ${totalMezzanineStairs} un`,
+            unitTypeBreakdown: breakdownByUt((ut) =>
+              ut.furniture.filter((f) => f.category === 'escada').length,
+            ),
+          },
+        ]
+      : []),
     {
       id: 'q-conc',
       code: 'EST-01',

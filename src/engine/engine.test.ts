@@ -347,3 +347,180 @@ test('Blank project auto-prices with SINAPI-RJ after distributing units and gene
   assert.ok(files.some((f) => f.includes('07 — Memorial descritivo/Memorial_Descritivo_Executivo.pdf')));
 });
 
+test('Fixed door widths (80/60/70cm), all 3 entrySide orientations, Drywall SINAPI-RJ, and conditional Mezzanine >= 3.0m', () => {
+  const entries: Array<'frente' | 'lateral_direita' | 'lateral_esquerda'> = [
+    'frente',
+    'lateral_direita',
+    'lateral_esquerda',
+  ];
+
+  // 1. Fixed widths & 0 clashes across all 3 entrySide orientations for studio (0) and 1-bedroom (1)
+  for (const bedrooms of [0, 1]) {
+    for (const entrySide of entries) {
+      const ut = generateParametricUnitLayout({
+        code: `UT-${bedrooms}-${entrySide}`,
+        name: `Unidade ${bedrooms}Q ${entrySide}`,
+        width: 4.5,
+        depth: 6.2,
+        ceilingHeight: 2.8,
+        bedrooms,
+        hasLaundry: true,
+        hasBalcony: false,
+        hasMezzanine: true, // MUST be forced false because ceilingHeight < 3.0m
+        accessible: false,
+        extWallThickness: 0.15,
+        intWallThickness: 0.1,
+        constructionSystem: 'alvenaria_convencional',
+        entrySide,
+        internalPartitionType: 'alvenaria',
+      });
+
+      assert.equal(ut.hasMezzanine, false, 'Mezzanine must be blocked when ceilingHeight < 3.0m');
+      assert.equal(ut.mezzanine, undefined);
+
+      const p1 = ut.openings.find((o) => o.code === 'P1');
+      const p2 = ut.openings.find((o) => o.code === 'P2');
+      assert.ok(p1 && p2);
+      assert.equal(p1.width, 0.8);
+      assert.equal(p2.width, 0.6);
+
+      if (bedrooms === 1) {
+        const p3 = ut.openings.find((o) => o.code === 'P3');
+        assert.ok(p3);
+        assert.equal(p3.width, 0.7);
+      }
+
+      const blank = createBlankProject({
+        name: 'Teste Orientação',
+        client: '',
+        municipality: 'Rio de Janeiro',
+        state: 'RJ',
+        front: 12,
+        depth: 25,
+        floorsCount: 1,
+        methodId: 'alvenaria_convencional',
+      });
+      const withUnit = autoDistributeUnitsAcrossFloors({ ...blank, unitTypes: [ut] }, ut.id);
+      const clashes = runCompatibilityAnalysis(withUnit);
+      assert.equal(
+        clashes.filter((c) => c.severity === 'CRITICO').length,
+        0,
+        `Unexpected CRITICO clash for bedrooms=${bedrooms}, entrySide=${entrySide}: ${JSON.stringify(clashes)}`,
+      );
+      assert.equal(
+        clashes.filter((c) => c.severity === 'ATENCAO').length,
+        0,
+        `Unexpected ATENCAO clash for bedrooms=${bedrooms}, entrySide=${entrySide}: ${JSON.stringify(clashes)}`,
+      );
+    }
+  }
+
+  // 2. Drywall partition emits ARQ-03 (96359) and reduces ALV-01 masonry blocks vs Alvenaria
+  const makeForPartition = (internalPartitionType: 'alvenaria' | 'drywall') => {
+    const ut = generateParametricUnitLayout({
+      code: 'PART-1',
+      name: `Kit ${internalPartitionType}`,
+      width: 4.0,
+      depth: 5.5,
+      ceilingHeight: 2.8,
+      bedrooms: 1,
+      hasLaundry: false,
+      hasBalcony: false,
+      hasMezzanine: false,
+      accessible: false,
+      extWallThickness: 0.15,
+      intWallThickness: internalPartitionType === 'drywall' ? 0.095 : 0.1,
+      constructionSystem: 'alvenaria_convencional',
+      entrySide: 'lateral_direita',
+      internalPartitionType,
+    });
+    const p = createBlankProject({
+      name: 'Teste Drywall',
+      client: '',
+      municipality: 'Rio de Janeiro',
+      state: 'RJ',
+      front: 12,
+      depth: 25,
+      floorsCount: 1,
+      methodId: 'alvenaria_convencional',
+    });
+    return autoDistributeUnitsAcrossFloors({ ...p, unitTypes: [ut] }, ut.id);
+  };
+
+  const projAlv = makeForPartition('alvenaria');
+  const projDry = makeForPartition('drywall');
+  const qtyAlv = calculateQuantities(projAlv);
+  const qtyDry = calculateQuantities(projDry);
+
+  assert.ok(qtyDry.items.some((i) => i.code === 'ARQ-03'));
+  assert.ok(!qtyAlv.items.some((i) => i.code === 'ARQ-03'));
+  const blocksAlv = qtyAlv.items.find((i) => i.code === 'ALV-01')?.netQuantity ?? 0;
+  const blocksDry = qtyDry.items.find((i) => i.code === 'ALV-01')?.netQuantity ?? 0;
+  assert.ok(blocksDry < blocksAlv, 'Drywall internal partitions must reduce ALV-01 masonry block count');
+
+  // 3. Conditional Mezzanine when ceilingHeight >= 3.0m with Blondel staircase & 0 floors added
+  const utMez = generateParametricUnitLayout({
+    code: 'MEZ-1',
+    name: 'Kit Pé-Direito Alto + Mezanino',
+    width: 4.2,
+    depth: 6.2,
+    ceilingHeight: 3.6,
+    bedrooms: 0,
+    hasLaundry: false,
+    hasBalcony: false,
+    hasMezzanine: true,
+    accessible: false,
+    extWallThickness: 0.15,
+    intWallThickness: 0.095,
+    constructionSystem: 'alvenaria_convencional',
+    entrySide: 'frente',
+    internalPartitionType: 'drywall',
+    mezzanineZone: 'sobre_banho_cozinha',
+    mezzanineElevationM: 2.2,
+    mezzanineCoverageRatio: 0.42,
+    mezzanineUsage: 'dormitorio',
+    mezzanineStructureType: 'metalica_madeira',
+    mezzanineStairLayout: 'reta',
+    mezzanineStairSide: 'esquerda',
+  });
+
+  assert.equal(utMez.hasMezzanine, true);
+  assert.ok(utMez.mezzanine?.enabled);
+  const stair = utMez.furniture.find((f) => f.category === 'escada');
+  assert.ok(stair && stair.stairSpec);
+  assert.ok(stair.stairSpec.blondelSumM >= 0.6 && stair.stairSpec.blondelSumM <= 0.66);
+
+  const blankMez = createBlankProject({
+    name: 'Residencial Mezanino',
+    client: '',
+    municipality: 'Rio de Janeiro',
+    state: 'RJ',
+    front: 12,
+    depth: 25,
+    floorsCount: 1,
+    methodId: 'alvenaria_convencional',
+  });
+  const projMez = autoDistributeUnitsAcrossFloors({ ...blankMez, unitTypes: [utMez] }, utMez.id);
+  // Mezzanine NEVER counts as an additional floor
+  assert.equal(projMez.floors.length, 1);
+
+  const mezClashes = runCompatibilityAnalysis(projMez);
+  assert.equal(
+    mezClashes.filter((c) => c.severity === 'CRITICO').length,
+    0,
+    `Unexpected CRITICO clash in mezzanine layout: ${JSON.stringify(mezClashes)}`,
+  );
+
+  const qtyMez = calculateQuantities(projMez);
+  assert.ok(qtyMez.items.some((i) => i.code === 'MEZ-01'));
+  assert.ok(qtyMez.items.some((i) => i.code === 'ESC-01'));
+  const bdgMez = calculateBudgetSummary(projMez, qtyMez);
+  assert.equal(bdgMez.unquotedCount, 0);
+
+  const dxfMez = generateProjectDXF(projMez, 0);
+  assert.ok(dxfMez.includes('PAREDES_INT_DRYWALL'));
+  assert.ok(dxfMez.includes('MEZANINO'));
+  assert.ok(dxfMez.includes('ESCADA'));
+});
+
+

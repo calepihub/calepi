@@ -3,10 +3,22 @@ import { Copy, FlipHorizontal2, LayoutGrid, Plus, Trash2, Wand2 } from 'lucide-r
 import { getRoomArea, getRoomPerimeter, getUnitUsefulArea, round2 } from '../engine/geometry';
 import {
   autoDistributeUnitsAcrossFloors,
+  computeBlondelStairSpec,
   generateParametricUnitLayout,
   nextId,
 } from '../engine/parametricGenerator';
-import type { Project, Room, RoomCategory, UnitType } from '../types/project';
+import type {
+  EntrySide,
+  InternalPartitionType,
+  MezzanineStairLayout,
+  MezzanineStructureType,
+  MezzanineUsage,
+  MezzanineZone,
+  Project,
+  Room,
+  RoomCategory,
+  UnitType,
+} from '../types/project';
 
 interface TypologiesModuleProps {
   project: Project;
@@ -39,11 +51,32 @@ export const TypologiesModule: React.FC<TypologiesModuleProps> = ({
   const [newName, setNewName] = useState('Nova Kitnet Paramétrica');
   const [newWidth, setNewWidth] = useState(4.2);
   const [newDepth, setNewDepth] = useState(6.0);
+  const [newCeilingHeight, setNewCeilingHeight] = useState(2.8);
   const [newBedrooms, setNewBedrooms] = useState(0);
+  const [newEntrySide, setNewEntrySide] = useState<EntrySide>('frente');
+  const [newPartitionType, setNewPartitionType] = useState<InternalPartitionType>(
+    project.constructionMethod.internalPartitionType ?? 'alvenaria',
+  );
   const [newLaundry, setNewLaundry] = useState(true);
   const [newBalcony, setNewBalcony] = useState(false);
   const [newAcc, setNewAcc] = useState(false);
+
+  // Perguntas de mezanino (somente visíveis e aplicáveis se pé-direito >= 3,00m)
+  const [newMezzEnabled, setNewMezzEnabled] = useState(false);
+  const [newMezzZone, setNewMezzZone] = useState<MezzanineZone>('sobre_banho_cozinha');
+  const [newMezzElev, setNewMezzElev] = useState(2.15);
+  const [newMezzCoverage, setNewMezzCoverage] = useState(0.42);
+  const [newMezzUsage, setNewMezzUsage] = useState<MezzanineUsage>('dormitorio');
+  const [newMezzStructure, setNewMezzStructure] = useState<MezzanineStructureType>('metalica_madeira');
+  const [newMezzStairLayout, setNewMezzStairLayout] = useState<MezzanineStairLayout>('reta');
+  const [newMezzStairSide, setNewMezzStairSide] = useState<'esquerda' | 'direita'>('direita');
+
   const [distNotice, setDistNotice] = useState<string | null>(null);
+
+  const canNewMezzanine = newCeilingHeight >= 3.0;
+  const previewNewStair = canNewMezzanine && newMezzEnabled
+    ? computeBlondelStairSpec(newMezzElev, newMezzStairLayout)
+    : null;
 
   const handleAutoDistribute = () => {
     if (!activeUt) return;
@@ -63,20 +96,33 @@ export const TypologiesModule: React.FC<TypologiesModuleProps> = ({
 
   const handleCreateTypology = (e: React.FormEvent) => {
     e.preventDefault();
+    const allowMezz = newCeilingHeight >= 3.0 && newMezzEnabled;
     const created = generateParametricUnitLayout({
       code: newCode.trim() || `TIPO-${project.unitTypes.length + 1}`,
       name: newName.trim() || 'Tipologia Personalizada',
       width: newWidth,
       depth: newDepth,
-      ceilingHeight: 2.8,
+      ceilingHeight: newCeilingHeight,
       bedrooms: newBedrooms,
       hasLaundry: newLaundry,
       hasBalcony: newBalcony,
-      hasMezzanine: false,
+      hasMezzanine: allowMezz,
       accessible: newAcc,
       extWallThickness: project.constructionMethod.externalWallThickness,
-      intWallThickness: project.constructionMethod.internalWallThickness,
+      intWallThickness:
+        newPartitionType === 'drywall'
+          ? 0.095
+          : project.constructionMethod.internalWallThickness,
       constructionSystem: project.constructionMethod.methodId,
+      entrySide: newEntrySide,
+      internalPartitionType: newPartitionType,
+      mezzanineZone: allowMezz ? newMezzZone : undefined,
+      mezzanineElevationM: allowMezz ? newMezzElev : undefined,
+      mezzanineCoverageRatio: allowMezz ? newMezzCoverage : undefined,
+      mezzanineUsage: allowMezz ? newMezzUsage : undefined,
+      mezzanineStructureType: allowMezz ? newMezzStructure : undefined,
+      mezzanineStairLayout: allowMezz ? newMezzStairLayout : undefined,
+      mezzanineStairSide: allowMezz ? newMezzStairSide : undefined,
     });
     onUpdateProject(
       (prev) => ({ ...prev, unitTypes: [...prev.unitTypes, created] }),
@@ -87,6 +133,8 @@ export const TypologiesModule: React.FC<TypologiesModuleProps> = ({
   };
 
   const handleRegenerateCurrent = (ut: UnitType) => {
+    const allowMezz = ut.ceilingHeight >= 3.0 && ut.hasMezzanine;
+    const partType = ut.internalPartitionType ?? project.constructionMethod.internalPartitionType ?? 'alvenaria';
     const regenerated = generateParametricUnitLayout({
       id: ut.id,
       code: ut.code,
@@ -98,12 +146,22 @@ export const TypologiesModule: React.FC<TypologiesModuleProps> = ({
       bedrooms: ut.bedrooms,
       hasLaundry: ut.hasLaundry,
       hasBalcony: ut.hasBalcony,
-      hasMezzanine: ut.hasMezzanine,
+      hasMezzanine: allowMezz,
       accessible: ut.accessible,
       extWallThickness: project.constructionMethod.externalWallThickness,
-      intWallThickness: project.constructionMethod.internalWallThickness,
+      intWallThickness:
+        partType === 'drywall' ? 0.095 : project.constructionMethod.internalWallThickness,
       constructionSystem: project.constructionMethod.methodId,
       finishStandard: ut.finishStandard,
+      entrySide: ut.entrySide ?? 'lateral_direita',
+      internalPartitionType: partType,
+      mezzanineZone: ut.mezzanine?.zone,
+      mezzanineElevationM: ut.mezzanine?.elevationM,
+      mezzanineCoverageRatio: ut.mezzanine?.coverageRatio,
+      mezzanineUsage: ut.mezzanine?.usage,
+      mezzanineStructureType: ut.mezzanine?.structureType,
+      mezzanineStairLayout: ut.mezzanine?.stairLayout,
+      mezzanineStairSide: ut.mezzanine?.stairSide,
     });
     onUpdateProject(
       (prev) => ({
@@ -125,8 +183,22 @@ export const TypologiesModule: React.FC<TypologiesModuleProps> = ({
 
   const handleMirrorTypology = (ut: UnitType) => {
     const W = ut.width;
+    const mirroredEntrySide: EntrySide | undefined =
+      ut.entrySide === 'lateral_direita'
+        ? 'lateral_esquerda'
+        : ut.entrySide === 'lateral_esquerda'
+          ? 'lateral_direita'
+          : ut.entrySide;
     const mirrored: UnitType = {
       ...ut,
+      entrySide: mirroredEntrySide,
+      mezzanine: ut.mezzanine
+        ? {
+            ...ut.mezzanine,
+            x: round2(W - ut.mezzanine.x - ut.mezzanine.width),
+            stairSide: ut.mezzanine.stairSide === 'esquerda' ? 'direita' : 'esquerda',
+          }
+        : undefined,
       walls: ut.walls.map((w) => ({
         ...w,
         start: { x: round2(W - w.start.x), y: w.start.y },
@@ -301,7 +373,7 @@ export const TypologiesModule: React.FC<TypologiesModuleProps> = ({
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               <div>
                 <label className="block text-[11px] text-[#949BA8] mb-1">Largura (m)</label>
                 <input
@@ -325,6 +397,24 @@ export const TypologiesModule: React.FC<TypologiesModuleProps> = ({
                 />
               </div>
               <div>
+                <label className="block text-[11px] text-[#949BA8] mb-1">Pé-direito (m)</label>
+                <input
+                  type="number"
+                  step="0.05"
+                  min={2.4}
+                  max={6.0}
+                  value={newCeilingHeight}
+                  onChange={(e) => {
+                    const val = Number(e.target.value);
+                    setNewCeilingHeight(val);
+                    if (val < 3.0) {
+                      setNewMezzEnabled(false);
+                    }
+                  }}
+                  className="w-full px-2 py-1.5 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                />
+              </div>
+              <div>
                 <label className="block text-[11px] text-[#949BA8] mb-1">Quartos</label>
                 <input
                   type="number"
@@ -334,6 +424,66 @@ export const TypologiesModule: React.FC<TypologiesModuleProps> = ({
                   onChange={(e) => setNewBedrooms(Number(e.target.value))}
                   className="w-full px-2 py-1.5 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
                 />
+              </div>
+            </div>
+
+            <div className="space-y-2 rounded border border-[#2A2F38] bg-[#14161A] p-2.5">
+              <div>
+                <label className="block text-[11px] font-medium text-[#C4C9D4] mb-1">
+                  Entrada Principal da Kitnet (Porta P1 — 0,80m fixo)
+                </label>
+                <div className="grid grid-cols-3 gap-1">
+                  {(
+                    [
+                      ['frente', 'Frente'],
+                      ['lateral_direita', 'Lat. Direita'],
+                      ['lateral_esquerda', 'Lat. Esquerda'],
+                    ] as const
+                  ).map(([val, label]) => (
+                    <button
+                      key={val}
+                      type="button"
+                      onClick={() => setNewEntrySide(val)}
+                      className={`px-2 py-1 text-[11px] rounded border transition-colors ${
+                        newEntrySide === val
+                          ? 'border-[#2F7CF6] bg-[#2F7CF6]/20 text-white font-semibold'
+                          : 'border-[#2A2F38] bg-[#1B1E24] text-[#949BA8] hover:text-white'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-medium text-[#C4C9D4] mb-1">
+                  Divisórias Internas
+                </label>
+                <div className="grid grid-cols-2 gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setNewPartitionType('alvenaria')}
+                    className={`px-2 py-1 text-[11px] rounded border transition-colors ${
+                      newPartitionType === 'alvenaria'
+                        ? 'border-[#2F7CF6] bg-[#2F7CF6]/20 text-white font-semibold'
+                        : 'border-[#2A2F38] bg-[#1B1E24] text-[#949BA8] hover:text-white'
+                    }`}
+                  >
+                    Alvenaria (10 cm)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewPartitionType('drywall')}
+                    className={`px-2 py-1 text-[11px] rounded border transition-colors ${
+                      newPartitionType === 'drywall'
+                        ? 'border-[#2F7CF6] bg-[#2F7CF6]/20 text-white font-semibold'
+                        : 'border-[#2A2F38] bg-[#1B1E24] text-[#949BA8] hover:text-white'
+                    }`}
+                  >
+                    Drywall (9,5 cm)
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -363,6 +513,158 @@ export const TypologiesModule: React.FC<TypologiesModuleProps> = ({
                 Acessível NBR 9050
               </label>
             </div>
+
+            {canNewMezzanine ? (
+              <div className="rounded border border-[#2F7CF6]/40 bg-[#14161A] p-3 space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <label className="inline-flex items-center gap-2 text-xs font-semibold text-white">
+                    <input
+                      type="checkbox"
+                      checked={newMezzEnabled}
+                      onChange={(e) => setNewMezzEnabled(e.target.checked)}
+                    />
+                    Incluir Mezanino (Pé-direito &ge; 3,00 m)
+                  </label>
+                  <span className="text-[10px] text-[#949BA8]">Não conta como andar</span>
+                </div>
+
+                {newMezzEnabled && (
+                  <div className="space-y-2 pt-1 border-t border-[#2A2F38]">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[10px] text-[#949BA8] mb-0.5">
+                          Posição do Mezanino
+                        </label>
+                        <select
+                          value={newMezzZone}
+                          onChange={(e) => setNewMezzZone(e.target.value as MezzanineZone)}
+                          className="w-full px-2 py-1 text-[11px] rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                        >
+                          <option value="sobre_banho_cozinha">Sobre BWC e Cozinha</option>
+                          <option value="fundos">Fundos da Unidade</option>
+                          <option value="lateral_esquerda">Lateral Esquerda</option>
+                          <option value="lateral_direita">Lateral Direita</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] text-[#949BA8] mb-0.5">
+                          Uso do Mezanino
+                        </label>
+                        <select
+                          value={newMezzUsage}
+                          onChange={(e) => setNewMezzUsage(e.target.value as MezzanineUsage)}
+                          className="w-full px-2 py-1 text-[11px] rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                        >
+                          <option value="dormitorio">Dormitório</option>
+                          <option value="home_office">Home Office</option>
+                          <option value="dormitorio_home_office">Dormitório + Office</option>
+                          <option value="deposito_estar">Depósito / Estar</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-2">
+                      <div>
+                        <label className="block text-[10px] text-[#949BA8] mb-0.5">
+                          Cota Piso (m)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.05"
+                          min={2.0}
+                          max={round2(Math.max(2.05, newCeilingHeight - 1.15))}
+                          value={newMezzElev}
+                          onChange={(e) => setNewMezzElev(Number(e.target.value))}
+                          className="w-full px-2 py-1 text-[11px] font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] text-[#949BA8] mb-0.5">
+                          Ocupação (%)
+                        </label>
+                        <input
+                          type="number"
+                          min={28}
+                          max={60}
+                          value={Math.round(newMezzCoverage * 100)}
+                          onChange={(e) =>
+                            setNewMezzCoverage(
+                              Math.min(0.6, Math.max(0.28, Number(e.target.value) / 100)),
+                            )
+                          }
+                          className="w-full px-2 py-1 text-[11px] font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] text-[#949BA8] mb-0.5">
+                          Estrutura
+                        </label>
+                        <select
+                          value={newMezzStructure}
+                          onChange={(e) =>
+                            setNewMezzStructure(e.target.value as MezzanineStructureType)
+                          }
+                          className="w-full px-1.5 py-1 text-[11px] rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                        >
+                          <option value="metalica_madeira">Metálica + Madeira</option>
+                          <option value="steel_deck">Steel Deck</option>
+                          <option value="madeira_estrutural">Madeira Estrutural</option>
+                          <option value="concreto_armado">Concreto Armado</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[10px] text-[#949BA8] mb-0.5">
+                          Formato da Escada
+                        </label>
+                        <select
+                          value={newMezzStairLayout}
+                          onChange={(e) =>
+                            setNewMezzStairLayout(e.target.value as MezzanineStairLayout)
+                          }
+                          className="w-full px-2 py-1 text-[11px] rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                        >
+                          <option value="reta">Lance Reto</option>
+                          <option value="em_l">Em L (Patamar)</option>
+                          <option value="caracol_compacta">Helicoidal Compacta</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] text-[#949BA8] mb-0.5">
+                          Lado da Escada
+                        </label>
+                        <select
+                          value={newMezzStairSide}
+                          onChange={(e) =>
+                            setNewMezzStairSide(e.target.value as 'esquerda' | 'direita')
+                          }
+                          className="w-full px-2 py-1 text-[11px] rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                        >
+                          <option value="direita">Parede Direita</option>
+                          <option value="esquerda">Parede Esquerda</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {previewNewStair && (
+                      <div className="rounded bg-[#1B1E24] px-2.5 py-1.5 text-[10px] font-mono text-[#949BA8]">
+                        Escada Blondel: {previewNewStair.steps} degraus · h=
+                        {(previewNewStair.riserM * 100).toFixed(1)}cm · p=
+                        {(previewNewStair.treadM * 100).toFixed(0)}cm · 2h+p=
+                        {previewNewStair.blondelSumM.toFixed(3)}m · PD sup.=
+                        {round2(newCeilingHeight - newMezzElev - 0.12)}m
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <p className="text-[11px] text-[#949BA8]">
+                Pé-direito abaixo de 3,00 m: mezanino indisponível (eleve o pé-direito para &ge; 3,00 m se desejar locar mezanino).
+              </p>
+            )}
 
             <button
               type="submit"
@@ -474,13 +776,21 @@ export const TypologiesModule: React.FC<TypologiesModuleProps> = ({
                       type="number"
                       step="0.05"
                       min={2.4}
+                      max={6.0}
                       value={activeUt.ceilingHeight}
                       onChange={(e) => {
                         const val = Number(e.target.value);
                         onUpdateProject((prev) => ({
                           ...prev,
                           unitTypes: prev.unitTypes.map((t) =>
-                            t.id === activeUt.id ? { ...t, ceilingHeight: val } : t,
+                            t.id === activeUt.id
+                              ? {
+                                  ...t,
+                                  ceilingHeight: val,
+                                  hasMezzanine: val < 3.0 ? false : t.hasMezzanine,
+                                  mezzanine: val < 3.0 ? undefined : t.mezzanine,
+                                }
+                              : t,
                           ),
                         }));
                       }}
@@ -527,6 +837,298 @@ export const TypologiesModule: React.FC<TypologiesModuleProps> = ({
                     </label>
                   </div>
                 </div>
+
+                {/* Entrada Principal & Divisórias Internas da Tipologia Ativa */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-[#2A2F38]">
+                  <div>
+                    <label className="block text-[11px] text-[#949BA8] mb-1">
+                      Entrada Principal da Kitnet (P1 — 0,80m)
+                    </label>
+                    <select
+                      value={activeUt.entrySide ?? 'lateral_direita'}
+                      onChange={(e) => {
+                        const val = e.target.value as EntrySide;
+                        const updatedUt: UnitType = { ...activeUt, entrySide: val };
+                        handleRegenerateCurrent(updatedUt);
+                      }}
+                      className="w-full px-2.5 py-1.5 text-xs rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                    >
+                      <option value="frente">Frente da Kitnet</option>
+                      <option value="lateral_direita">Lateral Direita</option>
+                      <option value="lateral_esquerda">Lateral Esquerda</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-[#949BA8] mb-1">
+                      Sistema de Divisórias Internas
+                    </label>
+                    <select
+                      value={
+                        activeUt.internalPartitionType ??
+                        project.constructionMethod.internalPartitionType ??
+                        'alvenaria'
+                      }
+                      onChange={(e) => {
+                        const val = e.target.value as InternalPartitionType;
+                        const updatedUt: UnitType = {
+                          ...activeUt,
+                          internalPartitionType: val,
+                        };
+                        handleRegenerateCurrent(updatedUt);
+                      }}
+                      className="w-full px-2.5 py-1.5 text-xs rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                    >
+                      <option value="alvenaria">Alvenaria Convencional (10 cm)</option>
+                      <option value="drywall">Drywall Gesso Acartonado ST/RU (9,5 cm)</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Mezanino Condicional (apenas se pé-direito >= 3,00m; nunca é contado como andar) */}
+                {activeUt.ceilingHeight >= 3.0 ? (
+                  <div className="rounded border border-[#2F7CF6]/40 bg-[#14161A] p-3.5 space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <label className="inline-flex items-center gap-2 text-xs font-semibold text-white">
+                        <input
+                          type="checkbox"
+                          checked={activeUt.hasMezzanine}
+                          onChange={(e) => {
+                            const checked = e.target.checked;
+                            const nextUt: UnitType = {
+                              ...activeUt,
+                              hasMezzanine: checked,
+                              mezzanine: checked
+                                ? activeUt.mezzanine ?? {
+                                    enabled: true,
+                                    zone: 'sobre_banho_cozinha',
+                                    elevationM: Math.min(2.2, round2(activeUt.ceilingHeight - 1.2)),
+                                    slabThicknessM: 0.12,
+                                    coverageRatio: 0.42,
+                                    x: 0.08,
+                                    y: 0.08,
+                                    width: round2(activeUt.width - 0.16),
+                                    depth: round2(activeUt.depth * 0.42),
+                                    usage: 'dormitorio',
+                                    structureType: 'metalica_madeira',
+                                    stairLayout: 'reta',
+                                    stairSide:
+                                      activeUt.entrySide === 'lateral_direita'
+                                        ? 'esquerda'
+                                        : 'direita',
+                                    guardrailHeightM: 1.05,
+                                  }
+                                : undefined,
+                            };
+                            handleRegenerateCurrent(nextUt);
+                          }}
+                        />
+                        Habilitar Mezanino nesta Tipologia (Pé-direito {activeUt.ceilingHeight.toFixed(2)} m)
+                      </label>
+                      <span className="text-[11px] text-[#949BA8]">
+                        Regra urbanística: Mezanino não conta como pavimento/andar
+                      </span>
+                    </div>
+
+                    {activeUt.hasMezzanine && activeUt.mezzanine && (
+                      <div className="space-y-2.5 pt-2 border-t border-[#2A2F38]">
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                          <div>
+                            <label className="block text-[10px] text-[#949BA8] mb-0.5">
+                              Localização do Mezanino
+                            </label>
+                            <select
+                              value={activeUt.mezzanine.zone}
+                              onChange={(e) =>
+                                handleRegenerateCurrent({
+                                  ...activeUt,
+                                  mezzanine: {
+                                    ...activeUt.mezzanine!,
+                                    zone: e.target.value as MezzanineZone,
+                                  },
+                                })
+                              }
+                              className="w-full px-2 py-1 text-xs rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                            >
+                              <option value="sobre_banho_cozinha">Sobre BWC + Cozinha</option>
+                              <option value="fundos">Fundos da Unidade</option>
+                              <option value="lateral_esquerda">Lateral Esquerda</option>
+                              <option value="lateral_direita">Lateral Direita</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-[10px] text-[#949BA8] mb-0.5">
+                              Uso Pretendido
+                            </label>
+                            <select
+                              value={activeUt.mezzanine.usage}
+                              onChange={(e) =>
+                                handleRegenerateCurrent({
+                                  ...activeUt,
+                                  mezzanine: {
+                                    ...activeUt.mezzanine!,
+                                    usage: e.target.value as MezzanineUsage,
+                                  },
+                                })
+                              }
+                              className="w-full px-2 py-1 text-xs rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                            >
+                              <option value="dormitorio">Dormitório</option>
+                              <option value="home_office">Home Office</option>
+                              <option value="dormitorio_home_office">Dormitório + Home Office</option>
+                              <option value="deposito_estar">Depósito / Estar</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-[10px] text-[#949BA8] mb-0.5">
+                              Cota Piso (m)
+                            </label>
+                            <input
+                              type="number"
+                              step="0.05"
+                              min={2.0}
+                              max={round2(Math.max(2.05, activeUt.ceilingHeight - 1.15))}
+                              value={activeUt.mezzanine.elevationM}
+                              onChange={(e) =>
+                                handleRegenerateCurrent({
+                                  ...activeUt,
+                                  mezzanine: {
+                                    ...activeUt.mezzanine!,
+                                    elevationM: Number(e.target.value),
+                                  },
+                                })
+                              }
+                              className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] text-[#949BA8] mb-0.5">
+                              Área Coberta (%)
+                            </label>
+                            <input
+                              type="number"
+                              min={28}
+                              max={60}
+                              value={Math.round(activeUt.mezzanine.coverageRatio * 100)}
+                              onChange={(e) =>
+                                handleRegenerateCurrent({
+                                  ...activeUt,
+                                  mezzanine: {
+                                    ...activeUt.mezzanine!,
+                                    coverageRatio: Math.min(
+                                      0.6,
+                                      Math.max(0.28, Number(e.target.value) / 100),
+                                    ),
+                                  },
+                                })
+                              }
+                              className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                          <div>
+                            <label className="block text-[10px] text-[#949BA8] mb-0.5">
+                              Estrutura do Mezanino
+                            </label>
+                            <select
+                              value={activeUt.mezzanine.structureType}
+                              onChange={(e) =>
+                                handleRegenerateCurrent({
+                                  ...activeUt,
+                                  mezzanine: {
+                                    ...activeUt.mezzanine!,
+                                    structureType: e.target.value as MezzanineStructureType,
+                                  },
+                                })
+                              }
+                              className="w-full px-2 py-1 text-xs rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                            >
+                              <option value="metalica_madeira">Metálica + Deck Madeira</option>
+                              <option value="steel_deck">Steel Deck</option>
+                              <option value="madeira_estrutural">Madeira Estrutural</option>
+                              <option value="concreto_armado">Concreto Armado</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-[10px] text-[#949BA8] mb-0.5">
+                              Traçado da Escada (Blondel)
+                            </label>
+                            <select
+                              value={activeUt.mezzanine.stairLayout}
+                              onChange={(e) =>
+                                handleRegenerateCurrent({
+                                  ...activeUt,
+                                  mezzanine: {
+                                    ...activeUt.mezzanine!,
+                                    stairLayout: e.target.value as MezzanineStairLayout,
+                                  },
+                                })
+                              }
+                              className="w-full px-2 py-1 text-xs rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                            >
+                              <option value="reta">Lance Reto</option>
+                              <option value="em_l">Escada em L</option>
+                              <option value="caracol_compacta">Helicoidal Compacta</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-[10px] text-[#949BA8] mb-0.5">
+                              Lado de Apoio da Escada
+                            </label>
+                            <select
+                              value={activeUt.mezzanine.stairSide}
+                              onChange={(e) =>
+                                handleRegenerateCurrent({
+                                  ...activeUt,
+                                  mezzanine: {
+                                    ...activeUt.mezzanine!,
+                                    stairSide: e.target.value as 'esquerda' | 'direita',
+                                  },
+                                })
+                              }
+                              className="w-full px-2 py-1 text-xs rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                            >
+                              <option value="direita">Parede Direita</option>
+                              <option value="esquerda">Parede Esquerda</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        {(() => {
+                          const stair = activeUt.furniture.find((f) => f.category === 'escada');
+                          const sp = stair?.stairSpec;
+                          if (!sp) return null;
+                          const upperPd = round2(
+                            activeUt.ceilingHeight -
+                              activeUt.mezzanine!.elevationM -
+                              activeUt.mezzanine!.slabThicknessM,
+                          );
+                          return (
+                            <div className="rounded bg-[#1B1E24] px-3 py-2 text-[11px] font-mono text-[#C4C9D4] flex flex-wrap gap-x-4 gap-y-1">
+                              <span>
+                                Plataforma: {activeUt.mezzanine!.width.toFixed(2)}×
+                                {activeUt.mezzanine!.depth.toFixed(2)}m (
+                                {round2(activeUt.mezzanine!.width * activeUt.mezzanine!.depth)} m²)
+                              </span>
+                              <span>PD Superior: {upperPd.toFixed(2)} m</span>
+                              <span>
+                                Escada: {sp.steps} degraus (h={(sp.riserM * 100).toFixed(1)}cm / p=
+                                {(sp.treadM * 100).toFixed(0)}cm · Blondel 2h+p=
+                                {sp.blondelSumM.toFixed(3)}m)
+                              </span>
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-[#949BA8] pt-1">
+                    Mezanino indisponível para pé-direito inferior a 3,00 m (atual:{' '}
+                    {activeUt.ceilingHeight.toFixed(2)} m). Eleve o pé-direito para habilitar opções de mezanino.
+                  </p>
+                )}
               </div>
 
               {/* Rooms / Ambientes */}

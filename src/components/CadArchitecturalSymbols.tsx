@@ -1,5 +1,5 @@
 import React from 'react';
-import type { ElectricalCategory, FurnitureCategory } from '../types/project';
+import type { ElectricalCategory, FurnitureCategory, StairSpec } from '../types/project';
 
 interface FurnitureCadBlockProps {
   category: FurnitureCategory;
@@ -12,6 +12,7 @@ interface FurnitureCadBlockProps {
   accent?: string;
   strokeWidth?: number;
   detailed?: boolean;
+  stairSpec?: StairSpec;
 }
 
 /**
@@ -30,6 +31,7 @@ export const FurnitureCadBlock: React.FC<FurnitureCadBlockProps> = ({
   accent,
   strokeWidth = 0.8,
   detailed = true,
+  stairSpec,
 }) => {
   const sw = strokeWidth;
   const swThin = sw * 0.65;
@@ -367,6 +369,78 @@ export const FurnitureCadBlock: React.FC<FurnitureCadBlockProps> = ({
           <rect x={x} y={y} width={w} height={d} fill={acc} fillOpacity={0.25} stroke={acc} strokeWidth={swThin} />
         </g>
       );
+
+    case 'escada': {
+      const steps = Math.max(7, Math.min(18, stairSpec?.steps ?? 11));
+      const verticalRun = d >= w;
+      const treadLines: number[] = [];
+      for (let i = 1; i < steps; i++) {
+        treadLines.push(i / steps);
+      }
+      const cx = x + w / 2;
+      const cy = y + d / 2;
+      return (
+        <g>
+          <rect x={x} y={y} width={w} height={d} fill={fill} stroke={stroke} strokeWidth={sw} />
+          {/* Degraus */}
+          {treadLines.map((t, idx) =>
+            verticalRun ? (
+              <line
+                key={idx}
+                x1={x}
+                y1={y + d * t}
+                x2={x + w}
+                y2={y + d * t}
+                stroke={stroke}
+                strokeWidth={swThin}
+                opacity={t > 0.65 ? 0.5 : 0.9}
+              />
+            ) : (
+              <line
+                key={idx}
+                x1={x + w * t}
+                y1={y}
+                x2={x + w * t}
+                y2={y + d}
+                stroke={stroke}
+                strokeWidth={swThin}
+                opacity={t > 0.65 ? 0.5 : 0.9}
+              />
+            ),
+          )}
+          {/* Linha de interrupção arquitetônica e seta SOBE */}
+          {detailed && (
+            <>
+              {verticalRun ? (
+                <>
+                  <line x1={x} y1={y + d * 0.66} x2={x + w} y2={y + d * 0.54} stroke={acc} strokeWidth={sw} />
+                  <line x1={cx} y1={y + d * 0.88} x2={cx} y2={y + d * 0.14} stroke={acc} strokeWidth={sw} />
+                  <polyline
+                    points={`${cx - w * 0.18},${y + d * 0.24} ${cx},${y + d * 0.12} ${cx + w * 0.18},${y + d * 0.24}`}
+                    fill="none"
+                    stroke={acc}
+                    strokeWidth={sw}
+                  />
+                  <circle cx={cx} cy={y + d * 0.88} r={Math.min(w, d) * 0.06} fill={acc} />
+                </>
+              ) : (
+                <>
+                  <line x1={x + w * 0.66} y1={y} x2={x + w * 0.54} y2={y + d} stroke={acc} strokeWidth={sw} />
+                  <line x1={x + w * 0.88} y1={cy} x2={x + w * 0.14} y2={cy} stroke={acc} strokeWidth={sw} />
+                  <polyline
+                    points={`${x + w * 0.24},${cy - d * 0.18} ${x + w * 0.12},${cy} ${x + w * 0.24},${cy + d * 0.18}`}
+                    fill="none"
+                    stroke={acc}
+                    strokeWidth={sw}
+                  />
+                  <circle cx={x + w * 0.88} cy={cy} r={Math.min(w, d) * 0.06} fill={acc} />
+                </>
+              )}
+            </>
+          )}
+        </g>
+      );
+    }
 
     default:
       return <rect x={x} y={y} width={w} height={d} fill={fill} stroke={stroke} strokeWidth={sw} />;

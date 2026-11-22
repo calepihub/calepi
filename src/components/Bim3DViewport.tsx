@@ -717,6 +717,19 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
       clippingPlanes,
       side: THREE.DoubleSide,
     });
+    const matDrywall = new THREE.MeshStandardMaterial({
+      color: 0xeaf0f6,
+      roughness: 0.9,
+      metalness: 0.02,
+      clippingPlanes,
+      side: THREE.DoubleSide,
+    });
+    const matSteelBeam = new THREE.MeshStandardMaterial({
+      color: 0x334155,
+      roughness: 0.42,
+      metalness: 0.72,
+      clippingPlanes,
+    });
     const matSlab = new THREE.MeshStandardMaterial({
       color: 0x64748b,
       roughness: 0.85,
@@ -1003,7 +1016,12 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
                   return g;
                 })();
 
-            const wallMesh = new THREE.Mesh(wallGeom, w.isExternal ? matExtWall : matIntWall);
+            const isDrywall =
+              !w.isExternal && w.material.toLowerCase().includes('drywall');
+            const wallMesh = new THREE.Mesh(
+              wallGeom,
+              w.isExternal ? matExtWall : isDrywall ? matDrywall : matIntWall,
+            );
             wallMesh.position.set(mx, baseY + floor.slabThickness, mz);
             wallMesh.rotation.y = -angle;
             wallMesh.castShadow = !isSoftwareGl && !isInternalView;
@@ -1011,7 +1029,7 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
             wallMesh.userData = {
               bimLabel: `Parede ${w.code} — Unid. ${inst.unitNumber}`,
               bimDiscipline: 'Arquitetura',
-              bimDetail: `${w.isExternal ? 'Externa' : 'Interna'} · e=${Math.round(w.thickness * 100)}cm · ${w.material}`,
+              bimDetail: `${w.isExternal ? 'Externa' : isDrywall ? 'Interna Drywall' : 'Interna Alvenaria'} · e=${Math.round(w.thickness * 100)}cm · ${w.material}`,
             };
             group.add(wallMesh);
 
@@ -1027,7 +1045,7 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
             }
           }
 
-          // Detailed Doors & Windows Assemblies
+          // Detailed Doors, Windows & Basculante Vitrôs Assemblies
           for (const op of ut.openings) {
             const wall = ut.walls.find((w) => w.id === op.wallId);
             if (!wall) continue;
@@ -1039,6 +1057,10 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
             const baseOpY = baseY + floor.slabThickness + op.sillHeight;
 
             if (op.type === 'janela') {
+              const isVitro =
+                op.openingKind?.startsWith('vitro_') ||
+                op.subtype.toLowerCase().includes('basculante') ||
+                op.subtype.toLowerCase().includes('vitr');
               const jGroup = new THREE.Group();
               jGroup.position.set(wp.x, baseOpY + op.height / 2, wp.z);
               jGroup.rotation.y = rotY;
@@ -1047,6 +1069,9 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
                 new THREE.BoxGeometry(op.width - 0.06, op.height - 0.06, 0.025),
                 matGlass,
               );
+              if (isVitro) {
+                glassPane.rotation.x = 0.24;
+              }
               glassPane.userData = {
                 bimLabel: `${op.code} (${op.subtype}) — Unid. ${inst.unitNumber}`,
                 bimDiscipline: 'Esquadrias',
@@ -1054,7 +1079,7 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
               };
               jGroup.add(glassPane);
 
-              // Sill, header, left/right jambs, central mullion
+              // Sill, header, left/right jambs, central mullion or horizontal basculante transom
               const frameD = wall.thickness + 0.03;
               const sill = new THREE.Mesh(new THREE.BoxGeometry(op.width + 0.06, 0.045, frameD + 0.04), matFrame);
               sill.position.y = -op.height / 2;
@@ -1064,8 +1089,10 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
               jambL.position.x = -op.width / 2 + 0.02;
               const jambR = new THREE.Mesh(new THREE.BoxGeometry(0.04, op.height, frameD), matFrame);
               jambR.position.x = op.width / 2 - 0.02;
-              const mullion = new THREE.Mesh(new THREE.BoxGeometry(0.035, op.height - 0.04, 0.045), matFrame);
-              jGroup.add(sill, head, jambL, jambR, mullion);
+              const bar = isVitro
+                ? new THREE.Mesh(new THREE.BoxGeometry(op.width - 0.04, 0.03, 0.045), matFrame)
+                : new THREE.Mesh(new THREE.BoxGeometry(0.035, op.height - 0.04, 0.045), matFrame);
+              jGroup.add(sill, head, jambL, jambR, bar);
               group.add(jGroup);
             } else {
               const dGroup = new THREE.Group();
@@ -1099,12 +1126,109 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
           }
         }
 
-        // Multi-part Architectural Furniture
+        // Conditional Mezzanine Deck, Support Columns & Guardrail (never counted as a floor)
+        if (
+          layers.arquitetura &&
+          ut.hasMezzanine &&
+          ut.mezzanine?.enabled &&
+          ut.ceilingHeight >= 3.0
+        ) {
+          const mez = ut.mezzanine;
+          const mezCenter = mapUnitPt(inst, ut.width, mez.x + mez.width / 2, mez.y + mez.depth / 2);
+          const mezDeckY = baseY + floor.slabThickness + mez.elevationM;
+          const deckMat =
+            mez.structureType === 'concreto_armado'
+              ? matSlab
+              : mez.structureType === 'madeira_estrutural'
+              ? matWoodDark
+              : matWoodDark;
+          const deckMesh = new THREE.Mesh(
+            new THREE.BoxGeometry(mez.width, mez.slabThicknessM, mez.depth),
+            deckMat,
+          );
+          deckMesh.position.set(mezCenter.x, mezDeckY + mez.slabThicknessM / 2, mezCenter.z);
+          deckMesh.rotation.y = -(inst.rotationDeg * Math.PI) / 180;
+          deckMesh.castShadow = !isSoftwareGl;
+          deckMesh.receiveShadow = !isSoftwareGl;
+          deckMesh.userData = {
+            bimLabel: `Mezanino +${mez.elevationM.toFixed(2)}m — Unid. ${inst.unitNumber}`,
+            bimDiscipline: 'Arquitetura',
+            bimDetail: `${mez.width.toFixed(2)}×${mez.depth.toFixed(2)}m · Estrutura ${mez.structureType} (Não computado como andar)`,
+          };
+          group.add(deckMesh);
+
+          // Corner support columns
+          const colCorners = [
+            { lx: mez.x + 0.06, ly: mez.y + 0.06 },
+            { lx: mez.x + mez.width - 0.06, ly: mez.y + 0.06 },
+            { lx: mez.x + 0.06, ly: mez.y + mez.depth - 0.06 },
+            { lx: mez.x + mez.width - 0.06, ly: mez.y + mez.depth - 0.06 },
+          ];
+          for (const corner of colCorners) {
+            const cp = mapUnitPt(inst, ut.width, corner.lx, corner.ly);
+            const colMesh = new THREE.Mesh(
+              new THREE.BoxGeometry(0.08, mez.elevationM, 0.08),
+              mez.structureType === 'madeira_estrutural' ? matWoodDark : matSteelBeam,
+            );
+            colMesh.position.set(cp.x, baseY + floor.slabThickness + mez.elevationM / 2, cp.z);
+            colMesh.rotation.y = -(inst.rotationDeg * Math.PI) / 180;
+            colMesh.castShadow = !isSoftwareGl;
+            group.add(colMesh);
+          }
+
+          // Guardrail (guarda-corpo 1,05m) on open interior edge(s)
+          const railH = mez.guardrailHeightM || 1.05;
+          const addRailSegment = (lx0: number, ly0: number, lx1: number, ly1: number) => {
+            const p0 = mapUnitPt(inst, ut.width, lx0, ly0);
+            const p1 = mapUnitPt(inst, ut.width, lx1, ly1);
+            const rLen = Math.hypot(p1.x - p0.x, p1.z - p0.z);
+            if (rLen < 0.25) return;
+            const rAng = Math.atan2(p1.z - p0.z, p1.x - p0.x);
+            const topBar = new THREE.Mesh(
+              new THREE.BoxGeometry(rLen, 0.04, 0.04),
+              matSteelBeam,
+            );
+            topBar.position.set((p0.x + p1.x) / 2, mezDeckY + mez.slabThicknessM + railH, (p0.z + p1.z) / 2);
+            topBar.rotation.y = -rAng;
+            const midBar = new THREE.Mesh(
+              new THREE.BoxGeometry(rLen, 0.025, 0.025),
+              matSteelBeam,
+            );
+            midBar.position.set((p0.x + p1.x) / 2, mezDeckY + mez.slabThicknessM + railH * 0.52, (p0.z + p1.z) / 2);
+            midBar.rotation.y = -rAng;
+            group.add(topBar, midBar);
+
+            const balusterCount = Math.max(2, Math.round(rLen / 0.65) + 1);
+            for (let b = 0; b < balusterCount; b++) {
+              const t = b / Math.max(1, balusterCount - 1);
+              const bx = p0.x + (p1.x - p0.x) * t;
+              const bz = p0.z + (p1.z - p0.z) * t;
+              const post = new THREE.Mesh(
+                new THREE.BoxGeometry(0.03, railH, 0.03),
+                matSteelBeam,
+              );
+              post.position.set(bx, mezDeckY + mez.slabThicknessM + railH / 2, bz);
+              group.add(post);
+            }
+          };
+
+          if (mez.y + mez.depth < ut.depth - 0.55) {
+            addRailSegment(mez.x + 0.05, mez.y + mez.depth - 0.03, mez.x + mez.width - 0.05, mez.y + mez.depth - 0.03);
+          }
+          if (mez.x + mez.width < ut.width - 0.55) {
+            addRailSegment(mez.x + mez.width - 0.03, mez.y + 0.05, mez.x + mez.width - 0.03, mez.y + mez.depth - 0.05);
+          }
+          if (mez.x > 0.55) {
+            addRailSegment(mez.x + 0.03, mez.y + 0.05, mez.x + 0.03, mez.y + mez.depth - 0.05);
+          }
+        }
+
+        // Multi-part Architectural Furniture (including elevated mezzanine furniture & 3D Blondel staircase)
         if (layers.mobiliario) {
           for (const f of ut.furniture) {
             const fc = mapUnitPt(inst, ut.width, f.x + f.width / 2, f.y + f.depth / 2);
             const rotY = -((inst.rotationDeg + f.rotationDeg) * Math.PI) / 180;
-            const fy0 = baseY + floor.slabThickness;
+            const fy0 = baseY + floor.slabThickness + (f.elevationM ?? 0);
             const furGroup = new THREE.Group();
             furGroup.position.set(fc.x, fy0, fc.z);
             furGroup.rotation.y = rotY;
@@ -1127,13 +1251,82 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
                 m.userData = {
                   bimLabel: `${f.name} — Unid. ${inst.unitNumber}`,
                   bimDiscipline: 'Mobiliário',
-                  bimDetail: `${f.width.toFixed(2)}×${f.depth.toFixed(2)}×${f.height.toFixed(2)} m`,
+                  bimDetail: `${f.width.toFixed(2)}×${f.depth.toFixed(2)}×${f.height.toFixed(2)} m${f.elevationM ? ` · Cota +${f.elevationM.toFixed(2)}m` : ''}`,
                 };
               }
               furGroup.add(m);
             };
 
-            if (isArchRender && f.category === 'cama') {
+            if (f.category === 'escada') {
+              const steps = Math.max(4, f.stairSpec?.steps ?? 9);
+              const totalRise = Math.max(1.8, f.height);
+              const riser = totalRise / steps;
+              if (f.stairSpec?.layout === 'caracol_compacta') {
+                const pole = new THREE.Mesh(
+                  new THREE.CylinderGeometry(0.05, 0.05, totalRise + 0.9, 10),
+                  matSteelBeam,
+                );
+                pole.position.set(0, (totalRise + 0.9) / 2, 0);
+                pole.userData = {
+                  bimLabel: `${f.name} — Unid. ${inst.unitNumber}`,
+                  bimDiscipline: 'Arquitetura',
+                  bimDetail: `${steps} degraus helicoidais · Pé-direito ${(f.stairSpec?.blondelSumM ?? 0.63).toFixed(2)}m`,
+                };
+                furGroup.add(pole);
+                const rad = Math.min(f.width, f.depth) * 0.48;
+                for (let s = 0; s < steps; s++) {
+                  const ang = (s / steps) * Math.PI * 1.65;
+                  const tread = new THREE.Mesh(
+                    new THREE.BoxGeometry(rad, 0.04, 0.24),
+                    matWoodDark,
+                  );
+                  tread.position.set(
+                    Math.cos(ang) * (rad * 0.5),
+                    riser * (s + 1),
+                    Math.sin(ang) * (rad * 0.5),
+                  );
+                  tread.rotation.y = -ang;
+                  tread.castShadow = !isSoftwareGl;
+                  furGroup.add(tread);
+                }
+              } else {
+                const runDepth = f.depth / steps;
+                for (let s = 0; s < steps; s++) {
+                  const stepZ = f.depth / 2 - runDepth * (s + 0.5);
+                  const stepY = riser * (s + 1);
+                  addPart(
+                    f.width - 0.04,
+                    0.045,
+                    Math.max(0.22, runDepth * 1.05),
+                    stepY,
+                    matWoodDark,
+                    0,
+                    stepZ,
+                    s === 0,
+                  );
+                }
+                // Stringer beams & handrail posts
+                const strLen = Math.hypot(f.depth, totalRise);
+                const strAng = Math.atan2(totalRise, f.depth);
+                for (const sideX of [-f.width / 2 + 0.03, f.width / 2 - 0.03]) {
+                  const stringer = new THREE.Mesh(
+                    new THREE.BoxGeometry(0.04, 0.1, strLen),
+                    matSteelBeam,
+                  );
+                  stringer.position.set(sideX, totalRise / 2, 0);
+                  stringer.rotation.x = strAng;
+                  furGroup.add(stringer);
+                }
+                const railPostA = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.9, 0.03), matSteelBeam);
+                railPostA.position.set(-f.width / 2 + 0.03, 0.45, f.depth / 2 - 0.08);
+                const railPostB = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.9, 0.03), matSteelBeam);
+                railPostB.position.set(-f.width / 2 + 0.03, totalRise + 0.45, -f.depth / 2 + 0.08);
+                const handRail = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.035, strLen), matSteelBeam);
+                handRail.position.set(-f.width / 2 + 0.03, totalRise / 2 + 0.9, 0);
+                handRail.rotation.x = strAng;
+                furGroup.add(railPostA, railPostB, handRail);
+              }
+            } else if (isArchRender && f.category === 'cama') {
               // Orient headboard toward the wall end (+d/2 if positioned in lower half of unit)
               const dir = f.y + f.depth > ut.depth * 0.55 ? 1 : -1;
               addPart(f.width, 0.16, f.depth, 0.1, matWoodDark, 0, 0, true);

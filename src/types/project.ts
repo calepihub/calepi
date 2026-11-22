@@ -20,6 +20,57 @@ export type ConstructionMethodId =
   | 'misto'
   | 'personalizado';
 
+export type EntrySide = 'frente' | 'lateral_direita' | 'lateral_esquerda';
+
+export type InternalPartitionType = 'alvenaria' | 'drywall';
+
+export type MezzanineZone =
+  | 'sobre_banho_cozinha'
+  | 'fundos'
+  | 'lateral_esquerda'
+  | 'lateral_direita';
+
+export type MezzanineStairLayout = 'reta' | 'em_l' | 'caracol_compacta';
+
+export type MezzanineStructureType =
+  | 'metalica_madeira'
+  | 'steel_deck'
+  | 'madeira_estrutural'
+  | 'concreto_armado';
+
+export type MezzanineUsage =
+  | 'dormitorio'
+  | 'home_office'
+  | 'dormitorio_home_office'
+  | 'deposito_estar';
+
+export interface MezzanineConfig {
+  enabled: boolean;
+  zone: MezzanineZone;
+  elevationM: number; // floor height of mezzanine platform above unit ground floor (e.g. 2.15m)
+  slabThicknessM: number; // e.g. 0.12m
+  coverageRatio: number; // 0.25 .. 0.60
+  x: number;
+  y: number;
+  width: number;
+  depth: number;
+  usage: MezzanineUsage;
+  structureType: MezzanineStructureType;
+  stairLayout: MezzanineStairLayout;
+  stairSide: 'esquerda' | 'direita';
+  guardrailHeightM: number; // e.g. 1.05m
+}
+
+export interface StairSpec {
+  steps: number;
+  riserM: number; // espelho h (m)
+  treadM: number; // piso p (m)
+  blondelSumM: number; // 2*h + p (ideal 0.62 - 0.65m)
+  direction: 'norte' | 'sul' | 'leste' | 'oeste';
+  layout: MezzanineStairLayout;
+  widthM: number;
+}
+
 export type SiteShapeType =
   | 'retangular'
   | 'quadrado'
@@ -139,6 +190,7 @@ export interface Room {
   width: number; // m
   depth: number; // m
   ceilingHeight: number; // m
+  elevationM?: number; // floor elevation above ground (e.g. mezzanine deck)
   naturalLightingArea: number; // m2 (computed from windows)
   ventilationArea: number; // m2 (computed from windows)
   finishes: RoomFinishes;
@@ -160,12 +212,24 @@ export interface Wall {
 
 export type OpeningType = 'porta' | 'janela' | 'vao';
 
+export type OpeningRole = 'entrada' | 'banheiro' | 'quarto' | 'outro';
+
+export type OpeningKind =
+  | 'porta_abrir'
+  | 'porta_correr'
+  | 'janela_correr'
+  | 'vitro_basculante'
+  | 'vitro_maxim_ar'
+  | 'vitro_fixo';
+
 export interface Opening {
   id: string;
   code: string;
   wallId: string;
   type: OpeningType;
-  subtype: string; // ex: 'Porta de abrir', 'Janela de correr'
+  role?: OpeningRole; // entrada (0.80m fixo), banheiro (0.60m fixo), quarto (0.70m fixo), outro (livre)
+  openingKind?: OpeningKind;
+  subtype: string; // ex: 'Porta de abrir', 'Janela de correr', 'Vitrô basculante'
   offsetAlongWall: number; // distance from wall start in meters
   width: number; // m
   height: number; // m
@@ -212,10 +276,12 @@ export interface FurnitureItem {
   width: number; // m
   depth: number; // m
   height: number; // m
+  elevationM?: number; // base height above unit floor (e.g. on mezzanine)
   rotationDeg: number; // 0, 90, 180, 270
   requiresPower?: boolean;
   requiresWater?: boolean;
   requiresDrain?: boolean;
+  stairSpec?: StairSpec;
 }
 
 export type ElectricalCategory =
@@ -380,6 +446,9 @@ export interface UnitType {
   hasLaundry: boolean;
   hasBalcony: boolean;
   hasMezzanine: boolean;
+  mezzanine?: MezzanineConfig;
+  entrySide?: EntrySide;
+  internalPartitionType?: InternalPartitionType;
   accessible: boolean;
   finishStandard: 'economico' | 'padrao' | 'medio_alto' | 'personalizado';
   rooms: Room[];
@@ -422,6 +491,7 @@ export interface ConstructionMethodDetails {
   name: string;
   externalWallThickness: number; // m
   internalWallThickness: number; // m
+  internalPartitionType?: InternalPartitionType;
   roofType: 'telha_ceramica' | 'telha_fibrocimento' | 'telha_termoacustica' | 'laje_impermeabilizada' | 'personalizada';
   roofSlopePercent: number;
   // Specific attributes per system

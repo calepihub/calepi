@@ -484,6 +484,10 @@ export function runCompatibilityAnalysis(project: Project): ClashIssue[] {
         if (a.category === 'luminaria' || b.category === 'luminaria') {
           continue;
         }
+        // Móveis em níveis verticais distintos (ex.: mezanino vs térreo) não colidem em planta
+        if (Math.abs((a.elevationM ?? 0) - (b.elevationM ?? 0)) >= 1.25) {
+          continue;
+        }
         const ra = getFurnitureWorldRect(a);
         const rb = getFurnitureWorldRect(b);
         if (rectsOverlap(ra, rb, 0.03)) {
@@ -519,6 +523,7 @@ export function runCompatibilityAnalysis(project: Project): ClashIssue[] {
       };
       for (const fur of ut.furniture) {
         if (fur.category === 'luminaria' || fur.category === 'espelho') continue;
+        if ((fur.elevationM ?? 0) >= 1.5) continue;
         const fr = getFurnitureWorldRect(fur);
         if (rectsOverlap(swingZone, fr, 0.08)) {
           issues.push({
@@ -621,6 +626,83 @@ export function runCompatibilityAnalysis(project: Project): ClashIssue[] {
           status: 'pendente',
           targetUnitTypeId: ut.id,
         });
+      }
+    }
+
+    // Mezzanine & Blondel stair ergonomic checks
+    if (ut.hasMezzanine) {
+      if (ut.ceilingHeight < 3.0) {
+        issues.push({
+          id: `clash-mez-ceiling-${ut.id}`,
+          severity: 'CRITICO',
+          disciplines: 'Arquitetura × Mezanino',
+          elementsInvolved: ['Mezanino', `Pé-direito ${ut.ceilingHeight.toFixed(2)}m`],
+          location: `Tipologia ${ut.code}`,
+          floorName: 'Tipologia Padrão',
+          roomName: 'Mezanino',
+          description: `Mezanino habilitado com pé-direito inferior a 3,00 m (${ut.ceilingHeight.toFixed(2)} m).`,
+          reason: 'Pé-direito insuficiente para acomodar nível inferior habitável + laje + plataforma superior.',
+          suggestion: 'Elevar pé-direito da tipologia para >= 3,00 m ou desativar o mezanino.',
+          status: 'pendente',
+          targetUnitTypeId: ut.id,
+        });
+      }
+      if (ut.mezzanine?.enabled) {
+        if (ut.mezzanine.elevationM < 2.0) {
+          issues.push({
+            id: `clash-mez-under-${ut.id}`,
+            severity: 'ATENCAO',
+            disciplines: 'Arquitetura × Mezanino',
+            elementsInvolved: ['Plataforma Mezanino'],
+            location: `Tipologia ${ut.code}`,
+            floorName: 'Tipologia Padrão',
+            roomName: 'Mezanino',
+            description: `Altura livre sob o mezanino abaixo de 2,00 m (${ut.mezzanine.elevationM.toFixed(2)} m).`,
+            reason: 'Circulação inferior pode apresentar desconforto ergonômico.',
+            suggestion: 'Ajustar cota do mezanino para >= 2,05 m (se pé-direito permitir).',
+            status: 'pendente',
+            targetUnitTypeId: ut.id,
+          });
+        }
+        const upperClear = round2(
+          ut.ceilingHeight - ut.mezzanine.elevationM - ut.mezzanine.slabThicknessM,
+        );
+        if (upperClear < 1.1) {
+          issues.push({
+            id: `clash-mez-upper-${ut.id}`,
+            severity: 'ATENCAO',
+            disciplines: 'Arquitetura × Mezanino',
+            elementsInvolved: ['Mezanino'],
+            location: `Tipologia ${ut.code}`,
+            floorName: 'Tipologia Padrão',
+            roomName: 'Mezanino',
+            description: `Pé-direito útil superior reduzido no mezanino (${upperClear.toFixed(2)} m).`,
+            reason: 'Recomenda-se altura mínima livre >= 1,10 m (dormitório) ou >= 2,00 m (permanência em pé).',
+            suggestion: 'Aumentar pé-direito da kitnet ou reduzir ligeiramente a cota do deck.',
+            status: 'pendente',
+            targetUnitTypeId: ut.id,
+          });
+        }
+      }
+      const stair = ut.furniture.find((f) => f.category === 'escada');
+      if (stair?.stairSpec) {
+        const b = stair.stairSpec.blondelSumM;
+        if (b < 0.6 || b > 0.66) {
+          issues.push({
+            id: `clash-mez-blondel-${ut.id}`,
+            severity: 'ATENCAO',
+            disciplines: 'Arquitetura × Circulação Vertical',
+            elementsInvolved: [stair.name],
+            location: `Tipologia ${ut.code}`,
+            floorName: 'Tipologia Padrão',
+            roomName: 'Escada Mezanino',
+            description: `Escada do mezanino fora da faixa ergonômica de Blondel (2h+p = ${b.toFixed(2)} m).`,
+            reason: 'Fórmula de Blondel recomenda 2h + p entre 0,62 m e 0,65 m (NBR 9050/9077).',
+            suggestion: 'Recalcular espelho/piso ou adotar escada em L.',
+            status: 'pendente',
+            targetUnitTypeId: ut.id,
+          });
+        }
       }
     }
   }
@@ -759,7 +841,9 @@ export function evaluateAccessibility(project: Project): ComplianceCheckItem[] {
 
   // Check doors on accessible units (or all entry doors)
   for (const ut of project.unitTypes) {
-    const entryDoor = ut.openings.find((o) => o.type === 'porta');
+    const entryDoor =
+      ut.openings.find((o) => o.type === 'porta' && o.role === 'entrada') ??
+      ut.openings.find((o) => o.type === 'porta');
     if (entryDoor) {
       items.push({
         id: `acc-door-${ut.id}`,

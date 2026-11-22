@@ -48,7 +48,18 @@ export function generateAllMemorials(project: Project): MemorialSection[] {
   const quadroAreas = project.unitTypes
     .map((ut) => {
       const q = unitCounts.get(ut.id) ?? 0;
-      return `- ${ut.code} (${ut.name}): ${q} unid × ${round2(ut.width * ut.depth)} m² (${ut.width}m × ${ut.depth}m) = ${round2(q * ut.width * ut.depth)} m² | Pé-direito: ${ut.ceilingHeight} m`;
+      const entryLabel =
+        ut.entrySide === 'frente'
+          ? 'Frente'
+          : ut.entrySide === 'lateral_esquerda'
+            ? 'Lateral Esquerda'
+            : 'Lateral Direita';
+      const partLabel = ut.internalPartitionType === 'drywall' ? 'Drywall 9,5cm' : 'Alvenaria';
+      const mezLabel =
+        ut.hasMezzanine && ut.mezzanine?.enabled && ut.ceilingHeight >= 3.0
+          ? ` | Mezanino ${ut.mezzanine.width.toFixed(2)}×${ut.mezzanine.depth.toFixed(2)}m (cota +${ut.mezzanine.elevationM.toFixed(2)}m — não computado como pavimento)`
+          : '';
+      return `- ${ut.code} (${ut.name}): ${q} unid × ${round2(ut.width * ut.depth)} m² (${ut.width}m × ${ut.depth}m) = ${round2(q * ut.width * ut.depth)} m² | Pé-direito: ${ut.ceilingHeight} m | Entrada: ${entryLabel} | Divisórias internas: ${partLabel}${mezLabel}`;
     })
     .join('\n');
 
@@ -57,10 +68,15 @@ export function generateAllMemorials(project: Project): MemorialSection[] {
       const rms = ut.rooms
         .map(
           (r) =>
-            `  • ${r.name} (${r.code}): ${r.width}m × ${r.depth}m = ${getRoomArea(r)} m² | Perímetro: ${getRoomPerimeter(r)} m | PD: ${r.ceilingHeight} m`,
+            `  • ${r.name} (${r.code}): ${r.width}m × ${r.depth}m = ${getRoomArea(r)} m² | Perímetro: ${getRoomPerimeter(r)} m | PD: ${r.ceilingHeight} m${r.elevationM ? ` | Nível +${r.elevationM.toFixed(2)}m` : ''}`,
         )
         .join('\n');
-      return `${ut.code} — ${ut.name}:\n${rms || '  • NÃO INFORMADO'}`;
+      const stair = ut.furniture.find((f) => f.category === 'escada');
+      const stairNote =
+        stair?.stairSpec
+          ? `\n  • Circulação Vertical (Mezanino): Escada ${stair.stairSpec.layout.replace(/_/g, ' ')} (${stair.stairSpec.steps} degraus, espelho ${(stair.stairSpec.riserM * 100).toFixed(1)}cm, piso ${(stair.stairSpec.treadM * 100).toFixed(1)}cm, largura ${(stair.stairSpec.widthM * 100).toFixed(0)}cm, Blondel 2h+p=${stair.stairSpec.blondelSumM.toFixed(3)}m)`
+          : '';
+      return `${ut.code} — ${ut.name}:\n${rms || '  • NÃO INFORMADO'}${stairNote}`;
     })
     .join('\n\n');
 
@@ -69,7 +85,7 @@ export function generateAllMemorials(project: Project): MemorialSection[] {
       const ops = ut.openings
         .map(
           (o) =>
-            `  • ${o.code} (${o.type.toUpperCase()}): ${o.subtype} — ${o.width.toFixed(2)}m × ${o.height.toFixed(2)}m (peitoril ${o.sillHeight.toFixed(2)}m) — ${o.material}`,
+            `  • ${o.code} (${o.type.toUpperCase()}${o.role ? ` — ${o.role.toUpperCase()}` : ''}): ${o.subtype} — ${o.width.toFixed(2)}m × ${o.height.toFixed(2)}m (peitoril ${o.sillHeight.toFixed(2)}m) — ${o.material}`,
         )
         .join('\n');
       return `${ut.code}:\n${ops || '  • Nenhuma abertura cadastrada'}`;
@@ -101,8 +117,9 @@ Confrontações: Frente: ${ni(project.site.confrontations.front)} | Fundos: ${ni
 
 5. DESCRIÇÃO DA EDIFICAÇÃO E PAVIMENTOS
 Sistema Construtivo: ${project.constructionMethod.name}
+Divisórias Internas Padrão: ${project.constructionMethod.internalPartitionType === 'drywall' ? 'Drywall Gesso Acartonado ST/RU (9,5 cm) c/ Lã Mineral' : 'Alvenaria Convencional / Estrutural'}
 Espessura de Paredes: Externas ${(project.constructionMethod.externalWallThickness * 100).toFixed(0)} cm | Internas ${(project.constructionMethod.internalWallThickness * 100).toFixed(0)} cm
-Quantidade de Pavimentos: ${project.floors.length}
+Quantidade de Pavimentos: ${project.floors.length} (eventuais mezaninos em pé-direito >= 3,00m não são contabilizados como pavimento adicional)
 ${project.floors.map((f) => `- ${f.name}: Cota +${f.elevation.toFixed(2)}m | Pé-direito piso a piso ${f.floorToFloorHeight.toFixed(2)}m | Unidades: ${f.units.length} | Área comum: ${f.commonAreaM2} m²`).join('\n')}
 
 6. QUANTIDADE DE UNIDADES E TIPOLOGIAS
@@ -114,10 +131,11 @@ ${quadroAreas || 'NÃO INFORMADO'}
 - Área Comum Total: ${quantities.summary.totalCommonAreaM2} m²
 - Área Construída Total Estimada: ${quantities.summary.totalBuiltAreaM2} m²
 
-8. CARACTERÍSTICAS DOS AMBIENTES
+8. CARACTERÍSTICAS DOS AMBIENTES E MEZANINOS
 ${descAmbientes || 'NÃO INFORMADO'}
 
-9. ESQUADRIAS
+9. ESQUADRIAS E PORTAS PADRONIZADAS (0,80m / 0,70m / 0,60m)
+Critério Adotado: Portas de Entrada Social = 0,80m | Portas de Quarto = 0,70m | Portas de Banheiro = 0,60m; Janelas e Vitrôs dimensionados por ambiente.
 ${esquadriasList || 'NÃO INFORMADO'}
 
 10. COBERTURA

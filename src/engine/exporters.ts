@@ -289,10 +289,16 @@ export function generateProjectDXF(project: Project, floorIndex = 0): string {
       const ut = project.unitTypes.find((t) => t.id === inst.unitTypeId);
       if (!ut) continue;
 
-      // Double-line walls split by openings
+      // Double-line walls split by openings (Alvenaria vs Drywall)
       for (const wall of ut.walls) {
+        const isDrywall =
+          !wall.isExternal && wall.material.toLowerCase().includes('drywall');
         const spans = splitWallByOpenings(wall, ut.openings);
-        const layer = wall.isExternal ? 'PAREDES_EXT' : 'PAREDES_INT';
+        const layer = wall.isExternal
+          ? 'PAREDES_EXT'
+          : isDrywall
+          ? 'PAREDES_INT_DRYWALL'
+          : 'PAREDES_INT';
         for (const sp of spans) {
           const lx0 = wall.start.x + (wall.end.x - wall.start.x) * sp.t0;
           const ly0 = wall.start.y + (wall.end.y - wall.start.y) * sp.t0;
@@ -305,7 +311,28 @@ export function generateProjectDXF(project: Project, floorIndex = 0): string {
         }
       }
 
-      // CAD Doors (leaf + 90 deg arc) & Windows (triple glazing lines)
+      // Mezzanine projection rectangle (never counted as a floor)
+      if (ut.hasMezzanine && ut.mezzanine?.enabled && ut.ceilingHeight >= 3.0) {
+        const mezRoom = ut.rooms.find((r) => r.category === 'mezanino');
+        if (mezRoom) {
+          const mp1 = unitLocalToWorld(inst, ut, mezRoom.x, mezRoom.y);
+          const mp2 = unitLocalToWorld(inst, ut, mezRoom.x + mezRoom.width, mezRoom.y);
+          const mp3 = unitLocalToWorld(inst, ut, mezRoom.x + mezRoom.width, mezRoom.y + mezRoom.depth);
+          const mp4 = unitLocalToWorld(inst, ut, mezRoom.x, mezRoom.y + mezRoom.depth);
+          entities.push(dxfClosedPoly([mp1, mp2, mp3, mp4], 'MEZANINO'));
+          entities.push(
+            dxfText(
+              mp1.x + 0.1,
+              mp1.y + 0.25,
+              0.13,
+              `MEZANINO +${ut.mezzanine.elevationM.toFixed(2)}m`,
+              'MEZANINO',
+            ),
+          );
+        }
+      }
+
+      // CAD Doors (leaf + 90 deg arc / sliding) & Windows / Vitrôs
       for (const op of ut.openings) {
         const wall = ut.walls.find((w) => w.id === op.wallId);
         if (!wall) continue;
@@ -325,17 +352,30 @@ export function generateProjectDXF(project: Project, floorIndex = 0): string {
         const pb = unitLocalToWorld(inst, ut, bLocal.x, bLocal.y);
 
         if (op.type === 'porta') {
-          const ang = (Math.atan2(pb.y - pa.y, pb.x - pa.x) * 180) / Math.PI;
-          const leafTip = {
-            x: pa.x + Math.cos(((ang + 90) * Math.PI) / 180) * op.width,
-            y: pa.y + Math.sin(((ang + 90) * Math.PI) / 180) * op.width,
-          };
-          entities.push(dxfLine(pa.x, pa.y, leafTip.x, leafTip.y, 'ESQUADRIAS'));
-          entities.push(dxfArc(pa.x, pa.y, op.width, ang, ang + 90, 'ESQUADRIAS'));
+          if (op.openingKind === 'porta_correr') {
+            const pm = { x: (pa.x + pb.x) / 2, y: (pa.y + pb.y) / 2 };
+            entities.push(dxfLine(pa.x, pa.y, pm.x, pm.y, 'ESQUADRIAS'));
+            entities.push(dxfLine(pm.x, pm.y + 0.03, pb.x, pb.y + 0.03, 'ESQUADRIAS'));
+          } else {
+            const ang = (Math.atan2(pb.y - pa.y, pb.x - pa.x) * 180) / Math.PI;
+            const leafTip = {
+              x: pa.x + Math.cos(((ang + 90) * Math.PI) / 180) * op.width,
+              y: pa.y + Math.sin(((ang + 90) * Math.PI) / 180) * op.width,
+            };
+            entities.push(dxfLine(pa.x, pa.y, leafTip.x, leafTip.y, 'ESQUADRIAS'));
+            entities.push(dxfArc(pa.x, pa.y, op.width, ang, ang + 90, 'ESQUADRIAS'));
+          }
         } else {
+          const isVitro =
+            op.openingKind?.startsWith('vitro_') ||
+            op.subtype.toLowerCase().includes('basculante') ||
+            op.subtype.toLowerCase().includes('vitr');
           const quad = getWallQuadWorld(pa, pb, wall.thickness * 0.7);
           entities.push(dxfClosedPoly(quad, 'ESQUADRIAS'));
           entities.push(dxfLine(pa.x, pa.y, pb.x, pb.y, 'ESQUADRIAS'));
+          if (isVitro) {
+            entities.push(dxfLine(pa.x, pa.y + 0.03, pb.x, pb.y + 0.03, 'ESQUADRIAS'));
+          }
         }
       }
 
@@ -344,12 +384,28 @@ export function generateProjectDXF(project: Project, floorIndex = 0): string {
         const p2 = unitLocalToWorld(inst, ut, fur.x + fur.width, fur.y);
         const p3 = unitLocalToWorld(inst, ut, fur.x + fur.width, fur.y + fur.depth);
         const p4 = unitLocalToWorld(inst, ut, fur.x, fur.y + fur.depth);
-        entities.push(dxfClosedPoly([p1, p2, p3, p4], 'MOBILIARIO'));
+        const fLayer = fur.category === 'escada' ? 'ESCADA' : 'MOBILIARIO';
+        entities.push(dxfClosedPoly([p1, p2, p3, p4], fLayer));
         if (fur.category === 'box') {
           entities.push(dxfLine(p1.x, p1.y, p3.x, p3.y, 'MOBILIARIO'));
           entities.push(dxfLine(p2.x, p2.y, p4.x, p4.y, 'MOBILIARIO'));
         } else if (fur.category === 'geladeira') {
           entities.push(dxfLine(p1.x, p1.y, p3.x, p3.y, 'MOBILIARIO'));
+        } else if (fur.category === 'escada') {
+          const steps = Math.max(4, fur.stairSpec?.steps ?? 9);
+          const horizontal = fur.width >= fur.depth;
+          for (let s = 1; s < steps; s++) {
+            const frac = s / steps;
+            if (horizontal) {
+              const a = unitLocalToWorld(inst, ut, fur.x + fur.width * frac, fur.y);
+              const b = unitLocalToWorld(inst, ut, fur.x + fur.width * frac, fur.y + fur.depth);
+              entities.push(dxfLine(a.x, a.y, b.x, b.y, 'ESCADA'));
+            } else {
+              const a = unitLocalToWorld(inst, ut, fur.x, fur.y + fur.depth * frac);
+              const b = unitLocalToWorld(inst, ut, fur.x + fur.width, fur.y + fur.depth * frac);
+              entities.push(dxfLine(a.x, a.y, b.x, b.y, 'ESCADA'));
+            }
+          }
         }
       }
 
@@ -1128,12 +1184,18 @@ function drawUnitCADInPDF(
   const mapX = (wx: number) => offX + wx * scale;
   const mapY = (wy: number) => offY + wy * scale;
 
-  // Double-line walls split by openings
+  // Double-line walls split by openings (Alvenaria vs Drywall)
   for (const w of ut.walls) {
+    const isDrywall =
+      !w.isExternal && w.material.toLowerCase().includes('drywall');
     const spans = splitWallByOpenings(w, ut.openings);
-    doc.setDrawColor(15, 23, 42);
-    doc.setFillColor(w.isExternal ? 148 : 203, w.isExternal ? 163 : 213, w.isExternal ? 184 : 225);
-    doc.setLineWidth(w.isExternal ? 0.42 : 0.25);
+    doc.setDrawColor(isDrywall ? 14 : 15, isDrywall ? 116 : 23, isDrywall ? 144 : 42);
+    doc.setFillColor(
+      w.isExternal ? 148 : isDrywall ? 224 : 203,
+      w.isExternal ? 163 : isDrywall ? 242 : 213,
+      w.isExternal ? 184 : isDrywall ? 254 : 225,
+    );
+    doc.setLineWidth(w.isExternal ? 0.42 : isDrywall ? 0.18 : 0.25);
 
     for (const sp of spans) {
       const lx0 = w.start.x + (w.end.x - w.start.x) * sp.t0;
@@ -1158,7 +1220,25 @@ function drawUnitCADInPDF(
     }
   }
 
-  // Openings (Door leaves + quarter-arc approximation / Triple window lines)
+  // Mezzanine dashed projection (never counted as a floor)
+  if (ut.hasMezzanine && ut.mezzanine?.enabled && ut.ceilingHeight >= 3.0) {
+    const mezRoom = ut.rooms.find((r) => r.category === 'mezanino');
+    if (mezRoom) {
+      const m1 = unitLocalToWorld(inst, ut, mezRoom.x, mezRoom.y);
+      const m3 = unitLocalToWorld(inst, ut, mezRoom.x + mezRoom.width, mezRoom.y + mezRoom.depth);
+      const mx0 = Math.min(mapX(m1.x), mapX(m3.x));
+      const my0 = Math.min(mapY(m1.y), mapY(m3.y));
+      const mw = Math.abs(mapX(m3.x) - mapX(m1.x));
+      const mh = Math.abs(mapY(m3.y) - mapY(m1.y));
+      doc.setDrawColor(180, 83, 9);
+      doc.setLineWidth(0.24);
+      doc.setLineDashPattern([1.5, 1.2], 0);
+      doc.rect(mx0, my0, mw, mh);
+      doc.setLineDashPattern([], 0);
+    }
+  }
+
+  // Openings (Door leaves + quarter-arc / Sliding / Windows & Vitrôs)
   for (const op of ut.openings) {
     const wall = ut.walls.find((w) => w.id === op.wallId);
     if (!wall) continue;
@@ -1172,28 +1252,43 @@ function drawUnitCADInPDF(
     if (op.type === 'porta') {
       doc.setDrawColor(180, 83, 9);
       doc.setLineWidth(0.3);
-      const vx = pb.x - pa.x;
-      const vy = pb.y - pa.y;
-      const perpX = -vy;
-      const perpY = vx;
-      doc.line(mapX(pa.x), mapY(pa.y), mapX(pa.x + perpX), mapY(pa.y + perpY));
-      // 6-segment swing arc
-      doc.setDrawColor(148, 163, 184);
-      doc.setLineWidth(0.18);
-      let prevX = pb.x;
-      let prevY = pb.y;
-      for (let s = 1; s <= 6; s++) {
-        const ang = (s / 6) * (Math.PI / 2);
-        const nx = pa.x + vx * Math.cos(ang) + perpX * Math.sin(ang);
-        const ny = pa.y + vy * Math.cos(ang) + perpY * Math.sin(ang);
-        doc.line(mapX(prevX), mapY(prevY), mapX(nx), mapY(ny));
-        prevX = nx;
-        prevY = ny;
+      if (op.openingKind === 'porta_correr') {
+        const mx = (mapX(pa.x) + mapX(pb.x)) / 2;
+        const my = (mapY(pa.y) + mapY(pb.y)) / 2;
+        doc.line(mapX(pa.x), mapY(pa.y), mx, my);
+        doc.line(mx, my + 0.6, mapX(pb.x), mapY(pb.y) + 0.6);
+      } else {
+        const vx = pb.x - pa.x;
+        const vy = pb.y - pa.y;
+        const perpX = -vy;
+        const perpY = vx;
+        doc.line(mapX(pa.x), mapY(pa.y), mapX(pa.x + perpX), mapY(pa.y + perpY));
+        // 6-segment swing arc
+        doc.setDrawColor(148, 163, 184);
+        doc.setLineWidth(0.18);
+        let prevX = pb.x;
+        let prevY = pb.y;
+        for (let s = 1; s <= 6; s++) {
+          const ang = (s / 6) * (Math.PI / 2);
+          const nx = pa.x + vx * Math.cos(ang) + perpX * Math.sin(ang);
+          const ny = pa.y + vy * Math.cos(ang) + perpY * Math.sin(ang);
+          doc.line(mapX(prevX), mapY(prevY), mapX(nx), mapY(ny));
+          prevX = nx;
+          prevY = ny;
+        }
       }
     } else {
+      const isVitro =
+        op.openingKind?.startsWith('vitro_') ||
+        op.subtype.toLowerCase().includes('basculante') ||
+        op.subtype.toLowerCase().includes('vitr');
       doc.setDrawColor(2, 132, 199);
       doc.setLineWidth(0.28);
       doc.line(mapX(pa.x), mapY(pa.y), mapX(pb.x), mapY(pb.y));
+      if (isVitro) {
+        doc.setLineWidth(0.18);
+        doc.line(mapX(pa.x), mapY(pa.y) + 0.5, mapX(pb.x), mapY(pb.y) + 0.5);
+      }
     }
   }
 
@@ -1219,6 +1314,17 @@ function drawUnitCADInPDF(
       doc.ellipse(rx + rw / 2, ry + rh * 0.55, Math.max(0.8, rw * 0.34), Math.max(0.8, rh * 0.34));
     } else if (f.category === 'bancada') {
       doc.rect(rx + rw * 0.14, ry + rh * 0.18, rw * 0.28, rh * 0.64);
+    } else if (f.category === 'escada') {
+      const steps = Math.max(4, f.stairSpec?.steps ?? 9);
+      const horiz = rw >= rh;
+      for (let s = 1; s < steps; s++) {
+        const frac = s / steps;
+        if (horiz) {
+          doc.line(rx + rw * frac, ry, rx + rw * frac, ry + rh);
+        } else {
+          doc.line(rx, ry + rh * frac, rx + rw, ry + rh * frac);
+        }
+      }
     }
   }
 
@@ -1414,13 +1520,30 @@ export function generateTechnicalSheetPDFBlob(
     doc.setDrawColor(15, 23, 42);
     doc.setLineWidth(0.6);
     doc.line(x0 - 10, yBase, x0 + frontElev.totalWidth * sc + 15, yBase);
+    const mezUt = project.unitTypes.find(
+      (u) => u.hasMezzanine && u.mezzanine?.enabled && u.ceilingHeight >= 3.0,
+    );
+    const mez = mezUt?.mezzanine;
     for (const fl of frontElev.floors) {
       doc.setFillColor(148, 163, 184);
       doc.rect(x0, yBase - fl.baseY * sc, frontElev.totalWidth * sc, 2.2, 'FD');
       doc.setDrawColor(15, 23, 42);
       doc.rect(x0, yBase - fl.slabTopY * sc, 2.2, (fl.slabTopY - fl.baseY) * sc, 'FD');
       doc.rect(x0 + frontElev.totalWidth * sc - 2.2, yBase - fl.slabTopY * sc, 2.2, (fl.slabTopY - fl.baseY) * sc, 'FD');
+      if (mez) {
+        const mezX = x0 + frontElev.totalWidth * sc * 0.15;
+        const mezW = frontElev.totalWidth * sc * 0.34;
+        const mezY = yBase - (fl.baseY + mez.elevationM) * sc;
+        doc.setFillColor(217, 119, 6);
+        doc.rect(mezX, mezY, mezW, Math.max(1.4, mez.slabThicknessM * sc), 'FD');
+        doc.setDrawColor(180, 83, 9);
+        doc.line(mezX, mezY - 1.05 * sc, mezX + mezW, mezY - 1.05 * sc);
+        doc.line(mezX + mezW, yBase - fl.baseY * sc, mezX + mezW + 8, mezY);
+        doc.setFontSize(6.5);
+        doc.text(`Mezanino +${mez.elevationM.toFixed(2)}m (N/C Pav.)`, mezX + 2, mezY - 1.8);
+      }
       doc.setFontSize(7.5);
+      doc.setTextColor(15, 23, 42);
       doc.text(`${fl.name} (+${fl.baseY.toFixed(2)}m)`, x0 + frontElev.totalWidth * sc + 5, yBase - fl.baseY * sc);
     }
   } else if (sheetId === 'A07') {

@@ -15,6 +15,7 @@ import { nextId } from '../engine/parametricGenerator';
 import type {
   ConstructionMethodDetails,
   ConstructionMethodId,
+  InternalPartitionType,
   Project,
   StructuralElement,
 } from '../types/project';
@@ -168,14 +169,21 @@ export const ConstructionAndStructureModule: React.FC<ConstructionAndStructureMo
   const updateCM = (patch: Partial<ConstructionMethodDetails>) => {
     onUpdateProject((prev) => {
       const nextCM = { ...prev.constructionMethod, ...patch };
+      const nextPartType = nextCM.internalPartitionType ?? 'alvenaria';
+      const intMaterial =
+        nextPartType === 'drywall'
+          ? 'Drywall Gesso Acartonado ST/RU (9,5cm) + Lã Mineral'
+          : nextCM.name;
       return {
         ...prev,
         constructionMethod: nextCM,
         unitTypes: prev.unitTypes.map((ut) => ({
           ...ut,
+          ...(patch.internalPartitionType ? { internalPartitionType: nextPartType } : {}),
           walls: ut.walls.map((w) => ({
             ...w,
             thickness: w.isExternal ? nextCM.externalWallThickness : nextCM.internalWallThickness,
+            ...(patch.internalPartitionType && !w.isExternal ? { material: intMaterial } : {}),
           })),
         })),
       };
@@ -387,6 +395,24 @@ export const ConstructionAndStructureModule: React.FC<ConstructionAndStructureMo
                   </label>
 
                   <label className="block space-y-1">
+                    <span className="text-xs text-slate-400">Divisórias Internas Padrão</span>
+                    <select
+                      value={cm.internalPartitionType ?? 'alvenaria'}
+                      onChange={(e) => {
+                        const val = e.target.value as InternalPartitionType;
+                        updateCM({
+                          internalPartitionType: val,
+                          internalWallThickness: val === 'drywall' ? 0.095 : 0.1,
+                        });
+                      }}
+                      className="w-full rounded border border-slate-700 bg-[#14161A] px-3 py-1.5 text-sm text-white"
+                    >
+                      <option value="alvenaria">Alvenaria (10 cm)</option>
+                      <option value="drywall">Drywall Gesso Acartonado (9,5 cm)</option>
+                    </select>
+                  </label>
+
+                  <label className="block space-y-1">
                     <span className="text-xs text-slate-400">Tipo de Cobertura</span>
                     <select
                       value={cm.roofType}
@@ -403,7 +429,7 @@ export const ConstructionAndStructureModule: React.FC<ConstructionAndStructureMo
                     </select>
                   </label>
 
-                  <label className="block space-y-1">
+                  <label className="block space-y-1 sm:col-span-2">
                     <span className="text-xs text-slate-400">Inclinação da Cobertura (%)</span>
                     <input
                       type="number"

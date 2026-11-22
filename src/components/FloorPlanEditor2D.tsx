@@ -35,6 +35,8 @@ import type {
   FurnitureCategory,
   FurnitureItem,
   Opening,
+  OpeningKind,
+  OpeningRole,
   Point2D,
   Project,
   UnitType,
@@ -52,8 +54,14 @@ interface FloorPlanEditor2DProps {
   canRedo: boolean;
 }
 
-type ToolMode = 'select' | 'wall' | 'door' | 'window' | 'furniture' | 'measure';
+type ToolMode = 'select' | 'wall' | 'door' | 'window' | 'vitro' | 'furniture' | 'measure';
 type ScopeMode = 'tipologia' | 'pavimento';
+
+const FIXED_DOOR_WIDTHS: Partial<Record<OpeningRole, number>> = {
+  entrada: 0.8,
+  banheiro: 0.6,
+  quarto: 0.7,
+};
 
 type SelectedElement =
   | { kind: 'wall'; id: string }
@@ -108,6 +116,7 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
   const [scope, setScope] = useState<ScopeMode>('tipologia');
   const [selectedFloorId, setSelectedFloorId] = useState<string>(project.floors[0]?.id ?? '');
   const [tool, setTool] = useState<ToolMode>('select');
+  const [doorRolePreset, setDoorRolePreset] = useState<OpeningRole>('outro');
   const [furniturePresetIdx, setFurniturePresetIdx] = useState(0);
   const [selected, setSelected] = useState<SelectedElement>(null);
 
@@ -135,12 +144,21 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
   const [lastMeasuredDist, setLastMeasuredDist] = useState<number | null>(null);
   const [isPanning, setIsPanning] = useState(false);
   const [panOrigin, setPanOrigin] = useState<Point2D>({ x: 0, y: 0 });
-  const [draggingItem, setDraggingItem] = useState<{
-    kind: 'furniture' | 'unit_instance';
-    id: string;
-    offsetX: number;
-    offsetY: number;
-  } | null>(null);
+  const [draggingItem, setDraggingItem] = useState<
+    | { kind: 'furniture'; id: string; offsetX: number; offsetY: number }
+    | { kind: 'unit_instance'; id: string; offsetX: number; offsetY: number }
+    | {
+        kind: 'wall_body';
+        id: string;
+        originPt: Point2D;
+        origStart: Point2D;
+        origEnd: Point2D;
+      }
+    | { kind: 'wall_start'; id: string }
+    | { kind: 'wall_end'; id: string }
+    | { kind: 'opening'; id: string }
+    | null
+  >(null);
 
   const svgRef = useRef<SVGSVGElement>(null);
 
@@ -268,25 +286,43 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
         return;
       }
 
-      if (tool === 'door' || tool === 'window') {
+      if (tool === 'door' || tool === 'window' || tool === 'vitro') {
         const hit = findNearestWall(pt, activeUt.walls);
         if (hit) {
           const wLen = getWallLength(hit.wall);
-          const defW = tool === 'door' ? 0.8 : 1.0;
-          const offset = round2(Math.max(0.05, Math.min(wLen - defW - 0.05, hit.offset - defW / 2)));
+          const isDoor = tool === 'door';
+          const isVitro = tool === 'vitro';
+          const role: OpeningRole | undefined = isDoor ? doorRolePreset : undefined;
+          const fixedW = role ? FIXED_DOOR_WIDTHS[role] : undefined;
+          const defW = isDoor ? (fixedW ?? 0.8) : isVitro ? 0.6 : 1.0;
+          const offset = round2(
+            Math.max(0.04, Math.min(Math.max(0.04, wLen - defW - 0.04), hit.offset - defW / 2)),
+          );
           const newOp: Opening = {
             id: nextId('op'),
-            code: `${tool === 'door' ? 'P' : 'J'}${activeUt.openings.length + 1}`,
+            code: `${isDoor ? 'P' : isVitro ? 'V' : 'J'}${activeUt.openings.length + 1}`,
             wallId: hit.wall.id,
-            type: tool === 'door' ? 'porta' : 'janela',
-            subtype: tool === 'door' ? 'Porta interna de abrir' : 'Janela de correr',
+            type: isDoor ? 'porta' : 'janela',
+            role,
+            openingKind: isDoor ? 'porta_abrir' : isVitro ? 'vitro_basculante' : 'janela_correr',
+            subtype: isDoor
+              ? role === 'entrada'
+                ? 'Porta de entrada social 80x210cm'
+                : role === 'banheiro'
+                  ? 'Porta de banheiro 60x210cm'
+                  : role === 'quarto'
+                    ? 'Porta de quarto 70x210cm'
+                    : 'Porta interna de abrir'
+              : isVitro
+                ? 'Vitrô basculante alumínio'
+                : 'Janela de correr',
             offsetAlongWall: offset,
             width: defW,
-            height: tool === 'door' ? 2.1 : 1.1,
-            sillHeight: tool === 'door' ? 0 : 1.0,
+            height: isDoor ? 2.1 : isVitro ? 0.6 : 1.1,
+            sillHeight: isDoor ? 0 : isVitro ? 1.6 : 1.0,
             thickness: 0.04,
-            swingDirection: tool === 'door' ? 'left_in' : 'sliding',
-            material: tool === 'door' ? 'Madeira' : 'Alumínio + vidro',
+            swingDirection: isDoor ? 'left_in' : 'sliding',
+            material: isDoor ? 'Madeira' : 'Alumínio + vidro',
           };
           updateActiveUt(
             (ut) => ({ ...ut, openings: [...ut.openings, newOp] }),
@@ -379,6 +415,64 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
             f.id === draggingItem.id ? { ...f, x: nx, y: ny } : f,
           ),
         }));
+      } else if (draggingItem.kind === 'wall_body' && scope === 'tipologia' && activeUt) {
+        const dx = snapVal(pt.x - draggingItem.originPt.x);
+        const dy = snapVal(pt.y - draggingItem.originPt.y);
+        updateActiveUt((ut) => ({
+          ...ut,
+          walls: ut.walls.map((w) =>
+            w.id === draggingItem.id
+              ? {
+                  ...w,
+                  start: {
+                    x: round2(draggingItem.origStart.x + dx),
+                    y: round2(draggingItem.origStart.y + dy),
+                  },
+                  end: {
+                    x: round2(draggingItem.origEnd.x + dx),
+                    y: round2(draggingItem.origEnd.y + dy),
+                  },
+                }
+              : w,
+          ),
+        }));
+      } else if (
+        (draggingItem.kind === 'wall_start' || draggingItem.kind === 'wall_end') &&
+        scope === 'tipologia' &&
+        activeUt
+      ) {
+        updateActiveUt((ut) => ({
+          ...ut,
+          walls: ut.walls.map((w) => {
+            if (w.id !== draggingItem.id) return w;
+            const targetPt = { x: round2(pt.x), y: round2(pt.y) };
+            const nextStart = draggingItem.kind === 'wall_start' ? targetPt : w.start;
+            const nextEnd = draggingItem.kind === 'wall_end' ? targetPt : w.end;
+            if (distance2D(nextStart, nextEnd) < 0.2) return w;
+            return { ...w, start: nextStart, end: nextEnd };
+          }),
+        }));
+      } else if (draggingItem.kind === 'opening' && scope === 'tipologia' && activeUt) {
+        updateActiveUt((ut) => {
+          const op = ut.openings.find((o) => o.id === draggingItem.id);
+          if (!op) return ut;
+          const wall = ut.walls.find((w) => w.id === op.wallId);
+          if (!wall) return ut;
+          const dx = wall.end.x - wall.start.x;
+          const dy = wall.end.y - wall.start.y;
+          const wallLen = Math.hypot(dx, dy);
+          if (wallLen < 0.1) return ut;
+          const t = ((pt.x - wall.start.x) * dx + (pt.y - wall.start.y) * dy) / (wallLen * wallLen);
+          const centerOffset = t * wallLen;
+          const maxOff = Math.max(0.02, wallLen - op.width - 0.02);
+          const nextOff = round2(Math.max(0.02, Math.min(maxOff, centerOffset - op.width / 2)));
+          return {
+            ...ut,
+            openings: ut.openings.map((o) =>
+              o.id === op.id ? { ...o, offsetAlongWall: nextOff } : o,
+            ),
+          };
+        });
       } else if (draggingItem.kind === 'unit_instance' && scope === 'pavimento' && activeFloor) {
         const nx = snapVal(pt.x - draggingItem.offsetX);
         const ny = snapVal(pt.y - draggingItem.offsetY);
@@ -597,18 +691,19 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
                   y={f.y}
                   width={w}
                   depth={d}
-                  stroke={isSel ? '#60A5FA' : '#94A3B8'}
+                  stroke={isSel ? '#60A5FA' : (f.elevationM ?? 0) > 0.5 ? '#22D3EE' : '#94A3B8'}
                   fill={isSel ? 'rgba(47,124,246,0.22)' : 'rgba(30,41,59,0.55)'}
                   accent={isSel ? '#93C5FD' : '#38BDF8'}
                   strokeWidth={isSel ? 0.03 : 0.018}
                   detailed={true}
+                  stairSpec={f.stairSpec}
                 />
                 {interactive && (
                   <text
                     x={fx + w / 2}
                     y={f.y + d + 0.08}
                     textAnchor="middle"
-                    fill="#94A3B8"
+                    fill={(f.elevationM ?? 0) > 0.5 ? '#22D3EE' : '#94A3B8'}
                     fontSize="0.09"
                   >
                     {f.name.split(' ')[0]}
@@ -618,10 +713,40 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
             );
           })}
 
+        {/* Projeção do Mezanino (linha tracejada técnica em planta) */}
+        {ut.hasMezzanine && ut.mezzanine?.enabled && ut.ceilingHeight >= 3.0 && (
+          <g pointerEvents="none">
+            <rect
+              x={isMirrored ? ut.width - ut.mezzanine.x - ut.mezzanine.width : ut.mezzanine.x}
+              y={ut.mezzanine.y}
+              width={ut.mezzanine.width}
+              height={ut.mezzanine.depth}
+              fill="rgba(34, 211, 238, 0.06)"
+              stroke="#22D3EE"
+              strokeWidth="0.025"
+              strokeDasharray="0.14 0.09"
+            />
+            <text
+              x={(isMirrored ? ut.width - ut.mezzanine.x - ut.mezzanine.width : ut.mezzanine.x) + ut.mezzanine.width / 2}
+              y={ut.mezzanine.y + 0.24}
+              textAnchor="middle"
+              fill="#22D3EE"
+              fontSize="0.14"
+              fontFamily="JetBrains Mono, monospace"
+            >
+              PROJ. MEZANINO (+{ut.mezzanine.elevationM.toFixed(2)}m)
+            </text>
+          </g>
+        )}
+
         {/* Walls */}
         {layers.walls &&
           ut.walls.map((w) => {
             const isSel = interactive && selected?.kind === 'wall' && selected.id === w.id;
+            const isDrywall =
+              !w.isExternal &&
+              ((w.material || '').toLowerCase().includes('drywall') ||
+                (w.material || '').toLowerCase().includes('gesso'));
             return (
               <g
                 key={w.id}
@@ -629,23 +754,61 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
                   if (!interactive || tool !== 'select') return;
                   e.stopPropagation();
                   setSelected({ kind: 'wall', id: w.id });
+                  const pt = clientToWorld(e.clientX, e.clientY);
+                  setDraggingItem({
+                    kind: 'wall_body',
+                    id: w.id,
+                    originPt: pt,
+                    origStart: { ...w.start },
+                    origEnd: { ...w.end },
+                  });
                 }}
-                className={interactive ? 'cursor-pointer' : ''}
+                className={interactive && tool === 'select' ? 'cursor-move' : ''}
               >
                 <line
                   x1={mapX(w.start.x)}
                   y1={w.start.y}
                   x2={mapX(w.end.x)}
                   y2={w.end.y}
-                  stroke={isSel ? '#60A5FA' : w.isExternal ? '#E2E8F0' : '#94A3B8'}
+                  stroke={isSel ? '#60A5FA' : w.isExternal ? '#E2E8F0' : isDrywall ? '#38BDF8' : '#94A3B8'}
                   strokeWidth={w.thickness}
                   strokeLinecap="square"
                 />
+                {isSel && (
+                  <>
+                    <circle
+                      cx={mapX(w.start.x)}
+                      cy={w.start.y}
+                      r={0.085}
+                      fill="#2F7CF6"
+                      stroke="#FFFFFF"
+                      strokeWidth="0.02"
+                      className="cursor-grab"
+                      onPointerDown={(e) => {
+                        e.stopPropagation();
+                        setDraggingItem({ kind: 'wall_start', id: w.id });
+                      }}
+                    />
+                    <circle
+                      cx={mapX(w.end.x)}
+                      cy={w.end.y}
+                      r={0.085}
+                      fill="#2F7CF6"
+                      stroke="#FFFFFF"
+                      strokeWidth="0.02"
+                      className="cursor-grab"
+                      onPointerDown={(e) => {
+                        e.stopPropagation();
+                        setDraggingItem({ kind: 'wall_end', id: w.id });
+                      }}
+                    />
+                  </>
+                )}
               </g>
             );
           })}
 
-        {/* Openings (Doors with swing arc & Windows) */}
+        {/* Openings (Doors with swing arc, Windows & Vitrôs) */}
         {layers.openings &&
           ut.openings.map((op) => {
             const wall = ut.walls.find((w) => w.id === op.wallId);
@@ -655,6 +818,10 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
             const cy = center.y;
             const angleDeg = (getWallAngleRad(wall) * 180) / Math.PI;
             const isSel = interactive && selected?.kind === 'opening' && selected.id === op.id;
+            const isVitro =
+              op.openingKind?.startsWith('vitro_') ||
+              op.subtype.toLowerCase().includes('vitrô') ||
+              op.subtype.toLowerCase().includes('basculante');
 
             return (
               <g
@@ -664,8 +831,9 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
                   if (!interactive || tool !== 'select') return;
                   e.stopPropagation();
                   setSelected({ kind: 'opening', id: op.id });
+                  setDraggingItem({ kind: 'opening', id: op.id });
                 }}
-                className={interactive ? 'cursor-pointer' : ''}
+                className={interactive && tool === 'select' ? 'cursor-move' : ''}
               >
                 {/* Clear wall break */}
                 <rect
@@ -682,9 +850,9 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
                       y={-0.04}
                       width={op.width}
                       height={0.08}
-                      fill="#0EA5E9"
+                      fill={isVitro ? '#22D3EE' : '#0EA5E9'}
                       fillOpacity={0.35}
-                      stroke={isSel ? '#60A5FA' : '#38BDF8'}
+                      stroke={isSel ? '#60A5FA' : isVitro ? '#22D3EE' : '#38BDF8'}
                       strokeWidth="0.025"
                     />
                     <line
@@ -694,6 +862,31 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
                       y2={0}
                       stroke="#E0F2FE"
                       strokeWidth="0.015"
+                    />
+                    {isVitro && (
+                      <>
+                        <line x1={-op.width / 2} y1={-0.055} x2={op.width / 2} y2={-0.055} stroke="#22D3EE" strokeWidth="0.012" strokeDasharray="0.04 0.03" />
+                        <line x1={-op.width / 2} y1={0.055} x2={op.width / 2} y2={0.055} stroke="#22D3EE" strokeWidth="0.012" strokeDasharray="0.04 0.03" />
+                      </>
+                    )}
+                  </>
+                ) : op.swingDirection === 'sliding' || op.openingKind === 'porta_correr' ? (
+                  <>
+                    <rect
+                      x={-op.width / 2}
+                      y={-0.02}
+                      width={op.width}
+                      height={0.04}
+                      fill={isSel ? '#60A5FA' : '#F59E0B'}
+                    />
+                    <line
+                      x1={-op.width / 2}
+                      y1={0.05}
+                      x2={op.width * 0.5}
+                      y2={0.05}
+                      stroke={isSel ? '#60A5FA' : '#F59E0B'}
+                      strokeDasharray="0.06 0.04"
+                      strokeWidth="0.018"
                     />
                   </>
                 ) : (
@@ -910,6 +1103,7 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
                 { id: 'wall', label: 'Parede', Icon: PenTool },
                 { id: 'door', label: 'Porta', Icon: Move },
                 { id: 'window', label: 'Janela', Icon: Grid3X3 },
+                { id: 'vitro', label: 'Vitrô', Icon: Grid3X3 },
                 { id: 'furniture', label: 'Mobiliário', Icon: Copy },
                 { id: 'measure', label: 'Cotar', Icon: Ruler },
               ] as const
@@ -931,6 +1125,20 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
                 {label}
               </button>
             ))}
+
+            {tool === 'door' && (
+              <select
+                value={doorRolePreset}
+                onChange={(e) => setDoorRolePreset(e.target.value as OpeningRole)}
+                aria-label="Função da porta"
+                className="px-2 py-1 text-xs rounded bg-[#14161A] border border-[#2F7CF6] text-white"
+              >
+                <option value="entrada">Entrada (0,80m fixo)</option>
+                <option value="banheiro">Banheiro (0,60m fixo)</option>
+                <option value="quarto">Quarto (0,70m fixo)</option>
+                <option value="outro">Outra porta (livre)</option>
+              </select>
+            )}
 
             {tool === 'furniture' && (
               <select
@@ -1289,41 +1497,170 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
           {selectedWall && (
             <div className="space-y-3 text-xs">
               <div className="font-semibold text-[#60A5FA]">Parede {selectedWall.code}</div>
-              <div>Comprimento: <strong className="font-mono">{getWallLength(selectedWall).toFixed(2)} m</strong></div>
               <div>
-                <label className="block text-[11px] text-[#949BA8] mb-1">Espessura (m)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min={0.06}
-                  value={selectedWall.thickness}
-                  onChange={(e) => {
-                    const val = Number(e.target.value);
-                    updateActiveUt((ut) => ({
-                      ...ut,
-                      walls: ut.walls.map((w) => (w.id === selectedWall.id ? { ...w, thickness: val } : w)),
-                    }));
-                  }}
-                  className="w-full px-2 py-1 font-mono bg-[#14161A] border border-[#2A2F38] rounded text-white"
-                />
+                Comprimento: <strong className="font-mono">{getWallLength(selectedWall).toFixed(2)} m</strong>
               </div>
-              <div>
-                <label className="block text-[11px] text-[#949BA8] mb-1">Altura (m)</label>
-                <input
-                  type="number"
-                  step="0.05"
-                  min={1.0}
-                  value={selectedWall.height}
-                  onChange={(e) => {
-                    const val = Number(e.target.value);
-                    updateActiveUt((ut) => ({
-                      ...ut,
-                      walls: ut.walls.map((w) => (w.id === selectedWall.id ? { ...w, height: val } : w)),
-                    }));
-                  }}
-                  className="w-full px-2 py-1 font-mono bg-[#14161A] border border-[#2A2F38] rounded text-white"
-                />
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[10px] text-[#949BA8] mb-0.5">Início X (m)</label>
+                  <input
+                    type="number"
+                    step="0.05"
+                    value={selectedWall.start.x}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      updateActiveUt((ut) => ({
+                        ...ut,
+                        walls: ut.walls.map((w) =>
+                          w.id === selectedWall.id ? { ...w, start: { ...w.start, x: val } } : w,
+                        ),
+                      }));
+                    }}
+                    className="w-full px-2 py-1 font-mono bg-[#14161A] border border-[#2A2F38] rounded text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] text-[#949BA8] mb-0.5">Início Y (m)</label>
+                  <input
+                    type="number"
+                    step="0.05"
+                    value={selectedWall.start.y}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      updateActiveUt((ut) => ({
+                        ...ut,
+                        walls: ut.walls.map((w) =>
+                          w.id === selectedWall.id ? { ...w, start: { ...w.start, y: val } } : w,
+                        ),
+                      }));
+                    }}
+                    className="w-full px-2 py-1 font-mono bg-[#14161A] border border-[#2A2F38] rounded text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] text-[#949BA8] mb-0.5">Fim X (m)</label>
+                  <input
+                    type="number"
+                    step="0.05"
+                    value={selectedWall.end.x}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      updateActiveUt((ut) => ({
+                        ...ut,
+                        walls: ut.walls.map((w) =>
+                          w.id === selectedWall.id ? { ...w, end: { ...w.end, x: val } } : w,
+                        ),
+                      }));
+                    }}
+                    className="w-full px-2 py-1 font-mono bg-[#14161A] border border-[#2A2F38] rounded text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] text-[#949BA8] mb-0.5">Fim Y (m)</label>
+                  <input
+                    type="number"
+                    step="0.05"
+                    value={selectedWall.end.y}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      updateActiveUt((ut) => ({
+                        ...ut,
+                        walls: ut.walls.map((w) =>
+                          w.id === selectedWall.id ? { ...w, end: { ...w.end, y: val } } : w,
+                        ),
+                      }));
+                    }}
+                    className="w-full px-2 py-1 font-mono bg-[#14161A] border border-[#2A2F38] rounded text-white"
+                  />
+                </div>
               </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[11px] text-[#949BA8] mb-1">Espessura (m)</label>
+                  <input
+                    type="number"
+                    step="0.005"
+                    min={0.06}
+                    value={selectedWall.thickness}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      updateActiveUt((ut) => ({
+                        ...ut,
+                        walls: ut.walls.map((w) => (w.id === selectedWall.id ? { ...w, thickness: val } : w)),
+                      }));
+                    }}
+                    className="w-full px-2 py-1 font-mono bg-[#14161A] border border-[#2A2F38] rounded text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] text-[#949BA8] mb-1">Altura (m)</label>
+                  <input
+                    type="number"
+                    step="0.05"
+                    min={1.0}
+                    value={selectedWall.height}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      updateActiveUt((ut) => ({
+                        ...ut,
+                        walls: ut.walls.map((w) => (w.id === selectedWall.id ? { ...w, height: val } : w)),
+                      }));
+                    }}
+                    className="w-full px-2 py-1 font-mono bg-[#14161A] border border-[#2A2F38] rounded text-white"
+                  />
+                </div>
+              </div>
+              {!selectedWall.isExternal && (
+                <div>
+                  <label className="block text-[11px] text-[#949BA8] mb-1">Divisória Interna</label>
+                  <div className="grid grid-cols-2 gap-1">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateActiveUt((ut) => ({
+                          ...ut,
+                          walls: ut.walls.map((w) =>
+                            w.id === selectedWall.id
+                              ? { ...w, thickness: 0.1, material: 'Alvenaria Bloco Cerâmico' }
+                              : w,
+                          ),
+                        }))
+                      }
+                      className={`px-2 py-1 text-[11px] rounded border ${
+                        !(selectedWall.material || '').toLowerCase().includes('drywall')
+                          ? 'border-[#2F7CF6] bg-[#2F7CF6]/20 text-white font-semibold'
+                          : 'border-[#2A2F38] bg-[#14161A] text-[#949BA8]'
+                      }`}
+                    >
+                      Alvenaria
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateActiveUt((ut) => ({
+                          ...ut,
+                          walls: ut.walls.map((w) =>
+                            w.id === selectedWall.id
+                              ? {
+                                  ...w,
+                                  thickness: 0.095,
+                                  material: 'Drywall Gesso Acartonado ST/RU (9,5cm) + Lã Mineral',
+                                }
+                              : w,
+                          ),
+                        }))
+                      }
+                      className={`px-2 py-1 text-[11px] rounded border ${
+                        (selectedWall.material || '').toLowerCase().includes('drywall')
+                          ? 'border-[#2F7CF6] bg-[#2F7CF6]/20 text-white font-semibold'
+                          : 'border-[#2A2F38] bg-[#14161A] text-[#949BA8]'
+                      }`}
+                    >
+                      Drywall
+                    </button>
+                  </div>
+                </div>
+              )}
               <div>
                 <label className="block text-[11px] text-[#949BA8] mb-1">Material</label>
                 <input
@@ -1354,13 +1691,100 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
               <div className="font-semibold text-[#F59E0B]">
                 {selectedOpening.type.toUpperCase()} {selectedOpening.code}
               </div>
+
+              {selectedOpening.type === 'porta' && (
+                <div>
+                  <label className="block text-[11px] text-[#949BA8] mb-1">
+                    Função / Regra de Largura
+                  </label>
+                  <select
+                    value={selectedOpening.role ?? 'outro'}
+                    onChange={(e) => {
+                      const nextRole = e.target.value as OpeningRole;
+                      const fixedW = FIXED_DOOR_WIDTHS[nextRole];
+                      updateActiveUt((ut) => ({
+                        ...ut,
+                        openings: ut.openings.map((o) =>
+                          o.id === selectedOpening.id
+                            ? { ...o, role: nextRole, width: fixedW ?? o.width }
+                            : o,
+                        ),
+                      }));
+                    }}
+                    className="w-full px-2 py-1 rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                  >
+                    <option value="entrada">Entrada Social (0,80m fixo)</option>
+                    <option value="banheiro">Banheiro (0,60m fixo)</option>
+                    <option value="quarto">Quarto (0,70m fixo)</option>
+                    <option value="outro">Outra porta (largura livre)</option>
+                  </select>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-[11px] text-[#949BA8] mb-1">Modelo / Tipo</label>
+                <select
+                  value={
+                    selectedOpening.openingKind ??
+                    (selectedOpening.type === 'porta' ? 'porta_abrir' : 'janela_correr')
+                  }
+                  onChange={(e) => {
+                    const nextKind = e.target.value as OpeningKind;
+                    updateActiveUt((ut) => ({
+                      ...ut,
+                      openings: ut.openings.map((o) =>
+                        o.id === selectedOpening.id
+                          ? {
+                              ...o,
+                              openingKind: nextKind,
+                              swingDirection:
+                                nextKind === 'porta_correr' || nextKind !== 'porta_abrir'
+                                  ? 'sliding'
+                                  : o.swingDirection === 'sliding'
+                                    ? 'left_in'
+                                    : o.swingDirection,
+                            }
+                          : o,
+                      ),
+                    }));
+                  }}
+                  className="w-full px-2 py-1 rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                >
+                  {selectedOpening.type === 'porta' ? (
+                    <>
+                      <option value="porta_abrir">Porta de Abrir</option>
+                      <option value="porta_correr">Porta de Correr</option>
+                    </>
+                  ) : (
+                    <>
+                      <option value="janela_correr">Janela de Correr</option>
+                      <option value="vitro_basculante">Vitrô Basculante</option>
+                      <option value="vitro_maxim_ar">Vitrô Maxim-Ar</option>
+                      <option value="vitro_fixo">Vitrô Fixo</option>
+                    </>
+                  )}
+                </select>
+              </div>
+
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block text-[11px] text-[#949BA8] mb-1">Largura (m)</label>
+                  <label className="block text-[11px] text-[#949BA8] mb-1">
+                    Largura (m)
+                    {selectedOpening.type === 'porta' &&
+                    selectedOpening.role &&
+                    FIXED_DOOR_WIDTHS[selectedOpening.role] !== undefined
+                      ? ' · Fixo'
+                      : ''}
+                  </label>
                   <input
                     type="number"
                     step="0.05"
                     min={0.4}
+                    disabled={Boolean(
+                      selectedOpening.type === 'porta' &&
+                        selectedOpening.role &&
+                        FIXED_DOOR_WIDTHS[selectedOpening.role] !== undefined,
+                    )}
                     value={selectedOpening.width}
                     onChange={(e) => {
                       const val = Number(e.target.value);
@@ -1371,7 +1795,7 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
                         ),
                       }));
                     }}
-                    className="w-full px-2 py-1 font-mono bg-[#14161A] border border-[#2A2F38] rounded text-white"
+                    className="w-full px-2 py-1 font-mono bg-[#14161A] border border-[#2A2F38] rounded text-white disabled:opacity-60"
                   />
                 </div>
                 <div>
@@ -1394,24 +1818,45 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
                   />
                 </div>
               </div>
-              <div>
-                <label className="block text-[11px] text-[#949BA8] mb-1">Peitoril (m)</label>
-                <input
-                  type="number"
-                  step="0.05"
-                  min={0}
-                  value={selectedOpening.sillHeight}
-                  onChange={(e) => {
-                    const val = Number(e.target.value);
-                    updateActiveUt((ut) => ({
-                      ...ut,
-                      openings: ut.openings.map((o) =>
-                        o.id === selectedOpening.id ? { ...o, sillHeight: val } : o,
-                      ),
-                    }));
-                  }}
-                  className="w-full px-2 py-1 font-mono bg-[#14161A] border border-[#2A2F38] rounded text-white"
-                />
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[11px] text-[#949BA8] mb-1">Peitoril (m)</label>
+                  <input
+                    type="number"
+                    step="0.05"
+                    min={0}
+                    value={selectedOpening.sillHeight}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      updateActiveUt((ut) => ({
+                        ...ut,
+                        openings: ut.openings.map((o) =>
+                          o.id === selectedOpening.id ? { ...o, sillHeight: val } : o,
+                        ),
+                      }));
+                    }}
+                    className="w-full px-2 py-1 font-mono bg-[#14161A] border border-[#2A2F38] rounded text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] text-[#949BA8] mb-1">Pos. na Parede (m)</label>
+                  <input
+                    type="number"
+                    step="0.05"
+                    min={0.02}
+                    value={selectedOpening.offsetAlongWall}
+                    onChange={(e) => {
+                      const val = Math.max(0.02, Number(e.target.value));
+                      updateActiveUt((ut) => ({
+                        ...ut,
+                        openings: ut.openings.map((o) =>
+                          o.id === selectedOpening.id ? { ...o, offsetAlongWall: val } : o,
+                        ),
+                      }));
+                    }}
+                    className="w-full px-2 py-1 font-mono bg-[#14161A] border border-[#2A2F38] rounded text-white"
+                  />
+                </div>
               </div>
               <div className="flex gap-2">
                 <button
@@ -1436,6 +1881,42 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
             <div className="space-y-3 text-xs">
               <div className="font-semibold text-[#60A5FA]">{selectedFurniture.name}</div>
               <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[10px] text-[#949BA8] mb-0.5">Pos. X (m)</label>
+                  <input
+                    type="number"
+                    step="0.05"
+                    value={selectedFurniture.x}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      updateActiveUt((ut) => ({
+                        ...ut,
+                        furniture: ut.furniture.map((f) =>
+                          f.id === selectedFurniture.id ? { ...f, x: val } : f,
+                        ),
+                      }));
+                    }}
+                    className="w-full px-2 py-1 font-mono bg-[#14161A] border border-[#2A2F38] rounded text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] text-[#949BA8] mb-0.5">Pos. Y (m)</label>
+                  <input
+                    type="number"
+                    step="0.05"
+                    value={selectedFurniture.y}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      updateActiveUt((ut) => ({
+                        ...ut,
+                        furniture: ut.furniture.map((f) =>
+                          f.id === selectedFurniture.id ? { ...f, y: val } : f,
+                        ),
+                      }));
+                    }}
+                    className="w-full px-2 py-1 font-mono bg-[#14161A] border border-[#2A2F38] rounded text-white"
+                  />
+                </div>
                 <div>
                   <label className="block text-[11px] text-[#949BA8] mb-1">Largura (m)</label>
                   <input
@@ -1474,6 +1955,44 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
                     className="w-full px-2 py-1 font-mono bg-[#14161A] border border-[#2A2F38] rounded text-white"
                   />
                 </div>
+                <div>
+                  <label className="block text-[10px] text-[#949BA8] mb-0.5">Altura (m)</label>
+                  <input
+                    type="number"
+                    step="0.05"
+                    min={0.05}
+                    value={selectedFurniture.height}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      updateActiveUt((ut) => ({
+                        ...ut,
+                        furniture: ut.furniture.map((f) =>
+                          f.id === selectedFurniture.id ? { ...f, height: val } : f,
+                        ),
+                      }));
+                    }}
+                    className="w-full px-2 py-1 font-mono bg-[#14161A] border border-[#2A2F38] rounded text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] text-[#949BA8] mb-0.5">Nível Z (m)</label>
+                  <input
+                    type="number"
+                    step="0.05"
+                    min={0}
+                    value={selectedFurniture.elevationM ?? 0}
+                    onChange={(e) => {
+                      const val = Math.max(0, Number(e.target.value));
+                      updateActiveUt((ut) => ({
+                        ...ut,
+                        furniture: ut.furniture.map((f) =>
+                          f.id === selectedFurniture.id ? { ...f, elevationM: val } : f,
+                        ),
+                      }));
+                    }}
+                    className="w-full px-2 py-1 font-mono bg-[#14161A] border border-[#2A2F38] rounded text-white"
+                  />
+                </div>
               </div>
               <div className="flex gap-1.5">
                 <button
@@ -1504,12 +2023,80 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
           )}
 
           {selectedRoom && (
-            <div className="space-y-2 text-xs">
+            <div className="space-y-3 text-xs">
               <div className="font-semibold text-white">
                 {selectedRoom.code} — {selectedRoom.name}
               </div>
               <div className="font-mono text-[#C4C9D4] tabular-nums">
-                {selectedRoom.width}m × {selectedRoom.depth}m = {getRoomArea(selectedRoom)} m²
+                Área: {getRoomArea(selectedRoom)} m²
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[10px] text-[#949BA8] mb-0.5">Pos. X (m)</label>
+                  <input
+                    type="number"
+                    step="0.05"
+                    value={selectedRoom.x}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      updateActiveUt((ut) => ({
+                        ...ut,
+                        rooms: ut.rooms.map((r) => (r.id === selectedRoom.id ? { ...r, x: val } : r)),
+                      }));
+                    }}
+                    className="w-full px-2 py-1 font-mono bg-[#14161A] border border-[#2A2F38] rounded text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] text-[#949BA8] mb-0.5">Pos. Y (m)</label>
+                  <input
+                    type="number"
+                    step="0.05"
+                    value={selectedRoom.y}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      updateActiveUt((ut) => ({
+                        ...ut,
+                        rooms: ut.rooms.map((r) => (r.id === selectedRoom.id ? { ...r, y: val } : r)),
+                      }));
+                    }}
+                    className="w-full px-2 py-1 font-mono bg-[#14161A] border border-[#2A2F38] rounded text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] text-[#949BA8] mb-0.5">Largura (m)</label>
+                  <input
+                    type="number"
+                    step="0.05"
+                    min={0.6}
+                    value={selectedRoom.width}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      updateActiveUt((ut) => ({
+                        ...ut,
+                        rooms: ut.rooms.map((r) => (r.id === selectedRoom.id ? { ...r, width: val } : r)),
+                      }));
+                    }}
+                    className="w-full px-2 py-1 font-mono bg-[#14161A] border border-[#2A2F38] rounded text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] text-[#949BA8] mb-0.5">Comp. (m)</label>
+                  <input
+                    type="number"
+                    step="0.05"
+                    min={0.6}
+                    value={selectedRoom.depth}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      updateActiveUt((ut) => ({
+                        ...ut,
+                        rooms: ut.rooms.map((r) => (r.id === selectedRoom.id ? { ...r, depth: val } : r)),
+                      }));
+                    }}
+                    className="w-full px-2 py-1 font-mono bg-[#14161A] border border-[#2A2F38] rounded text-white"
+                  />
+                </div>
               </div>
               <div className="text-[11px] text-[#949BA8]">
                 Piso: {selectedRoom.finishes.floor}

@@ -309,6 +309,10 @@ export const CadSheetPreview: React.FC<CadSheetPreviewProps> = ({
         <pattern id="cadMasonryHatch" width="6" height="6" patternUnits="userSpaceOnUse">
           <path d="M 0 6 L 6 0" stroke={pal.wallExtStroke} strokeWidth="0.45" opacity="0.35" />
         </pattern>
+        <pattern id="cadDrywallHatch" width="5" height="5" patternUnits="userSpaceOnUse">
+          <circle cx="1.5" cy="1.5" r="0.6" fill={pal.wallIntStroke} opacity="0.45" />
+          <circle cx="4" cy="4" r="0.6" fill={pal.wallIntStroke} opacity="0.45" />
+        </pattern>
         <pattern id="cadConcHatch" width="8" height="8" patternUnits="userSpaceOnUse">
           <path
             d="M 0 8 L 8 0 M -2 2 L 2 -2 M 6 10 L 10 6"
@@ -545,28 +549,58 @@ export const CadSheetPreview: React.FC<CadSheetPreviewProps> = ({
         <rect x={ox - 3} y={baseY} width={12} height={22} fill="url(#cadConcHatch)" stroke={pal.wallExtStroke} strokeWidth="1" />
         <rect x={ox + bw - 9} y={baseY} width={12} height={22} fill="url(#cadConcHatch)" stroke={pal.wallExtStroke} strokeWidth="1" />
 
-        {front.floors.map((fl, idx) => {
-          const yBot = baseY - fl.baseY * sc;
-          const yTop = baseY - fl.slabTopY * sc;
-          const flH = yBot - yTop;
-          const slabPx = Math.max(6, 0.15 * sc);
-          return (
-            <g key={idx}>
-              <rect x={ox} y={yBot - slabPx} width={bw} height={slabPx} fill="url(#cadConcHatch)" stroke={pal.wallExtStroke} strokeWidth="1.2" />
-              <rect x={ox} y={yTop} width={8} height={flH} fill={pal.wallExtFill} stroke={pal.wallExtStroke} strokeWidth="1.3" />
-              <rect x={ox + bw - 8} y={yTop} width={8} height={flH} fill={pal.wallExtFill} stroke={pal.wallExtStroke} strokeWidth="1.3" />
-              <rect x={ox + bw * 0.35} y={yTop} width={5} height={flH} fill={pal.wallIntFill} stroke={pal.wallIntStroke} strokeWidth="1" />
-              <rect x={ox + bw * 0.68} y={yTop} width={5} height={flH} fill={pal.wallIntFill} stroke={pal.wallIntStroke} strokeWidth="1" />
-              <line x1={ox - 20} y1={yBot - slabPx} x2={ox - 20} y2={yTop} stroke={pal.dimension} strokeWidth="1" />
-              <text x={ox - 26} y={(yBot + yTop) / 2} textAnchor="end" fill={pal.dimension} fontSize="9" fontFamily="monospace">
-                {(fl.slabTopY - fl.baseY).toFixed(2)}m
-              </text>
-              <text x={ox + bw + 16} y={yBot - 2} fill={pal.roomText} fontSize="9.5" fontFamily="monospace">
-                ⊕ +{fl.baseY.toFixed(2)}m ({fl.name})
-              </text>
-            </g>
+        {(() => {
+          const mezUt = project.unitTypes.find(
+            (u) => u.hasMezzanine && u.mezzanine?.enabled && u.ceilingHeight >= 3.0,
           );
-        })}
+          const mez = mezUt?.mezzanine;
+          return front.floors.map((fl, idx) => {
+            const yBot = baseY - fl.baseY * sc;
+            const yTop = baseY - fl.slabTopY * sc;
+            const flH = yBot - yTop;
+            const slabPx = Math.max(6, 0.15 * sc);
+            const mezX = ox + bw * 0.14;
+            const mezW = bw * 0.34;
+            const mezDeckY = mez ? baseY - (fl.baseY + mez.elevationM) * sc : 0;
+            const mezSlabPx = mez ? Math.max(4, mez.slabThicknessM * sc) : 0;
+            const railTopY = mez ? mezDeckY - 1.05 * sc : 0;
+            return (
+              <g key={idx}>
+                <rect x={ox} y={yBot - slabPx} width={bw} height={slabPx} fill="url(#cadConcHatch)" stroke={pal.wallExtStroke} strokeWidth="1.2" />
+                <rect x={ox} y={yTop} width={8} height={flH} fill={pal.wallExtFill} stroke={pal.wallExtStroke} strokeWidth="1.3" />
+                <rect x={ox + bw - 8} y={yTop} width={8} height={flH} fill={pal.wallExtFill} stroke={pal.wallExtStroke} strokeWidth="1.3" />
+                <rect x={ox + bw * 0.35} y={yTop} width={5} height={flH} fill={pal.wallIntFill} stroke={pal.wallIntStroke} strokeWidth="1" />
+                <rect x={ox + bw * 0.68} y={yTop} width={5} height={flH} fill={pal.wallIntFill} stroke={pal.wallIntStroke} strokeWidth="1" />
+                {mez && (
+                  <g>
+                    <rect
+                      x={mezX}
+                      y={mezDeckY}
+                      width={mezW}
+                      height={mezSlabPx}
+                      fill="url(#cadConcHatch)"
+                      stroke={pal.unitTag}
+                      strokeWidth="1.1"
+                    />
+                    <line x1={mezX + mezW - 2} y1={mezDeckY} x2={mezX + mezW - 2} y2={railTopY} stroke={pal.unitTag} strokeWidth="1" />
+                    <line x1={mezX} y1={railTopY} x2={mezX + mezW} y2={railTopY} stroke={pal.unitTag} strokeWidth="0.9" strokeDasharray="3 2" />
+                    <line x1={mezX + mezW + 2} y1={yBot - slabPx} x2={mezX + mezW + 24} y2={mezDeckY} stroke={pal.furniture} strokeWidth="1.3" />
+                    <text x={mezX + 6} y={mezDeckY - 6} fill={pal.unitTag} fontSize="7.5" fontFamily="monospace">
+                      MEZANINO (+{mez.elevationM.toFixed(2)}m · N/C PAV.)
+                    </text>
+                  </g>
+                )}
+                <line x1={ox - 20} y1={yBot - slabPx} x2={ox - 20} y2={yTop} stroke={pal.dimension} strokeWidth="1" />
+                <text x={ox - 26} y={(yBot + yTop) / 2} textAnchor="end" fill={pal.dimension} fontSize="9" fontFamily="monospace">
+                  {(fl.slabTopY - fl.baseY).toFixed(2)}m
+                </text>
+                <text x={ox + bw + 16} y={yBot - 2} fill={pal.roomText} fontSize="9.5" fontFamily="monospace">
+                  ⊕ +{fl.baseY.toFixed(2)}m ({fl.name})
+                </text>
+              </g>
+            );
+          });
+        })()}
 
         <rect
           x={ox - 8}
@@ -906,6 +940,40 @@ export const CadSheetPreview: React.FC<CadSheetPreviewProps> = ({
           />
         ))}
 
+        {/* Mezzanine dashed perimeter projection (never counted as a floor) */}
+        {ut.hasMezzanine &&
+          ut.mezzanine?.enabled &&
+          ut.ceilingHeight >= 3.0 &&
+          (() => {
+            const mezRoom = ut.rooms.find((r) => r.category === 'mezanino');
+            if (!mezRoom) return null;
+            return (
+              <g>
+                <rect
+                  x={ux(mezRoom.x)}
+                  y={uy(mezRoom.y)}
+                  width={mezRoom.width * uScale}
+                  height={mezRoom.depth * uScale}
+                  fill={pal.unitTag}
+                  fillOpacity={0.07}
+                  stroke={pal.unitTag}
+                  strokeDasharray="4 2"
+                  strokeWidth="1.1"
+                />
+                <text
+                  x={ux(mezRoom.x + 0.12)}
+                  y={uy(mezRoom.y + 0.28)}
+                  fill={pal.unitTag}
+                  fontSize="6.5"
+                  fontWeight="bold"
+                  fontFamily="monospace"
+                >
+                  PROJ. MEZANINO (+{ut.mezzanine.elevationM.toFixed(2)}m)
+                </text>
+              </g>
+            );
+          })()}
+
         {/* Enlarged Furniture CAD Blocks */}
         {ut.furniture.map((f) => {
           const rect = getFurnitureWorldRect(f);
@@ -922,6 +990,7 @@ export const CadSheetPreview: React.FC<CadSheetPreviewProps> = ({
               accent={pal.windowGlass}
               strokeWidth={0.95}
               detailed={true}
+              stairSpec={f.stairSpec}
             />
           );
         })}
@@ -978,8 +1047,10 @@ export const CadSheetPreview: React.FC<CadSheetPreviewProps> = ({
           );
         })}
 
-        {/* Double-line Hatched Walls */}
+        {/* Double-line Hatched Walls (Alvenaria vs Drywall) */}
         {ut.walls.map((wall) => {
+          const isDrywall =
+            !wall.isExternal && wall.material.toLowerCase().includes('drywall');
           const spans = splitWallByOpenings(wall, ut.openings);
           return spans.map((sp, sIdx) => {
             const p0 = {
@@ -995,15 +1066,16 @@ export const CadSheetPreview: React.FC<CadSheetPreviewProps> = ({
               <polygon
                 key={`enl-w-${wall.id}-${sIdx}`}
                 points={quad.map((q) => `${ux(q.x)},${uy(q.y)}`).join(' ')}
-                fill="url(#cadMasonryHatch)"
+                fill={isDrywall ? 'url(#cadDrywallHatch)' : 'url(#cadMasonryHatch)'}
                 stroke={wall.isExternal ? pal.wallExtStroke : pal.wallIntStroke}
-                strokeWidth={wall.isExternal ? 1.6 : 1.1}
+                strokeWidth={wall.isExternal ? 1.6 : isDrywall ? 0.9 : 1.1}
+                strokeDasharray={isDrywall ? '3 1.5' : undefined}
               />
             );
           });
         })}
 
-        {/* Openings w/ Door Swing & Labels */}
+        {/* Openings w/ Door Swing, Sliding & Vitrô Symbols */}
         {ut.openings.map((op) => {
           const wall = ut.walls.find((w) => w.id === op.wallId);
           if (!wall) return null;
@@ -1015,6 +1087,18 @@ export const CadSheetPreview: React.FC<CadSheetPreviewProps> = ({
           const pb = { x: pos.center.x + wux * (op.width / 2), y: pos.center.y + wuy * (op.width / 2) };
 
           if (op.type === 'porta') {
+            if (op.openingKind === 'porta_correr') {
+              const mid = { x: (pa.x + pb.x) / 2, y: (pa.y + pb.y) / 2 };
+              return (
+                <g key={`enl-op-${op.id}`}>
+                  <line x1={ux(pa.x)} y1={uy(pa.y)} x2={ux(mid.x)} y2={uy(mid.y)} stroke={pal.doorLeaf} strokeWidth="2.0" />
+                  <line x1={ux(mid.x)} y1={uy(mid.y) + 2} x2={ux(pb.x)} y2={uy(pb.y) + 2} stroke={pal.doorSwing} strokeWidth="1.4" />
+                  <text x={ux(pos.center.x)} y={uy(pos.center.y) - 4} textAnchor="middle" fill={pal.doorLeaf} fontSize="7" fontFamily="monospace">
+                    {op.code} ({Math.round(op.width * 100)})
+                  </text>
+                </g>
+              );
+            }
             const vx = pb.x - pa.x;
             const vy = pb.y - pa.y;
             const tip = { x: pa.x - vy, y: pa.y + vx };
@@ -1036,11 +1120,28 @@ export const CadSheetPreview: React.FC<CadSheetPreviewProps> = ({
             );
           }
 
+          const isVitro =
+            op.openingKind?.startsWith('vitro_') ||
+            op.subtype.toLowerCase().includes('basculante') ||
+            op.subtype.toLowerCase().includes('vitr');
           const quad = getWallQuadWorld(pa, pb, wall.thickness * 0.72);
+          const nx = -wuy * 2.2;
+          const ny = wux * 2.2;
           return (
             <g key={`enl-op-${op.id}`}>
               <polygon points={quad.map((q) => `${ux(q.x)},${uy(q.y)}`).join(' ')} fill={pal.bg} stroke={pal.windowFrame} strokeWidth="1" />
               <line x1={ux(pa.x)} y1={uy(pa.y)} x2={ux(pb.x)} y2={uy(pb.y)} stroke={pal.windowGlass} strokeWidth="1.2" />
+              {isVitro && (
+                <line
+                  x1={ux(pa.x) + nx}
+                  y1={uy(pa.y) + ny}
+                  x2={ux(pb.x) + nx}
+                  y2={uy(pb.y) + ny}
+                  stroke={pal.windowFrame}
+                  strokeWidth="0.85"
+                  strokeDasharray="2 1.5"
+                />
+              )}
               <text x={ux(pos.center.x)} y={uy(pos.center.y) - 5} textAnchor="middle" fill={pal.windowGlass} fontSize="7" fontFamily="monospace">
                 {op.code}
               </text>
@@ -1220,15 +1321,18 @@ export const CadSheetPreview: React.FC<CadSheetPreviewProps> = ({
           <rect x={0} y={-6} width={18} height={8} fill="url(#cadMasonryHatch)" stroke={pal.wallExtStroke} strokeWidth="1.2" />
           <text x={24} y={0}>Parede Alvenaria / Vedação c/ Hachura</text>
 
-          <line x1={0} y1={18} x2={14} y2={18} stroke={pal.doorLeaf} strokeWidth="1.4" />
-          <path d="M 0 18 A 12 12 0 0 1 12 6" fill="none" stroke={pal.doorSwing} strokeDasharray="2 1.5" strokeWidth="0.8" />
-          <text x={24} y={18}>Porta de Abrir c/ Arco de Giro 90°</text>
+          <rect x={0} y={6} width={18} height={6} fill="url(#cadDrywallHatch)" stroke={pal.wallIntStroke} strokeDasharray="3 1.5" strokeWidth="0.9" />
+          <text x={24} y={11}>Divisória Drywall ST/RU (9,5cm)</text>
 
-          <line x1={0} y1={34} x2={18} y2={34} stroke={pal.windowGlass} strokeWidth="1.8" />
-          <text x={24} y={37}>Esquadria / Janela c/ Peitoril</text>
+          <line x1={0} y1={24} x2={14} y2={24} stroke={pal.doorLeaf} strokeWidth="1.4" />
+          <path d="M 0 24 A 11 11 0 0 1 11 13" fill="none" stroke={pal.doorSwing} strokeDasharray="2 1.5" strokeWidth="0.8" />
+          <text x={24} y={24}>Porta (80 Entr. · 70 Quarto · 60 BWC)</text>
 
-          <line x1={0} y1={52} x2={18} y2={52} stroke={pal.axisLine} strokeDasharray="5 2 1 2" strokeWidth="0.9" />
-          <text x={24} y={55}>Eixo Estrutural / Alinhamento</text>
+          <line x1={0} y1={38} x2={18} y2={38} stroke={pal.windowGlass} strokeWidth="1.8" />
+          <text x={24} y={41}>Janela / Vitrô Basculante c/ Peitoril</text>
+
+          <line x1={0} y1={54} x2={18} y2={54} stroke={pal.axisLine} strokeDasharray="5 2 1 2" strokeWidth="0.9" />
+          <text x={24} y={57}>Eixo Estrutural / Proj. Mezanino</text>
 
           {showElectrical && (
             <>
@@ -1470,9 +1574,11 @@ export const CadSheetPreview: React.FC<CadSheetPreviewProps> = ({
 
           return (
             <g key={inst.id}>
-              {/* Double-Line Walls with masonry hatch */}
+              {/* Double-Line Walls with masonry / drywall hatch */}
               {!showRoof &&
                 ut.walls.map((wall) => {
+                  const isDrywall =
+                    !wall.isExternal && wall.material.toLowerCase().includes('drywall');
                   const spans = splitWallByOpenings(wall, ut.openings);
                   return spans.map((sp, sIdx) => {
                     const p0 = unitLocalToWorld(
@@ -1492,15 +1598,40 @@ export const CadSheetPreview: React.FC<CadSheetPreviewProps> = ({
                       <polygon
                         key={`${wall.id}-${sIdx}`}
                         points={quad.map((q) => `${mx(q.x)},${my(q.y)}`).join(' ')}
-                        fill="url(#cadMasonryHatch)"
+                        fill={isDrywall ? 'url(#cadDrywallHatch)' : 'url(#cadMasonryHatch)'}
                         stroke={wall.isExternal ? pal.wallExtStroke : pal.wallIntStroke}
-                        strokeWidth={wall.isExternal ? 1.3 : 0.85}
+                        strokeWidth={wall.isExternal ? 1.3 : isDrywall ? 0.75 : 0.85}
+                        strokeDasharray={isDrywall ? '2.5 1.2' : undefined}
                       />
                     );
                   });
                 })}
 
-              {/* Door 90° Swing Arcs & Window Triple Glazing */}
+              {/* Mezzanine dashed perimeter projection (never counted as a floor) */}
+              {!showRoof &&
+                ut.hasMezzanine &&
+                ut.mezzanine?.enabled &&
+                ut.ceilingHeight >= 3.0 &&
+                (() => {
+                  const mezRoom = ut.rooms.find((r) => r.category === 'mezanino');
+                  if (!mezRoom) return null;
+                  const mp0 = unitLocalToWorld(inst, ut, mezRoom.x, mezRoom.y);
+                  const mp1 = unitLocalToWorld(inst, ut, mezRoom.x + mezRoom.width, mezRoom.y);
+                  const mp2 = unitLocalToWorld(inst, ut, mezRoom.x + mezRoom.width, mezRoom.y + mezRoom.depth);
+                  const mp3 = unitLocalToWorld(inst, ut, mezRoom.x, mezRoom.y + mezRoom.depth);
+                  return (
+                    <polygon
+                      points={`${mx(mp0.x)},${my(mp0.y)} ${mx(mp1.x)},${my(mp1.y)} ${mx(mp2.x)},${my(mp2.y)} ${mx(mp3.x)},${my(mp3.y)}`}
+                      fill={pal.unitTag}
+                      fillOpacity={0.06}
+                      stroke={pal.unitTag}
+                      strokeDasharray="3.5 2"
+                      strokeWidth="0.8"
+                    />
+                  );
+                })()}
+
+              {/* Door 90° Swing Arcs, Sliding & Vitrô Glazing */}
               {!showRoof &&
                 ut.openings.map((op) => {
                   const wall = ut.walls.find((w) => w.id === op.wallId);
@@ -1513,6 +1644,15 @@ export const CadSheetPreview: React.FC<CadSheetPreviewProps> = ({
                   const pb = unitLocalToWorld(inst, ut, pos.center.x + ux * (op.width / 2), pos.center.y + uy * (op.width / 2));
 
                   if (op.type === 'porta') {
+                    if (op.openingKind === 'porta_correr') {
+                      const mid = { x: (pa.x + pb.x) / 2, y: (pa.y + pb.y) / 2 };
+                      return (
+                        <g key={op.id}>
+                          <line x1={mx(pa.x)} y1={my(pa.y)} x2={mx(mid.x)} y2={my(mid.y)} stroke={pal.doorLeaf} strokeWidth="1.5" />
+                          <line x1={mx(mid.x)} y1={my(mid.y) + 1.5} x2={mx(pb.x)} y2={my(pb.y) + 1.5} stroke={pal.doorSwing} strokeWidth="1" />
+                        </g>
+                      );
+                    }
                     const vx = pb.x - pa.x;
                     const vy = pb.y - pa.y;
                     const tip = { x: pa.x - vy, y: pa.y + vx };
@@ -1531,11 +1671,26 @@ export const CadSheetPreview: React.FC<CadSheetPreviewProps> = ({
                     );
                   }
 
+                  const isVitro =
+                    op.openingKind?.startsWith('vitro_') ||
+                    op.subtype.toLowerCase().includes('basculante') ||
+                    op.subtype.toLowerCase().includes('vitr');
                   const quad = getWallQuadWorld(pa, pb, wall.thickness * 0.72);
                   return (
                     <g key={op.id}>
                       <polygon points={quad.map((q) => `${mx(q.x)},${my(q.y)}`).join(' ')} fill={pal.bg} stroke={pal.windowFrame} strokeWidth="0.85" />
                       <line x1={mx(pa.x)} y1={my(pa.y)} x2={mx(pb.x)} y2={my(pb.y)} stroke={pal.windowGlass} strokeWidth="1" />
+                      {isVitro && (
+                        <line
+                          x1={mx(pa.x)}
+                          y1={my(pa.y) + 1.5}
+                          x2={mx(pb.x)}
+                          y2={my(pb.y) + 1.5}
+                          stroke={pal.windowFrame}
+                          strokeWidth="0.6"
+                          strokeDasharray="1.8 1"
+                        />
+                      )}
                     </g>
                   );
                 })}
@@ -1569,6 +1724,7 @@ export const CadSheetPreview: React.FC<CadSheetPreviewProps> = ({
                             accent={pal.windowGlass}
                             strokeWidth={0.032}
                             detailed={scale >= 12}
+                            stairSpec={fur.stairSpec}
                           />
                         );
                       })}
