@@ -72,7 +72,7 @@ const WORKFLOW_STEPS: Array<{
   label: string;
   icon: React.ComponentType<{ className?: string }>;
 }> = [
-  { id: 'terreno', num: '1', label: 'Terreno & Leis', icon: MapPin },
+  { id: 'terreno', num: '1', label: 'Terreno & Implantação', icon: MapPin },
   { id: 'planta2d', num: '2', label: 'Tipologias & Planta 2D', icon: PenTool },
   { id: 'bim3d', num: '3', label: 'Modelo BIM 3D', icon: Box },
   { id: 'engenharia', num: '4', label: 'Engenharia & Custos', icon: Calculator },
@@ -411,6 +411,8 @@ export function App() {
     depth: number;
     floorsCount: number;
     methodId: ConstructionMethodId;
+    measurementUnit?: 'm' | 'cm';
+    streetSide?: 'baixo' | 'cima' | 'esquerda' | 'direita';
   }) => {
     if (!authUser) return;
     const created = createBlankProject(params);
@@ -421,7 +423,7 @@ export function App() {
     setRedoStack([]);
     setProjectsHubOpen(false);
     setSaveState('saving');
-    saveProjectToFirestore(created, authUser.uid)
+    saveProjectToFirestore(created, authUser.uid, { isNew: true })
       .then(() => setSaveState('saved'))
       .catch((err) => {
         setSaveState('error');
@@ -439,7 +441,7 @@ export function App() {
     setProjects((list) => [copy, ...list]);
     setActiveProjectId(copy.id);
     setSaveState('saving');
-    saveProjectToFirestore(copy, authUser.uid)
+    saveProjectToFirestore(copy, authUser.uid, { isNew: true })
       .then(() => setSaveState('saved'))
       .catch(() => setSaveState('error'));
   };
@@ -493,7 +495,7 @@ export function App() {
     setSelectedUnitTypeId(stamped.unitTypes[0]?.id ?? '');
     setProjectsHubOpen(false);
     setSaveState('saving');
-    saveProjectToFirestore(stamped, authUser.uid)
+    saveProjectToFirestore(stamped, authUser.uid, { isNew: true })
       .then(async () => {
         for (const r of stamped.capturedRenders ?? []) {
           if (r.dataUrl && r.dataUrl.length <= 750000) {
@@ -1045,7 +1047,7 @@ export function App() {
                   <div className="hidden space-y-0.5 pl-6 lg:block">
                     {(
                       [
-                        ['terreno', 'Terreno & Pavimentos'],
+                        ['terreno', 'Implantação (4 Etapas)'],
                         ['urbanismo', 'Leis Urbanísticas'],
                       ] as const
                     ).map(([id, label]) => (
@@ -1215,7 +1217,11 @@ export function App() {
             <>
               {activeStep === 'terreno' && terrenoSubTab === 'terreno' && (
                 <div className="h-full overflow-y-auto">
-                  <SiteModule project={activeProject} onUpdateProject={handleUpdateProject} />
+                  <SiteModule
+                    project={activeProject}
+                    onUpdateProject={handleUpdateProject}
+                    onNavigateModule={navigateFromModule}
+                  />
                 </div>
               )}
 

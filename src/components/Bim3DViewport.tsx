@@ -29,6 +29,11 @@ import {
   createRoofTextures,
   createSiteContextTextures,
 } from '../engine/proceduralTextures';
+import {
+  getGateWorldPosition,
+  getLotBoundarySegments,
+  normalizeSiteData,
+} from '../engine/implantation';
 import { nextId } from '../engine/parametricGenerator';
 import type {
   CapturedRender,
@@ -545,6 +550,10 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
       disposableTextures.push(ctxTex.sidewalkMap, ctxTex.asphaltMap, ctxTex.grassMap);
     }
 
+    const normSite = normalizeSiteData(project.site);
+    const boundarySegs = getLotBoundarySegments(normSite);
+    const frontSeg = boundarySegs.find((s) => s.side === 'front') ?? boundarySegs[0];
+
     // 1. Site surroundings (Earth base, grass lot, sidewalk, curb, asphalt street, boundary walls)
     if (isArchRender) {
       const groundPad = new THREE.Mesh(
@@ -560,49 +569,59 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
       groundPad.receiveShadow = !isSoftwareGl;
       group.add(groundPad);
 
-      // Street + Sidewalk at the front of the lot (z = maxY - centerOffset.z)
-      const frontZ = siteBox.maxY - centerOffset.z;
-      const lotW = siteBox.width;
+      // Street + Sidewalk dynamically aligned to the configured front edge (streetSide)
+      if (frontSeg) {
+        const streetGroup = new THREE.Group();
+        const midX = (frontSeg.a.x + frontSeg.b.x) / 2 - centerOffset.x;
+        const midZ = (frontSeg.a.y + frontSeg.b.y) / 2 - centerOffset.z;
+        const outX = -frontSeg.inwardNormal.x;
+        const outZ = -frontSeg.inwardNormal.y;
+        streetGroup.position.set(midX, 0, midZ);
+        streetGroup.rotation.y = Math.atan2(outX, outZ);
 
-      const sidewalk = new THREE.Mesh(
-        new THREE.BoxGeometry(lotW + 16, 0.12, 2.4),
-        new THREE.MeshStandardMaterial({
-          map: ctxTex?.sidewalkMap ?? null,
-          color: ctxTex ? 0xffffff : 0xb8bdc4,
-          roughness: 0.85,
-        }),
-      );
-      sidewalk.position.set(0, -0.06, frontZ + 1.2);
-      sidewalk.receiveShadow = !isSoftwareGl;
-      group.add(sidewalk);
+        const frontLen = Math.max(8, frontSeg.lengthM);
 
-      const curb = new THREE.Mesh(
-        new THREE.BoxGeometry(lotW + 16, 0.14, 0.18),
-        new THREE.MeshStandardMaterial({ color: 0x94a3b8, roughness: 0.8 }),
-      );
-      curb.position.set(0, -0.07, frontZ + 2.45);
-      group.add(curb);
-
-      const street = new THREE.Mesh(
-        new THREE.BoxGeometry(lotW + 28, 0.08, 7.5),
-        new THREE.MeshStandardMaterial({
-          map: ctxTex?.asphaltMap ?? null,
-          color: ctxTex ? 0xffffff : 0x2b2f36,
-          roughness: 0.9,
-        }),
-      );
-      street.position.set(0, -0.15, frontZ + 6.3);
-      street.receiveShadow = !isSoftwareGl;
-      group.add(street);
-
-      // Dashed street lane markings
-      for (let mx = -lotW / 2 - 8; mx <= lotW / 2 + 8; mx += 3.2) {
-        const dash = new THREE.Mesh(
-          new THREE.BoxGeometry(1.5, 0.015, 0.12),
-          new THREE.MeshStandardMaterial({ color: 0xfacc15, roughness: 0.6 }),
+        const sidewalk = new THREE.Mesh(
+          new THREE.BoxGeometry(frontLen + 16, 0.12, 2.4),
+          new THREE.MeshStandardMaterial({
+            map: ctxTex?.sidewalkMap ?? null,
+            color: ctxTex ? 0xffffff : 0xb8bdc4,
+            roughness: 0.85,
+          }),
         );
-        dash.position.set(mx, -0.105, frontZ + 6.3);
-        group.add(dash);
+        sidewalk.position.set(0, -0.06, 1.2);
+        sidewalk.receiveShadow = !isSoftwareGl;
+        streetGroup.add(sidewalk);
+
+        const curb = new THREE.Mesh(
+          new THREE.BoxGeometry(frontLen + 16, 0.14, 0.18),
+          new THREE.MeshStandardMaterial({ color: 0x94a3b8, roughness: 0.8 }),
+        );
+        curb.position.set(0, -0.07, 2.45);
+        streetGroup.add(curb);
+
+        const street = new THREE.Mesh(
+          new THREE.BoxGeometry(frontLen + 28, 0.08, 7.5),
+          new THREE.MeshStandardMaterial({
+            map: ctxTex?.asphaltMap ?? null,
+            color: ctxTex ? 0xffffff : 0x2b2f36,
+            roughness: 0.9,
+          }),
+        );
+        street.position.set(0, -0.15, 6.3);
+        street.receiveShadow = !isSoftwareGl;
+        streetGroup.add(street);
+
+        for (let mx = -frontLen / 2 - 8; mx <= frontLen / 2 + 8; mx += 3.2) {
+          const dash = new THREE.Mesh(
+            new THREE.BoxGeometry(1.5, 0.015, 0.12),
+            new THREE.MeshStandardMaterial({ color: 0xfacc15, roughness: 0.6 }),
+          );
+          dash.position.set(mx, -0.105, 6.3);
+          streetGroup.add(dash);
+        }
+
+        group.add(streetGroup);
       }
     }
 
@@ -634,11 +653,16 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
     };
     group.add(siteMesh);
 
-    // Perimeter Boundary Walls (Muros de divisa lateral e fundos) in Architectural Mode
+    // Perimeter Boundary Walls, Fences & Gates honoring all 4 configured boundaries
     if (isArchRender && layers.arquitetura && project.site.vertices.length >= 3) {
       const muroMat = new THREE.MeshStandardMaterial({
         color: 0xd1d5db,
         roughness: 0.88,
+        clippingPlanes,
+      });
+      const sharedMuroMat = new THREE.MeshStandardMaterial({
+        color: 0xcbd5e1,
+        roughness: 0.85,
         clippingPlanes,
       });
       const muroCapMat = new THREE.MeshStandardMaterial({
@@ -647,34 +671,137 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
         metalness: 0.3,
         clippingPlanes,
       });
-      const muroHeight = 1.95;
-      for (let i = 0; i < project.site.vertices.length; i++) {
-        const va = project.site.vertices[i];
-        const vb = project.site.vertices[(i + 1) % project.site.vertices.length];
-        // Leave front edge open towards street (where both Y ~ maxY)
-        const isFrontEdge =
-          Math.abs(va.y - siteBox.maxY) < 0.4 && Math.abs(vb.y - siteBox.maxY) < 0.4;
-        if (isFrontEdge) continue;
+      const fenceMat = new THREE.MeshStandardMaterial({
+        color: 0x334155,
+        roughness: 0.45,
+        metalness: 0.55,
+        clippingPlanes,
+      });
+      const gateLeafMat = new THREE.MeshStandardMaterial({
+        color: 0x1e293b,
+        roughness: 0.4,
+        metalness: 0.65,
+        clippingPlanes,
+      });
 
-        const ax = va.x - centerOffset.x;
-        const az = va.y - centerOffset.z;
-        const bx = vb.x - centerOffset.x;
-        const bz = vb.y - centerOffset.z;
-        const mLen = Math.hypot(bx - ax, bz - az);
-        if (mLen < 0.3) continue;
-        const ang = Math.atan2(bz - az, bx - ax);
+      for (const seg of boundarySegs) {
+        if (seg.lengthM < 0.3) continue;
+        const ux = (seg.b.x - seg.a.x) / seg.lengthM;
+        const uy = (seg.b.y - seg.a.y) / seg.lengthM;
+        const ang = Math.atan2(uy, ux);
 
-        const wallMuro = new THREE.Mesh(new THREE.BoxGeometry(mLen, muroHeight, 0.14), muroMat);
-        wallMuro.position.set((ax + bx) / 2, muroHeight / 2, (az + bz) / 2);
-        wallMuro.rotation.y = -ang;
-        wallMuro.castShadow = !isSoftwareGl;
-        wallMuro.receiveShadow = !isSoftwareGl;
-        group.add(wallMuro);
+        // Enabled gates along this boundary segment
+        const gatesOnSeg = normSite.accesses
+          .filter((g) => g.enabled && g.side === seg.side)
+          .map((g) => {
+            const start = Math.max(0, Math.min(seg.lengthM - 0.3, g.offsetM));
+            const end = Math.min(seg.lengthM, start + Math.max(0.5, g.widthM));
+            return { gate: g, start, end };
+          })
+          .sort((a, b) => a.start - b.start);
 
-        const capMuro = new THREE.Mesh(new THREE.BoxGeometry(mLen, 0.05, 0.18), muroCapMat);
-        capMuro.position.set((ax + bx) / 2, muroHeight + 0.025, (az + bz) / 2);
-        capMuro.rotation.y = -ang;
-        group.add(capMuro);
+        // Compute solid intervals [t0, t1] skipping gate openings
+        const spans: Array<[number, number]> = [];
+        let cursor = 0;
+        for (const gi of gatesOnSeg) {
+          if (gi.start > cursor + 0.05) {
+            spans.push([cursor, gi.start]);
+          }
+          cursor = Math.max(cursor, gi.end);
+        }
+        if (cursor < seg.lengthM - 0.05) {
+          spans.push([cursor, seg.lengthM]);
+        }
+
+        const cond = seg.boundary.condition;
+        if (cond !== 'aberta') {
+          const wallH = Math.max(0.8, seg.boundary.heightM || (cond === 'cerca' ? 1.6 : 1.95));
+          for (const [s0, s1] of spans) {
+            const spanLen = s1 - s0;
+            if (spanLen < 0.15) continue;
+            const midT = (s0 + s1) / 2;
+            const wx = seg.a.x + ux * midT - centerOffset.x;
+            const wz = seg.a.y + uy * midT - centerOffset.z;
+
+            if (cond === 'cerca') {
+              const postCount = Math.max(2, Math.floor(spanLen / 2.0) + 1);
+              for (let p = 0; p < postCount; p++) {
+                const pt = s0 + (spanLen * p) / Math.max(1, postCount - 1);
+                const post = new THREE.Mesh(new THREE.BoxGeometry(0.08, wallH, 0.08), fenceMat);
+                post.position.set(
+                  seg.a.x + ux * pt - centerOffset.x,
+                  wallH / 2,
+                  seg.a.y + uy * pt - centerOffset.z,
+                );
+                post.rotation.y = -ang;
+                group.add(post);
+              }
+              for (const railRatio of [0.38, 0.82]) {
+                const rail = new THREE.Mesh(new THREE.BoxGeometry(spanLen, 0.05, 0.05), fenceMat);
+                rail.position.set(wx, wallH * railRatio, wz);
+                rail.rotation.y = -ang;
+                group.add(rail);
+              }
+            } else {
+              const mat = cond === 'compartilhada' ? sharedMuroMat : muroMat;
+              const wallMuro = new THREE.Mesh(new THREE.BoxGeometry(spanLen, wallH, 0.14), mat);
+              wallMuro.position.set(wx, wallH / 2, wz);
+              wallMuro.rotation.y = -ang;
+              wallMuro.castShadow = !isSoftwareGl;
+              wallMuro.receiveShadow = !isSoftwareGl;
+              wallMuro.userData = {
+                bimLabel: `${seg.label} (${cond})`,
+                bimDiscipline: 'Terreno',
+                bimDetail: `Extensão: ${round2(spanLen)} m · Altura: ${wallH.toFixed(2)} m`,
+              };
+              group.add(wallMuro);
+
+              const capMuro = new THREE.Mesh(
+                new THREE.BoxGeometry(spanLen, 0.05, 0.18),
+                muroCapMat,
+              );
+              capMuro.position.set(wx, wallH + 0.025, wz);
+              capMuro.rotation.y = -ang;
+              group.add(capMuro);
+            }
+          }
+        }
+
+        // Render gate pillars and gate panel for enabled gates on this edge
+        for (const gi of gatesOnSeg) {
+          const gw = getGateWorldPosition(normSite, gi.gate);
+          if (!gw) continue;
+          const gateW = Math.max(0.6, gi.end - gi.start);
+          const gateH = gi.gate.type === 'veiculo' ? 2.1 : 1.95;
+
+          const p1x = gw.p1.x - centerOffset.x;
+          const p1z = gw.p1.y - centerOffset.z;
+          const p2x = gw.p2.x - centerOffset.x;
+          const p2z = gw.p2.y - centerOffset.z;
+
+          for (const [px, pz] of [
+            [p1x, p1z],
+            [p2x, p2z],
+          ]) {
+            const pillar = new THREE.Mesh(
+              new THREE.BoxGeometry(0.18, gateH + 0.1, 0.18),
+              muroCapMat,
+            );
+            pillar.position.set(px, (gateH + 0.1) / 2, pz);
+            pillar.castShadow = !isSoftwareGl;
+            group.add(pillar);
+          }
+
+          const leaf = new THREE.Mesh(new THREE.BoxGeometry(gateW - 0.1, gateH - 0.12, 0.05), gateLeafMat);
+          leaf.position.set(gw.center.x - centerOffset.x, (gateH - 0.05) / 2, gw.center.y - centerOffset.z);
+          leaf.rotation.y = -ang;
+          leaf.userData = {
+            bimLabel: gi.gate.label,
+            bimDiscipline: 'Acessos',
+            bimDetail: `${gi.gate.type === 'veiculo' ? 'Veículos' : 'Pedestres'} · Vão ${gateW.toFixed(2)} m`,
+          };
+          group.add(leaf);
+        }
       }
     }
 

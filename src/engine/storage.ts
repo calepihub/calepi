@@ -159,7 +159,7 @@ export async function upsertUserProfile(user: User): Promise<void> {
 
 function buildFirestoreProjectPayload(project: Project, ownerId: string) {
   const safeId = normalizeId(project.id, 'proj');
-  const base = {
+  const base: Record<string, unknown> = {
     id: safeId,
     ownerId,
     schemaVersion: project.schemaVersion || 1,
@@ -177,13 +177,13 @@ function buildFirestoreProjectPayload(project: Project, ownerId: string) {
     constructionMethod: stripUndefined(project.constructionMethod),
     floors: stripUndefined((project.floors ?? []).slice(0, 20)),
     unitTypes: stripUndefined((project.unitTypes ?? []).slice(0, 30)),
-    structuralElements: stripUndefined((project.structuralElements ?? []).slice(0, 400)),
+    structuralElements: stripUndefined((project.structuralElements ?? []).slice(0, 600)),
     rainwaterElements: stripUndefined((project.rainwaterElements ?? []).slice(0, 100)),
     rainwaterConfig: stripUndefined(project.rainwaterConfig),
     electricalHeights: stripUndefined(project.electricalHeights),
     hydraulicConfig: stripUndefined(project.hydraulicConfig),
     professionals: stripUndefined((project.professionals ?? []).slice(0, 20)),
-    budgetEntries: stripUndefined((project.budgetEntries ?? []).slice(0, 150)),
+    budgetEntries: stripUndefined((project.budgetEntries ?? []).slice(0, 250)),
     budgetSettings: stripUndefined(project.budgetSettings),
     normativeRefs: stripUndefined((project.normativeRefs ?? []).slice(0, 50)),
     renderSettings: stripUndefined(project.renderSettings),
@@ -192,6 +192,9 @@ function buildFirestoreProjectPayload(project: Project, ownerId: string) {
     fireSafetyNotes: stripUndefined(project.fireSafetyNotes),
     accessibilityConfig: stripUndefined(project.accessibilityConfig),
   };
+  if (project.implantation !== undefined) {
+    base.implantation = stripUndefined(project.implantation);
+  }
   return base;
 }
 
@@ -245,38 +248,51 @@ export async function loadUserProjectsFromFirestore(ownerId: string): Promise<Pr
 
 /**
  * Persists a project document to Firestore (/projects/{projectId}) excluding renders subcollection.
+ * Uses `isNew: true` fast-path on brand-new projects to avoid unnecessary existence probes.
  */
-export async function saveProjectToFirestore(project: Project, ownerId: string): Promise<void> {
+export async function saveProjectToFirestore(
+  project: Project,
+  ownerId: string,
+  options?: { isNew?: boolean },
+): Promise<void> {
   const safeId = normalizeId(project.id, 'proj');
   const docPath = `projects/${safeId}`;
   const projectRef = doc(db, 'projects', safeId);
   const payload = buildFirestoreProjectPayload(project, ownerId);
 
-  try {
-    let existsInDb = persistedProjectIds.has(safeId);
-    if (!existsInDb) {
+  let existsInDb = persistedProjectIds.has(safeId);
+  if (!existsInDb && !options?.isNew) {
+    try {
       const snap = await getDoc(projectRef);
       existsInDb = snap.exists();
       if (existsInDb) persistedProjectIds.add(safeId);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.GET, docPath);
     }
+  }
 
-    if (!existsInDb) {
+  if (!existsInDb) {
+    try {
       await setDoc(projectRef, {
         ...payload,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
       persistedProjectIds.add(safeId);
-    } else {
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, docPath);
+    }
+  } else {
+    try {
       // Omit immutable fields (id, ownerId, createdAt) from updateDoc payload
       const { id: _id, ownerId: _ownerId, ...mutableFields } = payload;
       await updateDoc(projectRef, {
         ...mutableFields,
         updatedAt: serverTimestamp(),
       });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, docPath);
     }
-  } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, docPath);
   }
 }
 

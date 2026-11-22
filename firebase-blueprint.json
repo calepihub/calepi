@@ -90,6 +90,7 @@
         "revisions": { "type": "array" },
         "fireSafetyNotes": { "type": "object" },
         "accessibilityConfig": { "type": "object" },
+        "implantation": { "type": "object" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },

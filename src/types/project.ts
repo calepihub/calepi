@@ -92,8 +92,37 @@ export interface Setbacks {
   right: number; // m
 }
 
+export type MeasurementUnit = 'm' | 'cm';
+
+export type LotFrontSide = 'baixo' | 'cima' | 'esquerda' | 'direita';
+
+export type LotSideKey = 'front' | 'back' | 'left' | 'right';
+
+export type BoundaryCondition = 'murada' | 'aberta' | 'compartilhada' | 'cerca' | 'outra';
+
+export interface SiteEdgeBoundary {
+  condition: BoundaryCondition;
+  heightM: number;
+  hasNeighborBuilding: boolean;
+  notes?: string;
+}
+
+export type AccessGateType = 'pedestre' | 'veiculo' | 'misto';
+
+export interface SiteAccessGate {
+  id: string;
+  label: string;
+  type: AccessGateType;
+  side: LotSideKey;
+  offsetM: number; // distance from start of that edge (clockwise or left-to-right from street perspective)
+  widthM: number;
+  enabled: boolean;
+}
+
 export interface Site {
   shapeType: SiteShapeType;
+  measurementUnit?: MeasurementUnit;
+  streetSide?: LotFrontSide;
   front: number;       // m
   back: number;        // m
   leftDepth: number;   // m
@@ -112,9 +141,89 @@ export interface Site {
     left: string;
     right: string;
   };
+  boundaries?: {
+    front: SiteEdgeBoundary;
+    back: SiteEdgeBoundary;
+    left: SiteEdgeBoundary;
+    right: SiteEdgeBoundary;
+  };
+  accesses?: SiteAccessGate[];
   setbacks: Setbacks;
   easementArea: number; // área de servidão m2
   restrictions: string;
+}
+
+export type ImplantationZone =
+  | 'frontal'
+  | 'central'
+  | 'fundos'
+  | 'lado_esquerdo'
+  | 'lado_direito'
+  | 'ambos_lados'
+  | 'centralizada'
+  | 'personalizada';
+
+export type ImplantationLayoutPattern =
+  | 'isolada'
+  | 'duas_lado_a_lado'
+  | 'sequencia'
+  | 'duas_fileiras'
+  | 'ambos_lados'
+  | 'conjunto_fundos'
+  | 'personalizada';
+
+export type ImplantationModelMode =
+  | 'todas_iguais'
+  | 'modelos_diferentes'
+  | 'misto_repeticao';
+
+export type ImplantationCouplingMode =
+  | 'geminadas'
+  | 'separadas'
+  | 'mista'
+  | 'personalizada';
+
+export type ImplantationAccessMode = 'independente' | 'compartilhado' | 'misto';
+
+export interface ImplantationGroupSpec {
+  id: string;
+  label: string;
+  zone: Exclude<ImplantationZone, 'ambos_lados' | 'personalizada'>;
+  count: number;
+  unitTypeId: string;
+  coupling: 'geminadas' | 'separadas';
+  spacingM: number;
+  mirroredRule: 'nenhuma' | 'alternada' | 'todas' | 'oposta_corredor';
+  entranceOrientation: 'frente' | 'fundos' | 'lateral_esquerda' | 'lateral_direita';
+  shareWallWithNeighbor: boolean;
+}
+
+export interface ImplantationCirculationSpec {
+  corridorWidthM: number;
+  minInterUnitSpacingM: number;
+  accessMode: ImplantationAccessMode;
+  serviceAreaM2: number;
+  uncoveredAreaTargetM2: number;
+  notes?: string;
+}
+
+export interface ImplantationConfig {
+  primaryZone: ImplantationZone;
+  layoutPattern: ImplantationLayoutPattern;
+  totalUnitsTarget: number;
+  leftCount: number;
+  rightCount: number;
+  frontCount: number;
+  backCount: number;
+  modelMode: ImplantationModelMode;
+  couplingMode: ImplantationCouplingMode;
+  interUnitSpacingM: number;
+  mirrorAlternate: boolean;
+  shareWallsWhenPossible: boolean;
+  primaryUnitTypeId?: string;
+  groups: ImplantationGroupSpec[];
+  circulation: ImplantationCirculationSpec;
+  lastGeneratedAt?: string;
 }
 
 export type RuleEvaluationStatus =
@@ -470,6 +579,13 @@ export interface UnitInstance {
   y: number; // m in site/floor coords
   rotationDeg: number; // 0, 90, 180, 270
   mirrored: boolean;
+  zoneSide?: 'frontal' | 'central' | 'fundos' | 'esquerdo' | 'direito' | 'personalizada';
+  couplingGroupId?: string;
+  couplingType?: 'geminada' | 'separada' | 'isolada';
+  sharedWallIds?: string[];
+  individualName?: string;
+  entranceOrientation?: 'frente' | 'fundos' | 'lateral_esquerda' | 'lateral_direita';
+  notes?: string;
 }
 
 export interface Floor {
@@ -642,6 +758,7 @@ export interface Project {
   createdAt: string;
   updatedAt: string;
   site: Site;
+  implantation?: ImplantationConfig;
   urbanRules: UrbanRule[];
   constructionMethod: ConstructionMethodDetails;
   floors: Floor[];

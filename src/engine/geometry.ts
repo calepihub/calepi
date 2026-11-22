@@ -127,8 +127,33 @@ export function analyzeSiteGeometry(site: Site): SiteGeometryCheck {
 
   const bbox = getBoundingBox(site.vertices);
   const setbacks: Setbacks = site.setbacks;
-  const bWidth = Math.max(0, round2(bbox.width - setbacks.left - setbacks.right));
-  const bDepth = Math.max(0, round2(bbox.depth - setbacks.front - setbacks.back));
+
+  let bx = bbox.minX + setbacks.left;
+  let by = bbox.minY + setbacks.front;
+  let bWidth = Math.max(0, round2(bbox.width - setbacks.left - setbacks.right));
+  let bDepth = Math.max(0, round2(bbox.depth - setbacks.front - setbacks.back));
+
+  if (site.streetSide === 'baixo') {
+    bx = bbox.minX + setbacks.left;
+    by = bbox.minY + setbacks.back;
+    bWidth = Math.max(0, round2(bbox.width - setbacks.left - setbacks.right));
+    bDepth = Math.max(0, round2(bbox.depth - setbacks.front - setbacks.back));
+  } else if (site.streetSide === 'cima') {
+    bx = bbox.minX + setbacks.right;
+    by = bbox.minY + setbacks.front;
+    bWidth = Math.max(0, round2(bbox.width - setbacks.left - setbacks.right));
+    bDepth = Math.max(0, round2(bbox.depth - setbacks.front - setbacks.back));
+  } else if (site.streetSide === 'esquerda') {
+    bx = bbox.minX + setbacks.front;
+    by = bbox.minY + setbacks.left;
+    bWidth = Math.max(0, round2(bbox.width - setbacks.front - setbacks.back));
+    bDepth = Math.max(0, round2(bbox.depth - setbacks.left - setbacks.right));
+  } else if (site.streetSide === 'direita') {
+    bx = bbox.minX + setbacks.back;
+    by = bbox.minY + setbacks.right;
+    bWidth = Math.max(0, round2(bbox.width - setbacks.front - setbacks.back));
+    bDepth = Math.max(0, round2(bbox.depth - setbacks.left - setbacks.right));
+  }
 
   return {
     calculatedArea,
@@ -137,8 +162,8 @@ export function analyzeSiteGeometry(site: Site): SiteGeometryCheck {
     areaDivergenceM2,
     hasAreaDivergence,
     buildableBox: {
-      x: round2(bbox.minX + setbacks.left),
-      y: round2(bbox.minY + setbacks.front),
+      x: round2(bx),
+      y: round2(by),
       width: bWidth,
       depth: bDepth,
       area: round2(bWidth * bDepth),
@@ -218,6 +243,66 @@ export function getOpeningWorldPosition(
   };
 }
 
+/**
+ * Returns the exact axis-aligned world bounding box of a UnitInstance,
+ * matching unitLocalToWorld (rotation around local origin (0,0)).
+ */
+export function getUnitWorldRect(
+  inst: Pick<UnitInstance, 'x' | 'y' | 'rotationDeg' | 'mirrored'>,
+  ut: Pick<UnitType, 'width' | 'depth'>,
+): Rect2D {
+  const rad = (((inst.rotationDeg % 360) + 360) % 360) * (Math.PI / 180);
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const corners = [
+    { lx: 0, ly: 0 },
+    { lx: ut.width, ly: 0 },
+    { lx: ut.width, ly: ut.depth },
+    { lx: 0, ly: ut.depth },
+  ].map((c) => {
+    const mx = inst.mirrored ? ut.width - c.lx : c.lx;
+    return {
+      x: inst.x + (mx * cos - c.ly * sin),
+      y: inst.y + (mx * sin + c.ly * cos),
+    };
+  });
+  const xs = corners.map((c) => c.x);
+  const ys = corners.map((c) => c.y);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  return {
+    x: round3(minX),
+    y: round3(minY),
+    width: round3(maxX - minX),
+    depth: round3(maxY - minY),
+  };
+}
+
+/**
+ * Converts a desired world top-left coordinate (minX, minY) + rotationDeg
+ * into the canonical (inst.x, inst.y) origin expected by unitLocalToWorld / Three.js.
+ */
+export function topLeftToUnitOrigin(
+  topLeftX: number,
+  topLeftY: number,
+  ut: Pick<UnitType, 'width' | 'depth'>,
+  rotationDeg: number,
+): Point2D {
+  const rot = ((Math.round(rotationDeg / 90) * 90) % 360 + 360) % 360;
+  if (rot === 90) {
+    return { x: round2(topLeftX + ut.depth), y: round2(topLeftY) };
+  }
+  if (rot === 180) {
+    return { x: round2(topLeftX + ut.width), y: round2(topLeftY + ut.depth) };
+  }
+  if (rot === 270) {
+    return { x: round2(topLeftX), y: round2(topLeftY + ut.width) };
+  }
+  return { x: round2(topLeftX), y: round2(topLeftY) };
+}
+
 export function checkImplantationFeasibility(
   site: Site,
   instances: UnitInstance[],
@@ -239,17 +324,14 @@ export function checkImplantationFeasibility(
   for (const inst of instances) {
     const ut = unitTypes.find((t) => t.id === inst.unitTypeId);
     if (!ut) continue;
-    const rot = ((inst.rotationDeg % 360) + 360) % 360;
-    const w = rot === 90 || rot === 270 ? ut.depth : ut.width;
-    const d = rot === 90 || rot === 270 ? ut.width : ut.depth;
-    const rect: Rect2D = { x: inst.x, y: inst.y, width: w, depth: d };
+    const rect = getUnitWorldRect(inst, ut);
     unitRects.push({ id: inst.id, rect });
 
     const inside =
-      rect.x >= buildable.x - 0.01 &&
-      rect.y >= buildable.y - 0.01 &&
-      rect.x + rect.width <= buildable.x + buildable.width + 0.01 &&
-      rect.y + rect.depth <= buildable.y + buildable.depth + 0.01;
+      rect.x >= buildable.x - 0.02 &&
+      rect.y >= buildable.y - 0.02 &&
+      rect.x + rect.width <= buildable.x + buildable.width + 0.02 &&
+      rect.y + rect.depth <= buildable.y + buildable.depth + 0.02;
     if (!inside) {
       outOfBoundsUnitIds.push(inst.id);
     }
@@ -257,6 +339,7 @@ export function checkImplantationFeasibility(
 
   for (let i = 0; i < unitRects.length; i++) {
     for (let j = i + 1; j < unitRects.length; j++) {
+      // Tolerance 0.05m guarantees touching geminated walls (gap = 0m) are NEVER flagged as overlapping
       if (rectsOverlap(unitRects[i].rect, unitRects[j].rect, 0.05)) {
         overlappingUnitPairs.push([unitRects[i].id, unitRects[j].id]);
       }

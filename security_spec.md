@@ -2,7 +2,7 @@
 
 ## 1. Data Invariants
 1. Every document in `/users/{userId}` belongs strictly to the authenticated verified user whose `request.auth.uid == userId`.
-2. Every document in `/projects/{projectId}` MUST have `ownerId == request.auth.uid`, valid alphanumeric/hyphen/underscore `id`, bounded string fields, bounded arrays (`floors <= 20`, `unitTypes <= 30`, `urbanRules <= 40`, `professionals <= 20`, `budgetEntries <= 120`, `revisions <= 100`), and server-enforced timestamps (`createdAt == request.time` on create, `updatedAt == request.time` on create/update, `createdAt` immutable on update, `ownerId` immutable on update).
+2. Every document in `/projects/{projectId}` MUST have `ownerId == request.auth.uid`, valid alphanumeric/hyphen/underscore `id`, bounded string fields, bounded arrays (`floors <= 20`, `unitTypes <= 30`, `urbanRules <= 40`, `professionals <= 20`, `budgetEntries <= 250`, `structuralElements <= 600`, `revisions <= 100`), optional `implantation` map, and server-enforced timestamps (`createdAt == request.time` on create, `updatedAt == request.time` on create/update, `createdAt` immutable on update, `ownerId` immutable on update). Single-document `get` safely handles non-existent documents (`resource == null`) so create-existence probes do not trigger NullPointer PERMISSION_DENIED.
 3. List queries on `/projects` MUST enforce `resource.data.ownerId == request.auth.uid`.
 4. Every subcollection document `/projects/{projectId}/renders/{renderId}` MUST inherit ownership via `get(/databases/$(database)/documents/projects/$(projectId)).data.ownerId == request.auth.uid` and `data.projectId == projectId`, with `dataUrl.size() <= 750000`.
 5. No user may read, list, create, update, or delete another user's profile, projects, or renders.

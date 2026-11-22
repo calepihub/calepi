@@ -30,6 +30,8 @@ interface ProjectHubProps {
     depth: number;
     floorsCount: number;
     methodId: ConstructionMethodId;
+    measurementUnit?: 'm' | 'cm';
+    streetSide?: 'baixo' | 'cima' | 'esquerda' | 'direita';
   }) => void;
   onDuplicateProject: (id: string) => void;
   onToggleArchiveProject: (id: string, nextStatus: ProjectStatus) => void;
@@ -72,6 +74,8 @@ export const ProjectHub: React.FC<ProjectHubProps> = ({
   const [newDepth, setNewDepth] = useState(25);
   const [newFloors, setNewFloors] = useState(2);
   const [newMethod, setNewMethod] = useState<ConstructionMethodId>('alvenaria_convencional');
+  const [newUnit, setNewUnit] = useState<'m' | 'cm'>('m');
+  const [newStreetSide, setNewStreetSide] = useState<'baixo' | 'cima' | 'esquerda' | 'direita'>('baixo');
   const [formError, setFormError] = useState<string | null>(null);
 
   const filtered = projects.filter((p) => {
@@ -119,6 +123,8 @@ export const ProjectHub: React.FC<ProjectHubProps> = ({
       depth: newDepth,
       floorsCount: newFloors,
       methodId: newMethod,
+      measurementUnit: newUnit,
+      streetSide: newStreetSide,
     });
     setShowNewModal(false);
     setNewName('');
@@ -541,6 +547,35 @@ export const ProjectHub: React.FC<ProjectHubProps> = ({
                     onChange={(e) => setNewFloors(Number(e.target.value))}
                     className="w-full px-3 py-2 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white focus:border-[#2F7CF6] focus:outline-none"
                   />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-[#949BA8] mb-1">Unidade de Medida</label>
+                  <select
+                    value={newUnit}
+                    onChange={(e) => setNewUnit(e.target.value as 'm' | 'cm')}
+                    className="w-full px-3 py-2 text-xs rounded bg-[#14161A] border border-[#2A2F38] text-white focus:border-[#2F7CF6] focus:outline-none"
+                  >
+                    <option value="m">Metros (m)</option>
+                    <option value="cm">Centímetros (cm)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-[#949BA8] mb-1">Localização da Rua (Frente)</label>
+                  <select
+                    value={newStreetSide}
+                    onChange={(e) =>
+                      setNewStreetSide(e.target.value as 'baixo' | 'cima' | 'esquerda' | 'direita')
+                    }
+                    className="w-full px-3 py-2 text-xs rounded bg-[#14161A] border border-[#2A2F38] text-white focus:border-[#2F7CF6] focus:outline-none"
+                  >
+                    <option value="baixo">Borda Inferior (Padrão)</option>
+                    <option value="cima">Borda Superior</option>
+                    <option value="esquerda">Lateral Esquerda</option>
+                    <option value="direita">Lateral Direita</option>
+                  </select>
                 </div>
               </div>
 

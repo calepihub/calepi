@@ -1,4 +1,5 @@
 import {
+  analyzeSiteGeometry,
   buildSiteVerticesFromDimensions,
   round2,
 } from './geometry';
@@ -10,6 +11,8 @@ import type {
   Floor,
   FurnitureItem,
   InternalPartitionType,
+  LotFrontSide,
+  MeasurementUnit,
   MezzanineConfig,
   MezzanineStairLayout,
   MezzanineStructureType,
@@ -2592,6 +2595,8 @@ export function createBlankProject(params: {
   depth: number;
   floorsCount: number;
   methodId: ConstructionMethodId;
+  measurementUnit?: MeasurementUnit;
+  streetSide?: LotFrontSide;
 }): Project {
   const id = nextId('proj');
   const now = new Date().toISOString();
@@ -2599,6 +2604,8 @@ export function createBlankProject(params: {
   const depth = Math.max(6, params.depth);
   const vertices = buildSiteVerticesFromDimensions(front, front, depth, depth);
   const uf = (params.state || '').trim().toUpperCase();
+  const streetSide: LotFrontSide = params.streetSide ?? 'baixo';
+  const measurementUnit: MeasurementUnit = params.measurementUnit ?? 'm';
 
   const floors: Floor[] = [];
   for (let i = 0; i < Math.max(1, params.floorsCount); i++) {
@@ -2647,6 +2654,8 @@ export function createBlankProject(params: {
     updatedAt: now,
     site: {
       shapeType: 'retangular',
+      measurementUnit,
+      streetSide,
       front,
       back: front,
       leftDepth: depth,
@@ -2665,14 +2674,74 @@ export function createBlankProject(params: {
       elevationStart: 0,
       elevationEnd: 0,
       confrontations: {
-        front: 'Não informado',
-        back: 'Não informado',
-        left: 'Não informado',
-        right: 'Não informado',
+        front: 'Via Pública',
+        back: 'Lote vizinho fundos',
+        left: 'Lote vizinho esquerdo',
+        right: 'Lote vizinho direito',
       },
+      boundaries: {
+        front: {
+          condition: 'aberta',
+          heightM: 0,
+          hasNeighborBuilding: false,
+          notes: 'Testada voltada para a rua',
+        },
+        back: {
+          condition: 'murada',
+          heightM: 2.0,
+          hasNeighborBuilding: false,
+          notes: 'Muro de divisa nos fundos',
+        },
+        left: {
+          condition: 'murada',
+          heightM: 2.0,
+          hasNeighborBuilding: false,
+          notes: 'Muro de divisa lateral esquerda',
+        },
+        right: {
+          condition: 'murada',
+          heightM: 2.0,
+          hasNeighborBuilding: false,
+          notes: 'Muro de divisa lateral direita',
+        },
+      },
+      accesses: [
+        {
+          id: nextId('gate'),
+          label: 'Portão de Pedestres',
+          type: 'pedestre',
+          side: 'front',
+          offsetM: round2(Math.max(0.4, front * 0.45)),
+          widthM: 1.0,
+          enabled: true,
+        },
+      ],
       orientationDeg: 0,
       easementArea: 0,
       restrictions: '',
+    },
+    implantation: {
+      primaryZone: 'lado_esquerdo',
+      layoutPattern: 'sequencia',
+      totalUnitsTarget: 0,
+      leftCount: 0,
+      rightCount: 0,
+      frontCount: 0,
+      backCount: 0,
+      modelMode: 'todas_iguais',
+      couplingMode: 'geminadas',
+      interUnitSpacingM: 1.5,
+      mirrorAlternate: true,
+      shareWallsWhenPossible: true,
+      groups: [],
+      circulation: {
+        corridorWidthM: 1.5,
+        minInterUnitSpacingM: 1.5,
+        accessMode: 'compartilhado',
+        serviceAreaM2: 0,
+        uncoveredAreaTargetM2: 0,
+        notes: '',
+      },
     },
     urbanRules: [],
     constructionMethod: {
@@ -2789,12 +2858,11 @@ export function autoDistributeUnitsAcrossFloors(
   const ut =
     project.unitTypes.find((t) => t.id === preferredUnitTypeId) ?? project.unitTypes[0];
 
-  const front = Math.max(4, project.site.front);
-  const depth = Math.max(6, project.site.leftDepth);
-  const bx = project.site.setbacks.left;
-  const by = project.site.setbacks.front;
-  const bWidth = Math.max(0.5, front - project.site.setbacks.left - project.site.setbacks.right);
-  const bDepth = Math.max(0.5, depth - project.site.setbacks.front - project.site.setbacks.back);
+  const bBox = analyzeSiteGeometry(project.site).buildableBox;
+  const bx = bBox.x;
+  const by = bBox.y;
+  const bWidth = Math.max(0.5, bBox.width);
+  const bDepth = Math.max(0.5, bBox.depth);
 
   const updatedFloors = project.floors.map((fl) => {
     if (fl.units.length > 0) return fl;

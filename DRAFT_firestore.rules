@@ -54,7 +54,8 @@ service cloud.firestore {
           'electricalHeights', 'hydraulicConfig', 'professionals',
           'budgetEntries', 'budgetSettings', 'normativeRefs',
           'renderSettings', 'memorialOverrides', 'revisions',
-          'fireSafetyNotes', 'accessibilityConfig', 'createdAt', 'updatedAt'
+          'fireSafetyNotes', 'accessibilityConfig', 'implantation',
+          'createdAt', 'updatedAt'
         ])
         && isValidId(data.id)
         && data.id == projectId
@@ -78,13 +79,13 @@ service cloud.firestore {
         && data.constructionMethod is map
         && data.floors is list && data.floors.size() <= 20
         && data.unitTypes is list && data.unitTypes.size() <= 30
-        && data.structuralElements is list && data.structuralElements.size() <= 400
+        && data.structuralElements is list && data.structuralElements.size() <= 600
         && data.rainwaterElements is list && data.rainwaterElements.size() <= 100
         && data.rainwaterConfig is map
         && data.electricalHeights is map
         && data.hydraulicConfig is map
         && data.professionals is list && data.professionals.size() <= 20
-        && data.budgetEntries is list && data.budgetEntries.size() <= 150
+        && data.budgetEntries is list && data.budgetEntries.size() <= 250
         && data.budgetSettings is map
         && data.normativeRefs is list && data.normativeRefs.size() <= 50
         && data.renderSettings is map
@@ -92,6 +93,7 @@ service cloud.firestore {
         && data.revisions is list && data.revisions.size() <= 100
         && data.fireSafetyNotes is map
         && data.accessibilityConfig is map
+        && (!('implantation' in data) || data.implantation is map)
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -144,7 +146,7 @@ service cloud.firestore {
     match /projects/{projectId} {
       allow get: if isSignedIn()
         && isValidId(projectId)
-        && existing().ownerId == request.auth.uid;
+        && (resource == null || existing().ownerId == request.auth.uid);
 
       allow list: if isSignedIn()
         && existing().ownerId == request.auth.uid;
@@ -171,7 +173,7 @@ service cloud.firestore {
           'electricalHeights', 'hydraulicConfig', 'professionals',
           'budgetEntries', 'budgetSettings', 'normativeRefs',
           'renderSettings', 'memorialOverrides', 'revisions',
-          'fireSafetyNotes', 'accessibilityConfig', 'updatedAt'
+          'fireSafetyNotes', 'accessibilityConfig', 'implantation', 'updatedAt'
         ]);
 
       allow delete: if isSignedIn()

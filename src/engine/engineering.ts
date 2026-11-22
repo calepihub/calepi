@@ -8,6 +8,7 @@ import {
   round2,
   round3,
 } from './geometry';
+import { validateImplantation } from './implantation';
 import type {
   Project,
   RuleEvaluationStatus,
@@ -458,6 +459,33 @@ export function runCompatibilityAnalysis(project: Project): ClashIssue[] {
         description: `Sobreposição geométrica detectada entre ${imp.overlappingUnitPairs.length} par(es) de unidades.`,
         reason: 'Duas unidades ocupam a mesma região de planta.',
         suggestion: 'Ajustar coordenadas X/Y ou dimensões da tipologia.',
+        status: 'pendente',
+      });
+    }
+    const impVal = validateImplantation(project, floor.id);
+    for (const iIssue of impVal.issues) {
+      if (
+        iIssue.code === 'OUT_OF_BOUNDS' ||
+        iIssue.code === 'OVERLAP' ||
+        iIssue.code === 'INCOMPLETE_FIELDS' ||
+        iIssue.code === 'COUNT_DIVERGENCE'
+      ) {
+        continue;
+      }
+      if ((!project.implantation || project.implantation.totalUnitsTarget === 0) && iIssue.severity !== 'CRITICO') {
+        continue;
+      }
+      issues.push({
+        id: `clash-imp-${floor.id}-${iIssue.id}`,
+        severity: iIssue.severity === 'CRITICO' ? 'CRITICO' : iIssue.severity === 'ATENCAO' ? 'ATENCAO' : 'INFORMATIVO',
+        disciplines: 'Implantação × Terreno',
+        elementsInvolved: iIssue.affectedUnitIds.length > 0 ? iIssue.affectedUnitIds : [floor.name],
+        location: 'Implantação no Terreno',
+        floorName: floor.name,
+        roomName: 'Lote / Circulação',
+        description: `${iIssue.title}: ${iIssue.detail}`,
+        reason: 'Conflito geométrico ou de circulação/acesso na implantação configurada.',
+        suggestion: 'Ajuste o posicionamento, espaçamento ou acessos na Etapa 1–4 de Implantação.',
         status: 'pendente',
       });
     }

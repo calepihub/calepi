@@ -8,6 +8,7 @@ import {
   calculatePolygonArea,
   calculatePolygonPerimeter,
   checkImplantationFeasibility,
+  round2,
 } from './geometry';
 import {
   autoDistributeUnitsAcrossFloors,
@@ -522,5 +523,368 @@ test('Fixed door widths (80/60/70cm), all 3 entrySide orientations, Drywall SINA
   assert.ok(dxfMez.includes('MEZANINO'));
   assert.ok(dxfMez.includes('ESCADA'));
 });
+
+import {
+  createDefaultImplantationConfig,
+  detectSharedWallsAndGaps,
+  generateImplantationUnits,
+  getLotBoundarySegments,
+  normalizeSiteData,
+  validateImplantation,
+} from './implantation';
+import { generateTechnicalSheetPDFBlob } from './exporters';
+import { buildSheetTabulations } from './cadDrawings';
+import type { ImplantationConfig, Project } from '../types/project';
+
+function makeQuickUnitType(code: string, width: number, depth: number, entrySide: 'frente' | 'lateral_direita' | 'lateral_esquerda' = 'frente') {
+  return generateParametricUnitLayout({
+    code,
+    name: `Modelo ${code}`,
+    width,
+    depth,
+    ceilingHeight: 2.8,
+    bedrooms: 0,
+    hasLaundry: true,
+    hasBalcony: false,
+    hasMezzanine: false,
+    accessible: false,
+    extWallThickness: 0.15,
+    intWallThickness: 0.1,
+    constructionSystem: 'alvenaria_convencional',
+    entrySide,
+    internalPartitionType: 'alvenaria',
+  });
+}
+
+test('Implantation Scenarios 1-5: Isolated, Geminated (0m), Separated (1.5m), Asymmetric Left/Right, and Rear Cluster', () => {
+  const ut = makeQuickUnitType('KIT-A', 4.0, 5.0, 'frente');
+  const baseBlank = createBlankProject({
+    name: 'Residencial Implantação Teste',
+    client: 'Cliente Teste',
+    municipality: 'Niterói',
+    state: 'RJ',
+    front: 12,
+    depth: 25,
+    floorsCount: 1,
+    methodId: 'alvenaria_convencional',
+    measurementUnit: 'm',
+    streetSide: 'baixo',
+  });
+  const baseProj = { ...baseBlank, unitTypes: [ut] };
+
+  // Scenario 1: Single isolated kitnet in central / frontal / fundos zones
+  for (const zone of ['frontal', 'centralizada', 'fundos'] as const) {
+    const cfg = {
+      ...createDefaultImplantationConfig(baseProj),
+      primaryZone: zone,
+      layoutPattern: 'isolada' as const,
+      totalUnitsTarget: 1,
+      couplingMode: 'separadas' as const,
+      interUnitSpacingM: 1.5,
+    };
+    const units = generateImplantationUnits(baseProj, cfg, baseProj.floors[0].id);
+    assert.equal(units.length, 1);
+    const pZone = {
+      ...baseProj,
+      implantation: cfg,
+      floors: [{ ...baseProj.floors[0], units }],
+    };
+    const rep = validateImplantation(pZone);
+    assert.equal(rep.isValid, true, `Zone ${zone} should be valid: ${JSON.stringify(rep.issues)}`);
+    assert.equal(rep.criticalCount, 0);
+  }
+
+  // Scenario 2: Geminated kitnets touching at 0.00m (shared wall, zero overlap alert)
+  const cfgGem = {
+    ...createDefaultImplantationConfig(baseProj),
+    primaryZone: 'lado_esquerdo' as const,
+    layoutPattern: 'sequencia' as const,
+    totalUnitsTarget: 3,
+    leftCount: 3,
+    rightCount: 0,
+    couplingMode: 'geminadas' as const,
+    interUnitSpacingM: 0,
+  };
+  const gemUnits = generateImplantationUnits(baseProj, cfgGem, baseProj.floors[0].id);
+  assert.equal(gemUnits.length, 3);
+  const pGem = {
+    ...baseProj,
+    implantation: cfgGem,
+    floors: [{ ...baseProj.floors[0], units: gemUnits }],
+  };
+  const repGem = validateImplantation(pGem);
+  assert.equal(repGem.isValid, true, `Geminated should be valid: ${JSON.stringify(repGem.issues)}`);
+  assert.equal(repGem.sharedWalls.length, 2);
+  assert.ok(!repGem.issues.some((i) => i.code === 'OVERLAP'));
+  assert.ok(!repGem.issues.some((i) => i.code === 'SPACING_MISMATCH'));
+
+  // Scenario 3: Separated kitnets with 1.50m gap
+  const cfgSep = {
+    ...createDefaultImplantationConfig(baseProj),
+    primaryZone: 'lado_esquerdo' as const,
+    layoutPattern: 'sequencia' as const,
+    totalUnitsTarget: 3,
+    couplingMode: 'separadas' as const,
+    interUnitSpacingM: 1.5,
+  };
+  const sepUnits = generateImplantationUnits(baseProj, cfgSep, baseProj.floors[0].id);
+  const pSep = {
+    ...baseProj,
+    implantation: cfgSep,
+    floors: [{ ...baseProj.floors[0], units: sepUnits }],
+  };
+  const repSep = validateImplantation(pSep);
+  assert.equal(repSep.isValid, true, `Separated should be valid: ${JSON.stringify(repSep.issues)}`);
+  assert.equal(repSep.sharedWalls.length, 0);
+  assert.equal(repSep.metrics.minMeasuredInterUnitGapM, 1.5);
+
+  // Scenario 4: Asymmetric distribution (3 left + 1 right, AND 2 left + 0 right without forcing right)
+  const cfgAsym = {
+    ...createDefaultImplantationConfig(baseProj),
+    primaryZone: 'ambos_lados' as const,
+    layoutPattern: 'ambos_lados' as const,
+    totalUnitsTarget: 4,
+    leftCount: 3,
+    rightCount: 1,
+    couplingMode: 'geminadas' as const,
+  };
+  const asymUnits = generateImplantationUnits(baseProj, cfgAsym, baseProj.floors[0].id);
+  assert.equal(asymUnits.filter((u) => u.zoneSide === 'esquerdo').length, 3);
+  assert.equal(asymUnits.filter((u) => u.zoneSide === 'direito').length, 1);
+
+  const cfgOneSide = {
+    ...cfgAsym,
+    totalUnitsTarget: 2,
+    leftCount: 2,
+    rightCount: 0,
+  };
+  const oneSideUnits = generateImplantationUnits(baseProj, cfgOneSide, baseProj.floors[0].id);
+  assert.equal(oneSideUnits.filter((u) => u.zoneSide === 'esquerdo').length, 2);
+  assert.equal(oneSideUnits.filter((u) => u.zoneSide === 'direito').length, 0);
+
+  // Scenario 5: Rear cluster + clear front gate access
+  const cfgRear = {
+    ...createDefaultImplantationConfig(baseProj),
+    primaryZone: 'fundos' as const,
+    layoutPattern: 'conjunto_fundos' as const,
+    totalUnitsTarget: 2,
+    couplingMode: 'geminadas' as const,
+  };
+  const rearUnits = generateImplantationUnits(baseProj, cfgRear, baseProj.floors[0].id);
+  const pRear = {
+    ...baseProj,
+    implantation: cfgRear,
+    floors: [{ ...baseProj.floors[0], units: rearUnits }],
+  };
+  const repRear = validateImplantation(pRear);
+  assert.equal(repRear.isValid, true);
+  assert.ok((repRear.metrics.realSetbacksMeasured.front ?? 0) > 10);
+});
+
+test('Implantation Scenarios 6-10: Mixed Typologies, Street-Side Rotation, Live Propagation, Serialization, Validation Errors & SINAPI/DXF/PDF Integrity', () => {
+  const utSmall = makeQuickUnitType('KIT-P', 3.6, 5.0, 'frente');
+  const utLarge = makeQuickUnitType('KIT-G', 4.4, 6.0, 'frente');
+  const blank = createBlankProject({
+    name: 'Residencial Misto Avançado',
+    client: 'Construtora Carioca',
+    municipality: 'Rio de Janeiro',
+    state: 'RJ',
+    front: 24,
+    depth: 18,
+    floorsCount: 1,
+    methodId: 'alvenaria_convencional',
+    measurementUnit: 'cm',
+    streetSide: 'esquerda',
+  });
+
+  // Custom boundary conditions across all 4 edges + vehicle gate
+  blank.site.boundaries = {
+    front: { condition: 'aberta', heightM: 0, hasNeighborBuilding: false, notes: 'Rua' },
+    back: { condition: 'compartilhada', heightM: 2.4, hasNeighborBuilding: true, notes: 'Vizinho fundos' },
+    left: { condition: 'murada', heightM: 2.2, hasNeighborBuilding: false, notes: 'Muro bloco' },
+    right: { condition: 'cerca', heightM: 1.6, hasNeighborBuilding: false, notes: 'Gradil' },
+  };
+  blank.site.accesses = [
+    { id: 'g1', label: 'Portão Social', type: 'pedestre', side: 'front', offsetM: 0.8, widthM: 1.1, enabled: true },
+    { id: 'g2', label: 'Portão Garagem', type: 'veiculo', side: 'front', offsetM: 7.5, widthM: 3.2, enabled: true },
+  ];
+
+  const baseMixed = { ...blank, unitTypes: [utSmall, utLarge] };
+  const cfgMixed: ImplantationConfig = {
+    ...createDefaultImplantationConfig(baseMixed),
+    primaryZone: 'ambos_lados',
+    layoutPattern: 'personalizada',
+    totalUnitsTarget: 4,
+    modelMode: 'misto_repeticao',
+    couplingMode: 'mista',
+    groups: [
+      {
+        id: 'grp-1',
+        label: 'Bloco Esq Geminado',
+        zone: 'lado_esquerdo',
+        count: 2,
+        unitTypeId: utSmall.id,
+        coupling: 'geminadas',
+        spacingM: 0,
+        mirroredRule: 'nenhuma',
+        shareWallWithNeighbor: true,
+        entranceOrientation: 'frente',
+      },
+      {
+        id: 'grp-2',
+        label: 'Bloco Dir Separado',
+        zone: 'lado_direito',
+        count: 2,
+        unitTypeId: utLarge.id,
+        coupling: 'separadas',
+        spacingM: 1.6,
+        mirroredRule: 'nenhuma',
+        shareWallWithNeighbor: false,
+        entranceOrientation: 'frente',
+      },
+    ],
+  };
+
+  const mixedUnits = generateImplantationUnits(baseMixed, cfgMixed, baseMixed.floors[0].id);
+  assert.equal(mixedUnits.length, 4);
+  const projMixed: Project = {
+    ...baseMixed,
+    implantation: cfgMixed,
+    floors: [{ ...baseMixed.floors[0], units: mixedUnits }],
+  };
+
+  // Scenario 6 & 7: Street-side 'esquerda' boundary mapping + live propagation to quantities/CAD/DXF/PDF
+  const segs = getLotBoundarySegments(projMixed.site);
+  const frontSeg = segs.find((s) => s.side === 'front');
+  assert.ok(frontSeg && frontSeg.a.x === 0 && frontSeg.b.x === 0);
+  const repMixed = validateImplantation(projMixed);
+  assert.equal(repMixed.isValid, true, `Mixed project should be valid: ${JSON.stringify(repMixed.issues)}`);
+  assert.equal(repMixed.sharedWalls.length, 1);
+
+  const qtyMixed = calculateQuantities(projMixed);
+  assert.equal(qtyMixed.summary.totalUnits, 4);
+  assert.equal(qtyMixed.summary.totalPrivateAreaM2, round2(2 * (3.6 * 5.0) + 2 * (4.4 * 6.0)));
+  const bdgMixed = calculateBudgetSummary(projMixed, qtyMixed);
+  assert.ok(bdgMixed.grandTotalCost > 0);
+
+  const tabs = buildSheetTabulations(projMixed);
+  assert.equal(tabs.areaRows.length, 2);
+
+  const dxfMixed = generateProjectDXF(projMixed, 0);
+  assert.ok(dxfMixed.includes('DIVISA_COMPARTILHADA'));
+  assert.ok(dxfMixed.includes('DIVISA_CERCA'));
+  assert.ok(dxfMixed.includes('PAREDES_GEMINADAS'));
+  assert.ok(dxfMixed.includes('ACESSOS'));
+
+  const pdfA02 = generateTechnicalSheetPDFBlob(projMixed, 'A02', 0);
+  assert.ok(pdfA02.size > 2000);
+
+  // Scenario 8: JSON serialization round-trip + legacy project compatibility
+  const roundTrip = JSON.parse(JSON.stringify(projMixed)) as typeof projMixed;
+  assert.equal(roundTrip.site.measurementUnit, 'cm');
+  assert.equal(roundTrip.site.streetSide, 'esquerda');
+  assert.equal(roundTrip.implantation?.groups.length, 2);
+  const demoLegacy = createDefaultDemoProject();
+  assert.equal(normalizeSiteData(demoLegacy.site).streetSide, 'baixo');
+  assert.equal(validateImplantation(demoLegacy).criticalCount, 0);
+
+  // Scenario 9: Explicit validation error detection
+  // 9A. Out of bounds + Blocked Gate
+  const badOutAndGate = structuredClone(projMixed);
+  badOutAndGate.floors[0].units[0].x = -0.4; // outside lot + blocks front gate at x=0!
+  badOutAndGate.floors[0].units[0].y = 1.0;
+  const repBadA = validateImplantation(badOutAndGate);
+  assert.ok(repBadA.issues.some((i) => i.code === 'OUT_OF_BOUNDS'));
+  assert.ok(repBadA.issues.some((i) => i.code === 'BLOCKED_ACCESS'));
+
+  // 9B. Count divergence + Overlap + Separated units touching
+  const badOverlap = structuredClone(projMixed);
+  badOverlap.implantation!.totalUnitsTarget = 6; // mismatch with 4
+  badOverlap.implantation!.couplingMode = 'separadas';
+  badOverlap.implantation!.interUnitSpacingM = 1.5;
+  badOverlap.floors[0].units[1].x = badOverlap.floors[0].units[0].x;
+  badOverlap.floors[0].units[1].y = badOverlap.floors[0].units[0].y + 1.0; // physical overlap
+  const repBadB = validateImplantation(badOverlap);
+  assert.ok(repBadB.issues.some((i) => i.code === 'COUNT_DIVERGENCE'));
+  assert.ok(repBadB.issues.some((i) => i.code === 'OVERLAP'));
+
+  // 9C. Shared wall with opening conflict & corridor conflict
+  const utFrontDoor = makeQuickUnitType('KIT-DOOR', 4.0, 5.0, 'frente');
+  const pBack = createBlankProject({
+    name: 'Conflito Parede',
+    client: '',
+    municipality: '',
+    state: 'RJ',
+    front: 12,
+    depth: 25,
+    floorsCount: 1,
+    methodId: 'alvenaria_convencional',
+  });
+  const projConflict = {
+    ...pBack,
+    unitTypes: [utFrontDoor],
+    implantation: {
+      ...createDefaultImplantationConfig(pBack),
+      couplingMode: 'geminadas' as const,
+      totalUnitsTarget: 2,
+      circulation: {
+        ...createDefaultImplantationConfig(pBack).circulation,
+        corridorWidthM: 2.0,
+      },
+    },
+    floors: [
+      {
+        ...pBack.floors[0],
+        corridorWidth: 2.0,
+        units: [
+          {
+            id: 'u1',
+            unitNumber: '101',
+            unitTypeId: utFrontDoor.id,
+            floorId: pBack.floors[0].id,
+            x: 1.5,
+            y: 3.0,
+            rotationDeg: 0,
+            mirrored: false,
+          },
+          {
+            id: 'u2',
+            unitNumber: '102',
+            unitTypeId: utFrontDoor.id,
+            floorId: pBack.floors[0].id,
+            // Touches bottom edge of u1 where u1 has J1/P1 front openings -> SHARED_WALL_CONFLICT
+            x: 1.5,
+            y: 8.0,
+            rotationDeg: 0,
+            mirrored: false,
+          },
+          {
+            id: 'u3',
+            unitNumber: '103',
+            unitTypeId: utFrontDoor.id,
+            floorId: pBack.floors[0].id,
+            // Corridor between u1 (maxX=5.5) and u3 (x=6.6) = 1.10m < 2.0m -> CORRIDOR_CONFLICT
+            x: 6.6,
+            y: 3.0,
+            rotationDeg: 0,
+            mirrored: false,
+          },
+        ],
+      },
+    ],
+  };
+  const { sharedWalls: swConflict } = detectSharedWallsAndGaps(
+    projConflict.floors[0].units,
+    projConflict.unitTypes,
+  );
+  assert.equal(swConflict.length, 1);
+  assert.ok(swConflict[0].conflictingOpenings.length > 0);
+  const repConflict = validateImplantation(projConflict);
+  assert.ok(repConflict.issues.some((i) => i.code === 'SHARED_WALL_CONFLICT'));
+  assert.ok(repConflict.issues.some((i) => i.code === 'CORRIDOR_CONFLICT'));
+  // Honest municipal notice (never approves municipal zoning without rules)
+  assert.ok(repConflict.municipalValidationNote.includes('não implica aprovação'));
+});
+
 
 

@@ -43,6 +43,12 @@ import {
   calculateQuantities,
 } from './quantitiesAndBudget';
 import { generateAllMemorials } from './memorialGenerator';
+import {
+  detectSharedWallsAndGaps,
+  getGateWorldPosition,
+  getLotBoundarySegments,
+  normalizeSiteData,
+} from './implantation';
 import type { Project, UnitType } from '../types/project';
 
 export interface SheetDefinition {
@@ -218,13 +224,74 @@ export function generateProjectDXF(project: Project, floorIndex = 0): string {
   const entities: string[] = [];
   const verts = project.site.vertices;
 
-  // Site boundary (closed LWPOLYLINE)
+  const normSite = normalizeSiteData(project.site);
+  const boundarySegs = getLotBoundarySegments(normSite);
+
+  // Site boundaries per condition + enabled gates
   if (verts.length >= 3) {
     entities.push(dxfClosedPoly(verts, 'TERRENO'));
+    for (const seg of boundarySegs) {
+      const layer =
+        seg.boundary.condition === 'murada'
+          ? 'DIVISA_MURADA'
+          : seg.boundary.condition === 'compartilhada'
+            ? 'DIVISA_COMPARTILHADA'
+            : seg.boundary.condition === 'cerca'
+              ? 'DIVISA_CERCA'
+              : 'DIVISA_ABERTA';
+      const ux = (seg.b.x - seg.a.x) / Math.max(0.01, seg.lengthM);
+      const uy = (seg.b.y - seg.a.y) / Math.max(0.01, seg.lengthM);
+      const gatesOnSeg = normSite.accesses
+        .filter((g) => g.enabled && g.side === seg.side)
+        .map((g) => {
+          const start = Math.max(0, Math.min(seg.lengthM - 0.3, g.offsetM));
+          const end = Math.min(seg.lengthM, start + Math.max(0.5, g.widthM));
+          return { gate: g, start, end };
+        })
+        .sort((a, b) => a.start - b.start);
+
+      let cursor = 0;
+      for (const gi of gatesOnSeg) {
+        if (gi.start > cursor + 0.05) {
+          entities.push(
+            dxfLine(
+              seg.a.x + ux * cursor,
+              seg.a.y + uy * cursor,
+              seg.a.x + ux * gi.start,
+              seg.a.y + uy * gi.start,
+              layer,
+            ),
+          );
+        }
+        const gw = getGateWorldPosition(normSite, gi.gate);
+        if (gw) {
+          entities.push(dxfLine(gw.p1.x, gw.p1.y, gw.p2.x, gw.p2.y, 'ACESSOS'));
+          entities.push(dxfText(gw.center.x, gw.center.y, 0.16, gi.gate.type.toUpperCase(), 'ACESSOS'));
+        }
+        cursor = Math.max(cursor, gi.end);
+      }
+      if (cursor < seg.lengthM - 0.05) {
+        entities.push(
+          dxfLine(
+            seg.a.x + ux * cursor,
+            seg.a.y + uy * cursor,
+            seg.b.x,
+            seg.b.y,
+            layer,
+          ),
+        );
+      }
+    }
+    const frontSeg = boundarySegs.find((s) => s.side === 'front');
+    if (frontSeg) {
+      const midX = (frontSeg.a.x + frontSeg.b.x) / 2 - frontSeg.inwardNormal.x * 1.1;
+      const midY = (frontSeg.a.y + frontSeg.b.y) / 2 - frontSeg.inwardNormal.y * 1.1;
+      entities.push(dxfText(midX - 1.2, midY, 0.25, 'VIA PUBLICA / RUA', 'TERRENO'));
+    }
   }
 
   // Buildable box
-  const siteCheck = analyzeSiteGeometry(project.site);
+  const siteCheck = analyzeSiteGeometry(normSite);
   const bx = siteCheck.buildableBox;
   if (bx.width > 0 && bx.depth > 0) {
     entities.push(
@@ -242,6 +309,14 @@ export function generateProjectDXF(project: Project, floorIndex = 0): string {
 
   const floor = project.floors[floorIndex] ?? project.floors[0];
   const footprint = computeFloorFootprint(project, floor);
+
+  // Shared geminated party walls
+  if (floor) {
+    const { sharedWalls } = detectSharedWallsAndGaps(floor.units, project.unitTypes);
+    for (const sw of sharedWalls) {
+      entities.push(dxfLine(sw.p1.x, sw.p1.y, sw.p2.x, sw.p2.y, 'PAREDES_GEMINADAS'));
+    }
+  }
 
   // Structural axes
   if (footprint.hasUnits) {
@@ -1578,21 +1653,83 @@ export function generateTechnicalSheetPDFBlob(
       y += 11;
     }
   } else {
-    // Plan CAD viewport (Site, Setbacks, Grid Axes, Double-Line Walls, Doors, Furniture, Cotas)
-    const bbox = getBoundingBox(site.vertices);
+    // Plan CAD viewport (Site, Boundaries, Gates, Setbacks, Grid Axes, Double-Line Walls, Doors, Furniture, Cotas)
+    const normSite = normalizeSiteData(site);
+    const boundarySegs = getLotBoundarySegments(normSite);
+    const bbox = getBoundingBox(normSite.vertices);
     const drawW = 240;
     const drawH = 220;
     const scale = Math.min(drawW / Math.max(1, bbox.width), drawH / Math.max(1, bbox.depth)) * 0.82;
     const offX = 36;
     const offY = 44;
 
-    // Site Polygon
-    doc.setDrawColor(71, 85, 105);
-    doc.setLineWidth(0.4);
-    for (let i = 0; i < site.vertices.length; i++) {
-      const a = site.vertices[i];
-      const b = site.vertices[(i + 1) % site.vertices.length];
-      doc.line(offX + a.x * scale, offY + a.y * scale, offX + b.x * scale, offY + b.y * scale);
+    // Boundary edges respecting conditions (murada / aberta / compartilhada / cerca) and gate openings
+    for (const seg of boundarySegs) {
+      const cond = seg.boundary.condition;
+      doc.setDrawColor(15, 23, 42);
+      doc.setLineWidth(cond === 'murada' ? 0.65 : cond === 'compartilhada' ? 0.55 : cond === 'cerca' ? 0.35 : 0.25);
+      if (cond === 'compartilhada') doc.setLineDashPattern([3, 1, 1, 1], 0);
+      else if (cond === 'cerca') doc.setLineDashPattern([2, 1.2], 0);
+      else if (cond === 'aberta') doc.setLineDashPattern([1, 1.8], 0);
+      else doc.setLineDashPattern([], 0);
+
+      const ux = (seg.b.x - seg.a.x) / Math.max(0.01, seg.lengthM);
+      const uy = (seg.b.y - seg.a.y) / Math.max(0.01, seg.lengthM);
+      const gatesOnSeg = normSite.accesses
+        .filter((g) => g.enabled && g.side === seg.side)
+        .map((g) => {
+          const start = Math.max(0, Math.min(seg.lengthM - 0.3, g.offsetM));
+          const end = Math.min(seg.lengthM, start + Math.max(0.5, g.widthM));
+          return { gate: g, start, end };
+        })
+        .sort((a, b) => a.start - b.start);
+
+      let cursor = 0;
+      for (const gi of gatesOnSeg) {
+        if (gi.start > cursor + 0.05) {
+          doc.line(
+            offX + (seg.a.x + ux * cursor) * scale,
+            offY + (seg.a.y + uy * cursor) * scale,
+            offX + (seg.a.x + ux * gi.start) * scale,
+            offY + (seg.a.y + uy * gi.start) * scale,
+          );
+        }
+        const gw = getGateWorldPosition(normSite, gi.gate);
+        if (gw) {
+          doc.setLineDashPattern([1.2, 0.8], 0);
+          doc.setDrawColor(180, 83, 9);
+          doc.setLineWidth(0.45);
+          doc.line(offX + gw.p1.x * scale, offY + gw.p1.y * scale, offX + gw.p2.x * scale, offY + gw.p2.y * scale);
+          doc.setFontSize(5.5);
+          doc.setTextColor(180, 83, 9);
+          doc.text(
+            gi.gate.type === 'veiculo' ? 'VEIC' : 'PED',
+            offX + (gw.center.x + gw.inwardNormal.x * 0.6) * scale,
+            offY + (gw.center.y + gw.inwardNormal.y * 0.6) * scale,
+            { align: 'center' },
+          );
+          doc.setDrawColor(15, 23, 42);
+        }
+        cursor = Math.max(cursor, gi.end);
+      }
+      if (cursor < seg.lengthM - 0.05) {
+        doc.line(
+          offX + (seg.a.x + ux * cursor) * scale,
+          offY + (seg.a.y + uy * cursor) * scale,
+          offX + seg.b.x * scale,
+          offY + seg.b.y * scale,
+        );
+      }
+    }
+    doc.setLineDashPattern([], 0);
+
+    const frontSeg = boundarySegs.find((s) => s.side === 'front');
+    if (frontSeg && (sheetId === 'A01' || sheetId === 'A02')) {
+      const fx = offX + ((frontSeg.a.x + frontSeg.b.x) / 2 - frontSeg.inwardNormal.x * 1.4) * scale;
+      const fy = offY + ((frontSeg.a.y + frontSeg.b.y) / 2 - frontSeg.inwardNormal.y * 1.4) * scale;
+      doc.setFontSize(7.5);
+      doc.setTextColor(71, 85, 105);
+      doc.text(`VIA PÚBLICA / RUA (${frontSeg.lengthM.toFixed(2)}m)`, fx, fy, { align: 'center' });
     }
 
     // Buildable Setback Box
@@ -1638,6 +1775,15 @@ export function generateTechnicalSheetPDFBlob(
         const ut = project.unitTypes.find((t) => t.id === inst.unitTypeId);
         if (!ut) continue;
         drawUnitCADInPDF(doc, ut, inst, offX, offY, scale, sheetId);
+      }
+
+      if (sheetId === 'A01' || sheetId === 'A02' || sheetId === 'A03') {
+        const { sharedWalls } = detectSharedWallsAndGaps(floor.units, project.unitTypes);
+        doc.setDrawColor(217, 119, 6);
+        doc.setLineWidth(0.7);
+        for (const sw of sharedWalls) {
+          doc.line(offX + sw.p1.x * scale, offY + sw.p1.y * scale, offX + sw.p2.x * scale, offY + sw.p2.y * scale);
+        }
       }
     }
 

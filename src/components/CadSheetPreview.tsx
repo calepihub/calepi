@@ -20,6 +20,12 @@ import {
   getRoomArea,
   round2,
 } from '../engine/geometry';
+import {
+  detectSharedWallsAndGaps,
+  getGateWorldPosition,
+  getLotBoundarySegments,
+  normalizeSiteData,
+} from '../engine/implantation';
 import { ElectricalSymbolSvg, FurnitureCadBlock } from './CadArchitecturalSymbols';
 import type { Project, UnitType } from '../types/project';
 
@@ -1455,27 +1461,132 @@ export const CadSheetPreview: React.FC<CadSheetPreviewProps> = ({
 
         <g clipPath="url(#leftViewportClip)">
 
-        {/* Street label for Site / Implantation */}
-        {(sheetId === 'A01' || sheetId === 'A02') && (
-          <text
-            x={mx((siteBBox.minX + siteBBox.maxX) / 2)}
-            y={my(siteBBox.maxY) + 18}
-            textAnchor="middle"
-            fill={pal.dimension}
-            fontSize="9"
-            fontFamily="monospace"
-          >
-            VIA PÚBLICA / PASSEIO ({project.site.front.toFixed(2)}m testada)
-          </text>
-        )}
+        {/* Street label + Per-Edge Site Boundaries + Gate Openings */}
+        {(() => {
+          const normSite = normalizeSiteData(project.site);
+          const boundarySegs = getLotBoundarySegments(normSite);
+          const frontSeg = boundarySegs.find((s) => s.side === 'front');
 
-        {/* Site Boundary */}
-        <polygon
-          points={project.site.vertices.map((v) => `${mx(v.x)},${my(v.y)}`).join(' ')}
-          fill="none"
-          stroke={pal.siteBound}
-          strokeWidth="1.5"
-        />
+          return (
+            <g>
+              {(sheetId === 'A01' || sheetId === 'A02') && frontSeg && (() => {
+                const midX = (frontSeg.a.x + frontSeg.b.x) / 2;
+                const midY = (frontSeg.a.y + frontSeg.b.y) / 2;
+                const outX = -frontSeg.inwardNormal.x;
+                const outY = -frontSeg.inwardNormal.y;
+                const sx = mx(midX) + outX * 18;
+                const sy = my(midY) + outY * 18;
+                const isSideVert =
+                  normSite.streetSide === 'esquerda' || normSite.streetSide === 'direita';
+                return (
+                  <text
+                    x={sx}
+                    y={sy}
+                    textAnchor="middle"
+                    transform={isSideVert ? `rotate(-90 ${sx} ${sy})` : undefined}
+                    fill={pal.dimension}
+                    fontSize="8.5"
+                    fontWeight="bold"
+                    fontFamily="monospace"
+                  >
+                    VIA PÚBLICA / RUA ({frontSeg.lengthM.toFixed(2)}m)
+                  </text>
+                );
+              })()}
+
+              {/* Lot polygon subtle fill */}
+              <polygon
+                points={project.site.vertices.map((v) => `${mx(v.x)},${my(v.y)}`).join(' ')}
+                fill="none"
+                stroke={pal.siteBound}
+                strokeWidth="0.4"
+                opacity={0.35}
+              />
+
+              {/* Individual Boundary Edges honoring murada / aberta / compartilhada / cerca */}
+              {boundarySegs.map((seg) => {
+                if (seg.lengthM < 0.1) return null;
+                const ux = (seg.b.x - seg.a.x) / seg.lengthM;
+                const uy = (seg.b.y - seg.a.y) / seg.lengthM;
+                const gatesOnSeg = normSite.accesses
+                  .filter((g) => g.enabled && g.side === seg.side)
+                  .map((g) => {
+                    const start = Math.max(0, Math.min(seg.lengthM - 0.3, g.offsetM));
+                    const end = Math.min(seg.lengthM, start + Math.max(0.5, g.widthM));
+                    return { gate: g, start, end };
+                  })
+                  .sort((a, b) => a.start - b.start);
+
+                const spans: Array<[number, number]> = [];
+                let cursor = 0;
+                for (const gi of gatesOnSeg) {
+                  if (gi.start > cursor + 0.05) spans.push([cursor, gi.start]);
+                  cursor = Math.max(cursor, gi.end);
+                }
+                if (cursor < seg.lengthM - 0.05) spans.push([cursor, seg.lengthM]);
+
+                const cond = seg.boundary.condition;
+                const strokeW =
+                  cond === 'murada' ? 2.1 : cond === 'compartilhada' ? 1.8 : cond === 'cerca' ? 1.2 : 0.9;
+                const dash =
+                  cond === 'compartilhada'
+                    ? '7 2 2 2'
+                    : cond === 'cerca'
+                      ? '4 2.2'
+                      : cond === 'aberta'
+                        ? '2 3'
+                        : undefined;
+
+                return (
+                  <g key={`cad-bound-${seg.side}`}>
+                    {spans.map(([s0, s1], idx) => (
+                      <line
+                        key={idx}
+                        x1={mx(seg.a.x + ux * s0)}
+                        y1={my(seg.a.y + uy * s0)}
+                        x2={mx(seg.a.x + ux * s1)}
+                        y2={my(seg.a.y + uy * s1)}
+                        stroke={pal.siteBound}
+                        strokeWidth={strokeW}
+                        strokeDasharray={dash}
+                      />
+                    ))}
+                    {gatesOnSeg.map((gi) => {
+                      const gw = getGateWorldPosition(normSite, gi.gate);
+                      if (!gw) return null;
+                      return (
+                        <g key={gi.gate.id}>
+                          <line
+                            x1={mx(gw.p1.x)}
+                            y1={my(gw.p1.y)}
+                            x2={mx(gw.p2.x)}
+                            y2={my(gw.p2.y)}
+                            stroke={pal.doorLeaf}
+                            strokeWidth="1.6"
+                            strokeDasharray="2.2 1.2"
+                          />
+                          {(sheetId === 'A01' || sheetId === 'A02') && (
+                            <text
+                              x={mx(gw.center.x) + gw.inwardNormal.x * 9}
+                              y={my(gw.center.y) + gw.inwardNormal.y * 9}
+                              textAnchor="middle"
+                              fill={pal.doorLeaf}
+                              fontSize="6"
+                              fontWeight="bold"
+                              fontFamily="monospace"
+                            >
+                              {gi.gate.type === 'veiculo' ? 'VEÍC.' : 'PED.'}
+                            </text>
+                          )}
+                        </g>
+                      );
+                    })}
+                  </g>
+                );
+              })}
+            </g>
+          );
+        })()}
 
         {/* Setbacks */}
         {siteCheck.buildableBox.width > 0 && siteCheck.buildableBox.depth > 0 && (
@@ -1888,6 +1999,26 @@ export const CadSheetPreview: React.FC<CadSheetPreviewProps> = ({
             </g>
           );
         })}
+
+        {/* Shared Geminated Party Walls Highlight (A01 / A02 / A03) */}
+        {(sheetId === 'A01' || sheetId === 'A02' || sheetId === 'A03') &&
+          activeFloor &&
+          (() => {
+            const { sharedWalls } = detectSharedWallsAndGaps(activeFloor.units, project.unitTypes);
+            return sharedWalls.map((sw) => (
+              <g key={sw.id}>
+                <line
+                  x1={mx(sw.p1.x)}
+                  y1={my(sw.p1.y)}
+                  x2={mx(sw.p2.x)}
+                  y2={my(sw.p2.y)}
+                  stroke={pal.setback}
+                  strokeWidth="2.4"
+                  opacity={0.9}
+                />
+              </g>
+            ));
+          })()}
 
         {/* Common Area Corridor CFTV Cameras on E06 */}
         {showSpecials && footprint.hasUnits && (
