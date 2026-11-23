@@ -13,6 +13,33 @@ import {
   evaluateFireSafety,
 } from './engineering';
 import { calculateQuantities } from './quantitiesAndBudget';
+import {
+  BASEBOARD_OPTIONS,
+  CEILING_OPTIONS,
+  DRAIN_OPTIONS,
+  FLOOR_INTERNAL_OPTIONS,
+  GLASS_TYPE_OPTIONS,
+  INTERIOR_DOOR_OPTIONS,
+  KITCHEN_FAUCET_OPTIONS,
+  KITCHEN_SINK_OPTIONS,
+  LAUNDRY_TUB_OPTIONS,
+  METALS_FINISH_OPTIONS,
+  ROOF_MATERIAL_OPTIONS,
+  ROOF_SHAPE_OPTIONS,
+  SANITARY_COLOR_OPTIONS,
+  SHOWER_OPTIONS,
+  TOILET_OPTIONS,
+  WALL_EXTERIOR_OPTIONS,
+  WALL_INTERIOR_OPTIONS,
+  WASHBASIN_FAUCET_OPTIONS,
+  WASHBASIN_OPTIONS,
+  WET_FLOOR_OPTIONS,
+  WET_WALL_BATHROOM_OPTIONS,
+  WET_WALL_KITCHEN_OPTIONS,
+  WINDOW_FRAME_OPTIONS,
+  findLabel,
+  getNormalizedSanitaryFixtures,
+} from './finishesCatalog';
 import type { Project } from '../types/project';
 
 export interface MemorialSection {
@@ -55,9 +82,17 @@ export function generateAllMemorials(project: Project): MemorialSection[] {
             ? 'Lateral Esquerda'
             : 'Lateral Direita';
       const partLabel = ut.internalPartitionType === 'drywall' ? 'Drywall 9,5cm' : 'Alvenaria';
+      const mezStructLbl =
+        ut.mezzanine?.structureType === 'madeira_estrutural'
+          ? 'Madeira Estrutural'
+          : ut.mezzanine?.structureType === 'steel_deck'
+            ? 'Steel Deck Metálico'
+            : ut.mezzanine?.structureType === 'concreto_armado'
+              ? 'Concreto Armado'
+              : 'Estrutura Metálica + Deck Madeira';
       const mezLabel =
         ut.hasMezzanine && ut.mezzanine?.enabled && ut.ceilingHeight >= 3.0
-          ? ` | Mezanino ${ut.mezzanine.width.toFixed(2)}×${ut.mezzanine.depth.toFixed(2)}m (cota +${ut.mezzanine.elevationM.toFixed(2)}m — não computado como pavimento)`
+          ? ` | Mezanino 100% interno ${ut.mezzanine.width.toFixed(2)}×${ut.mezzanine.depth.toFixed(2)}m (${round2(ut.mezzanine.width * ut.mezzanine.depth)} m² = ${Math.round(ut.mezzanine.coverageRatio * 100)}% do piso · cota +${ut.mezzanine.elevationM.toFixed(2)}m do chão · PD sup. ${round2(ut.ceilingHeight - ut.mezzanine.elevationM - ut.mezzanine.slabThicknessM).toFixed(2)}m · ${mezStructLbl} · Dormitório acima e Sala/Coz/BWC embaixo — não computado como pavimento)`
           : '';
       return `- ${ut.code} (${ut.name}): ${q} unid × ${round2(ut.width * ut.depth)} m² (${ut.width}m × ${ut.depth}m) = ${round2(q * ut.width * ut.depth)} m² | Pé-direito: ${ut.ceilingHeight} m | Entrada: ${entryLabel} | Divisórias internas: ${partLabel}${mezLabel}`;
     })
@@ -91,6 +126,39 @@ export function generateAllMemorials(project: Project): MemorialSection[] {
       return `${ut.code}:\n${ops || '  • Nenhuma abertura cadastrada'}`;
     })
     .join('\n\n');
+
+  const rs = project.renderSettings;
+  const fx = getNormalizedSanitaryFixtures(project);
+  const specBlock = `
+10. COBERTURA E ESQUADRIAS
+Formato do Telhado: ${findLabel(ROOF_SHAPE_OPTIONS, rs.roofShape ?? 'platibanda')}
+Tipo / Material da Telha: ${findLabel(ROOF_MATERIAL_OPTIONS, rs.roofMaterial)} | Inclinação: ${project.constructionMethod.roofSlopePercent}%
+Isolamento / Especificação: ${ni(project.constructionMethod.insulationSpec)}
+Esquadrias Externas / Janelas: ${findLabel(WINDOW_FRAME_OPTIONS, rs.windowFrameColor)}
+Folhas de Portas Internas: ${findLabel(INTERIOR_DOOR_OPTIONS, rs.interiorDoorMaterial)}
+Vidros: ${findLabel(GLASS_TYPE_OPTIONS, rs.glassType)}
+
+11. CADERNO DE ACABAMENTOS, REVESTIMENTOS, LOUÇAS, METAIS, CHUVEIROS & RALOS
+- Fachada Externa: ${findLabel(WALL_EXTERIOR_OPTIONS, rs.wallExteriorFinish ?? 'textura_acrilica')} (Cor base ${rs.facadeColor})
+- Paredes Internas Secas: ${findLabel(WALL_INTERIOR_OPTIONS, rs.wallInteriorFinish ?? 'pintura_fosca')} (Cor ${rs.interiorWallColor})
+- Paredes Banheiro / Box: ${findLabel(WET_WALL_BATHROOM_OPTIONS, rs.wetWallBathroom)}
+- Paredes Cozinha / Lavanderia: ${findLabel(WET_WALL_KITCHEN_OPTIONS, rs.wetWallKitchen)}
+- Piso Áreas Secas: ${findLabel(FLOOR_INTERNAL_OPTIONS, rs.floorMaterial)}
+- Piso Áreas Molhadas: ${findLabel(WET_FLOOR_OPTIONS, rs.wetFloorMaterial)}
+- Rodapé: ${findLabel(BASEBOARD_OPTIONS, rs.baseboardType)}
+- Forro / Teto: ${findLabel(CEILING_OPTIONS, rs.ceilingType)}
+- Bacia Sanitária: ${findLabel(TOILET_OPTIONS, fx.toiletType)} (${findLabel(SANITARY_COLOR_OPTIONS, fx.sanitaryWareColor)})
+- Chuveiro / Ducha: ${findLabel(SHOWER_OPTIONS, fx.showerType)}
+- Ralos e Drenagem BWC: ${findLabel(DRAIN_OPTIONS, fx.drainType)}
+- Lavatório & Torneira BWC: ${findLabel(WASHBASIN_OPTIONS, fx.washbasinType)} | ${findLabel(WASHBASIN_FAUCET_OPTIONS, fx.washbasinFaucet)}
+- Pia Cozinha & Torneira: ${findLabel(KITCHEN_SINK_OPTIONS, fx.kitchenSinkType)} | ${findLabel(KITCHEN_FAUCET_OPTIONS, fx.kitchenFaucet)}
+- Tanque Lavanderia: ${findLabel(LAUNDRY_TUB_OPTIONS, fx.laundryTubType)}
+- Acabamento dos Metais: ${findLabel(METALS_FINISH_OPTIONS, fx.metalsFinish)}
+- Paisagismo & Áreas Externas: Piso base ${(project.landscaping?.defaultGroundSurface ?? 'grama_esmeralda').replace(/_/g, ' ')} | ${project.landscaping?.surfaceZones?.length ?? 0} zonas externas | ${project.landscaping?.pools?.length ?? 0} piscina(s) | ${project.landscaping?.gourmetAreas?.length ?? 0} área(s) gourmet | ${project.landscaping?.plants?.length ?? 0} espécimes botânicos.
+
+12. ACESSIBILIDADE E CONSIDERAÇÕES TÉCNICAS
+Referência utilizada: ${project.accessibilityConfig.normReference}.
+Nota de Responsabilidade Técnica: Este memorial reflete os parâmetros cadastrados no modelo digital. A aprovação legal junto aos órgãos municipais e a execução da obra dependem de validação e assinatura por profissionais habilitados (CAU/CREA).`;
 
   const archContent = `1. IDENTIFICAÇÃO DO EMPREENDIMENTO
 Empreendimento: ${ni(project.name)} (${project.code})
@@ -136,15 +204,7 @@ ${descAmbientes || 'NÃO INFORMADO'}
 
 9. ESQUADRIAS E PORTAS PADRONIZADAS (0,80m / 0,70m / 0,60m)
 Critério Adotado: Portas de Entrada Social = 0,80m | Portas de Quarto = 0,70m | Portas de Banheiro = 0,60m; Janelas e Vitrôs dimensionados por ambiente.
-${esquadriasList || 'NÃO INFORMADO'}
-
-10. COBERTURA
-Tipo: ${project.constructionMethod.roofType.replace(/_/g, ' ')} | Inclinação: ${project.constructionMethod.roofSlopePercent}%
-Isolamento / Especificação: ${ni(project.constructionMethod.insulationSpec)}
-
-11. ACESSIBILIDADE E CONSIDERAÇÕES TÉCNICAS
-Referência utilizada: ${project.accessibilityConfig.normReference}.
-Nota de Responsabilidade Técnica: Este memorial reflete os parâmetros cadastrados no modelo digital. A aprovação legal junto aos órgãos municipais e a execução da obra dependem de validação e assinatura por profissionais habilitados (CAU/CREA).`;
+${esquadriasList || 'NÃO INFORMADO'}${specBlock}`;
 
   const materialsByRoom = project.unitTypes
     .map((ut) => {

@@ -33,6 +33,7 @@ import {
   validateImplantation,
 } from '../engine/implantation';
 import {
+  computeMezzanineInteriorBounds,
   generateParametricUnitLayout,
   nextId,
 } from '../engine/parametricGenerator';
@@ -52,6 +53,7 @@ import type {
   LotFrontSide,
   LotSideKey,
   MeasurementUnit,
+  MezzanineStructureType,
   Point2D,
   Project,
   SiteAccessGate,
@@ -106,7 +108,14 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
   const [qtBedrooms, setQtBedrooms] = useState(0);
   const [qtEntrySide, setQtEntrySide] = useState<EntrySide>('lateral_direita');
   const [qtPartition, setQtPartition] = useState<InternalPartitionType>('alvenaria');
+  const [qtLaundry, setQtLaundry] = useState(true);
   const [qtMezzanine, setQtMezzanine] = useState(false);
+  const [qtMezzElev, setQtMezzElev] = useState(2.15);
+  const [qtMezzSizingMode, setQtMezzSizingMode] = useState<'percent' | 'dimensions'>('percent');
+  const [qtMezzPct, setQtMezzPct] = useState(30);
+  const [qtMezzCustomW, setQtMezzCustomW] = useState(3.8);
+  const [qtMezzCustomD, setQtMezzCustomD] = useState(2.0);
+  const [qtMezzStruct, setQtMezzStruct] = useState<MezzanineStructureType>('metalica_madeira');
 
   // Per-unit quick dimension customization modal/panel state
   const [customizingUnitId, setCustomizingUnitId] = useState<string | null>(null);
@@ -266,6 +275,7 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
 
   const handleQuickCreateTypology = (e: React.FormEvent) => {
     e.preventDefault();
+    const allowMezz = qtCeiling >= 3.0 && qtMezzanine;
     const ut = generateParametricUnitLayout({
       code: qtCode.trim() || `TIPO-${project.unitTypes.length + 1}`,
       name: qtName.trim() || 'Kitnet Padrão',
@@ -273,15 +283,22 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
       depth: Math.max(3.6, qtDepth),
       ceilingHeight: Math.max(2.4, qtCeiling),
       bedrooms: qtBedrooms,
-      hasLaundry: false,
+      hasLaundry: qtLaundry,
       hasBalcony: false,
-      hasMezzanine: qtCeiling >= 3.0 ? qtMezzanine : false,
+      hasMezzanine: allowMezz,
       accessible: false,
       extWallThickness: project.constructionMethod.externalWallThickness,
       intWallThickness: qtPartition === 'drywall' ? 0.095 : project.constructionMethod.internalWallThickness,
       constructionSystem: project.constructionMethod.methodId,
       entrySide: qtEntrySide,
       internalPartitionType: qtPartition,
+      mezzanineElevationM: allowMezz ? qtMezzElev : undefined,
+      mezzanineSizingMode: allowMezz ? qtMezzSizingMode : undefined,
+      mezzanineCoverageRatio: allowMezz ? qtMezzPct / 100 : undefined,
+      mezzanineCustomWidthM: allowMezz && qtMezzSizingMode === 'dimensions' ? qtMezzCustomW : undefined,
+      mezzanineCustomDepthM: allowMezz && qtMezzSizingMode === 'dimensions' ? qtMezzCustomD : undefined,
+      mezzanineStructureType: allowMezz ? qtMezzStruct : undefined,
+      mezzanineUsage: allowMezz ? 'dormitorio' : undefined,
     });
 
     onUpdateProject((prev) => {
@@ -417,6 +434,16 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
       constructionSystem: project.constructionMethod.methodId,
       entrySide: customEntry,
       internalPartitionType: baseUt.internalPartitionType ?? 'alvenaria',
+      mezzanineZone: baseUt.mezzanine?.zone,
+      mezzanineElevationM: baseUt.mezzanine?.elevationM,
+      mezzanineSizingMode: baseUt.mezzanine?.sizingMode,
+      mezzanineCoverageRatio: baseUt.mezzanine?.coverageRatio,
+      mezzanineCustomWidthM: baseUt.mezzanine?.customWidthM,
+      mezzanineCustomDepthM: baseUt.mezzanine?.customDepthM,
+      mezzanineUsage: baseUt.mezzanine?.usage,
+      mezzanineStructureType: baseUt.mezzanine?.structureType,
+      mezzanineStairLayout: baseUt.mezzanine?.stairLayout,
+      mezzanineStairSide: baseUt.mezzanine?.stairSide,
     });
 
     onUpdateProject(
@@ -1226,16 +1253,144 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
                       </div>
                     </div>
 
-                    {qtCeiling >= 3.0 && (
-                      <label className="inline-flex items-center gap-2 text-xs text-sky-300 cursor-pointer">
+                    <div className="flex flex-wrap items-center gap-4 text-xs text-[#C4C9D4]">
+                      <label className="inline-flex items-center gap-1.5 cursor-pointer">
                         <input
                           type="checkbox"
-                          checked={qtMezzanine}
-                          onChange={(e) => setQtMezzanine(e.target.checked)}
+                          checked={qtLaundry}
+                          onChange={(e) => setQtLaundry(e.target.checked)}
                         />
-                        Incluir Mezanino técnico com escada Blondel (não conta como pavimento)
+                        Incluir Área de Serviço
                       </label>
-                    )}
+                      {qtCeiling >= 3.0 && (
+                        <label className="inline-flex items-center gap-2 text-xs text-sky-300 cursor-pointer font-medium">
+                          <input
+                            type="checkbox"
+                            checked={qtMezzanine}
+                            onChange={(e) => setQtMezzanine(e.target.checked)}
+                          />
+                          Incluir Mezanino 100% Interno (Dormitório acima · Sala/Coz/BWC embaixo)
+                        </label>
+                      )}
+                    </div>
+
+                    {qtCeiling >= 3.0 && qtMezzanine && (() => {
+                      const qb = computeMezzanineInteriorBounds(
+                        qtWidth,
+                        qtDepth,
+                        project.constructionMethod.externalWallThickness,
+                        false,
+                      );
+                      return (
+                        <div className="rounded border border-sky-500/40 bg-[#1B1E24] p-3 space-y-2.5">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                            <div>
+                              <label className="block text-[10px] font-semibold text-sky-200 mb-0.5">
+                                A quantos metros do chão fica o mezanino? (m)
+                              </label>
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="number"
+                                  step="0.05"
+                                  min={2.0}
+                                  max={round2(Math.max(2.05, qtCeiling - 1.05))}
+                                  value={qtMezzElev}
+                                  onChange={(e) => setQtMezzElev(Number(e.target.value))}
+                                  className="w-20 px-2 py-1 text-xs font-mono rounded bg-[#14161A] border border-[#2F7CF6] text-white"
+                                />
+                                <span className="text-[10px] font-mono text-[#949BA8]">
+                                  PD sup.: {round2(Math.max(0.8, qtCeiling - qtMezzElev - 0.12)).toFixed(2)}m
+                                </span>
+                              </div>
+                            </div>
+                            <div>
+                              <label className="block text-[10px] text-[#949BA8] mb-0.5">
+                                Estrutura do Mezanino
+                              </label>
+                              <select
+                                value={qtMezzStruct}
+                                onChange={(e) => setQtMezzStruct(e.target.value as MezzanineStructureType)}
+                                className="w-full px-2 py-1 text-xs rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                              >
+                                <option value="metalica_madeira">Estrutura Metálica + Deck Madeira</option>
+                                <option value="madeira_estrutural">Estrutura de Madeira Maciça</option>
+                                <option value="steel_deck">Metálica Steel Deck</option>
+                                <option value="concreto_armado">Concreto Armado</option>
+                              </select>
+                            </div>
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-[10px] text-[#C4C9D4]">
+                                Área interna útil: {qb.innerW.toFixed(2)}×{qb.innerD.toFixed(2)}m ({qb.innerAreaM2} m²)
+                              </span>
+                              <div className="inline-flex rounded border border-[#2A2F38] bg-[#14161A] p-0.5 text-[10px]">
+                                <button
+                                  type="button"
+                                  onClick={() => setQtMezzSizingMode('percent')}
+                                  className={`px-2 py-0.5 rounded ${qtMezzSizingMode === 'percent' ? 'bg-[#2F7CF6] text-white' : 'text-[#949BA8]'}`}
+                                >
+                                  Por %
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setQtMezzSizingMode('dimensions')}
+                                  className={`px-2 py-0.5 rounded ${qtMezzSizingMode === 'dimensions' ? 'bg-[#2F7CF6] text-white' : 'text-[#949BA8]'}`}
+                                >
+                                  Dimensões (m)
+                                </button>
+                              </div>
+                            </div>
+
+                            {qtMezzSizingMode === 'percent' ? (
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                {[10, 20, 30, 40, 50].map((pct) => (
+                                  <button
+                                    key={pct}
+                                    type="button"
+                                    onClick={() => setQtMezzPct(pct)}
+                                    className={`px-2 py-0.5 text-[10px] font-mono rounded border ${
+                                      qtMezzPct === pct
+                                        ? 'border-[#2F7CF6] bg-[#2F7CF6]/25 text-white font-semibold'
+                                        : 'border-[#2A2F38] bg-[#14161A] text-[#949BA8]'
+                                    }`}
+                                  >
+                                    {pct}%
+                                  </button>
+                                ))}
+                                <span className="text-[10px] font-mono text-cyan-300 ml-1">
+                                  ≈ {round2((qb.innerAreaM2 * qtMezzPct) / 100)} m²
+                                </span>
+                              </div>
+                            ) : (
+                              <div className="grid grid-cols-2 gap-2">
+                                <input
+                                  type="number"
+                                  step="0.1"
+                                  min={1.0}
+                                  max={qb.innerW}
+                                  value={qtMezzCustomW}
+                                  onChange={(e) => setQtMezzCustomW(Number(e.target.value))}
+                                  aria-label="Largura mezanino"
+                                  className="px-2 py-1 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                                />
+                                <input
+                                  type="number"
+                                  step="0.1"
+                                  min={1.0}
+                                  max={qb.innerD}
+                                  value={qtMezzCustomD}
+                                  onChange={(e) => setQtMezzCustomD(Number(e.target.value))}
+                                  aria-label="Profundidade mezanino"
+                                  className="px-2 py-1 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                                />
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })()}
 
                     <div className="flex justify-end">
                       <button

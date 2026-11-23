@@ -49,7 +49,10 @@ export interface MezzanineConfig {
   zone: MezzanineZone;
   elevationM: number; // floor height of mezzanine platform above unit ground floor (e.g. 2.15m)
   slabThicknessM: number; // e.g. 0.12m
-  coverageRatio: number; // 0.25 .. 0.60
+  coverageRatio: number; // 0.10 .. 0.65 (% of interior useful floor area)
+  sizingMode?: 'percent' | 'dimensions';
+  customWidthM?: number;
+  customDepthM?: number;
   x: number;
   y: number;
   width: number;
@@ -636,6 +639,47 @@ export interface ElectricalDefaultHeights {
   iluminacaoTeto: number;
 }
 
+export interface SanitaryFixturesSpec {
+  toiletType:
+    | 'caixa_acoplada_dual'
+    | 'caixa_acoplada_monobloco'
+    | 'convencional_valvula'
+    | 'suspensa_embutida';
+  sanitaryWareColor: 'branco_gelo' | 'preto_fosco' | 'cinza_urbano';
+  showerType:
+    | 'eletrico_multitemperatura'
+    | 'ducha_eletronica_haste'
+    | 'ducha_aquecedor_gas'
+    | 'ducha_teto_monocomando';
+  washbasinType:
+    | 'cuba_apoio_granito'
+    | 'cuba_embutir_granito'
+    | 'lavatorio_coluna_suspensa'
+    | 'pia_esculpida_porcelanato';
+  washbasinFaucet:
+    | 'bica_baixa_cromada'
+    | 'bica_alta_apoio'
+    | 'monocomando_mesa'
+    | 'torneira_parede_arejador';
+  kitchenSinkType:
+    | 'granito_cuba_inox'
+    | 'quartzo_cuba_esculpida'
+    | 'inox_monobloco';
+  kitchenFaucet:
+    | 'bica_movel_mesa'
+    | 'monocomando_gourmet_extensivel'
+    | 'torneira_parede_flexivel';
+  laundryTubType:
+    | 'louca_suspensa'
+    | 'inox_embutida'
+    | 'marmore_sintetico_compacto';
+  drainType:
+    | 'ralo_linear_oculto'
+    | 'ralo_seco_click_inox'
+    | 'ralo_quadrado_convencional';
+  metalsFinish: 'cromado' | 'preto_fosco' | 'aco_escovado' | 'dourado_escovado';
+}
+
 export interface HydraulicConfig {
   occupantsPerUnit: number;
   litersPerPersonDay: number;
@@ -645,6 +689,7 @@ export interface HydraulicConfig {
   hotWaterMaterial: string;
   hasHotWaterHeating: boolean;
   heatingSystem: string;
+  sanitaryFixtures?: SanitaryFixturesSpec;
 }
 
 export interface RainwaterConfig {
@@ -857,7 +902,38 @@ export interface RenderMaterialSettings {
   interiorWallColor: string;
   wallExteriorFinish?: WallExteriorFinish;
   wallInteriorFinish?: WallInteriorFinish;
+  wetWallBathroom?:
+    | 'ceramica_branca'
+    | 'porcelanato_marmorizado'
+    | 'azulejo_metro'
+    | 'cimento_queimado_resinado'
+    | 'porcelanato_amadeirado';
+  wetWallKitchen?:
+    | 'azulejo_metro'
+    | 'porcelanato_acetinado'
+    | 'ceramica_esmaltada'
+    | 'cimento_queimado_resinado';
   floorMaterial: FloorFinishMaterial;
+  wetFloorMaterial?:
+    | 'porcelanato_antiderrapante'
+    | 'ceramica_acetinada'
+    | 'cimento_queimado_fosco';
+  baseboardType?:
+    | 'porcelanato_10cm'
+    | 'poliestireno_branco_10cm'
+    | 'madeira_mdf_7cm'
+    | 'negativo_embutido';
+  ceilingType?:
+    | 'gesso_drywall_tabica'
+    | 'laje_pintada'
+    | 'forro_pvc_amadeirado'
+    | 'forro_madeira_cumaru';
+  interiorDoorMaterial?:
+    | 'madeira_pintada_branca'
+    | 'madeira_verniz_natural'
+    | 'mdf_melaminico_cinza'
+    | 'aluminio_vidro';
+  glassType?: 'temperado_incolor' | 'temperado_verde_solar' | 'temperado_fume';
   roofMaterial: RoofFinishMaterial;
   roofShape?: RoofShapeType;
   windowFrameColor: 'aluminio_preto' | 'aluminio_branco' | 'madeira';

@@ -953,10 +953,11 @@ export function buildRoofGeometryGroup(params: {
   g.add(panel);
 
   // Tapered side parapet triangles closing sides of monopitch
+  const wallRise = rise * (depth / rd);
   const sideShape = new THREE.Shape();
   sideShape.moveTo(0, 0);
   sideShape.lineTo(depth, 0);
-  sideShape.lineTo(depth, rise * (depth / rd));
+  sideShape.lineTo(depth, wallRise);
   sideShape.closePath();
   const sideGeo = new THREE.ExtrudeGeometry(sideShape, { depth: 0.15, bevelEnabled: false });
   const sL = new THREE.Mesh(sideGeo, facadeMat);
@@ -965,7 +966,166 @@ export function buildRoofGeometryGroup(params: {
   const sR = new THREE.Mesh(sideGeo, facadeMat);
   sR.rotation.y = Math.PI / 2;
   sR.position.set(x + width - 0.15, baseElevationY, y + depth);
-  g.add(sL, sR);
+
+  // Rear high wall closing the tall edge of monopitch
+  const backClose = new THREE.Mesh(
+    new THREE.BoxGeometry(width, Math.max(0.25, wallRise), 0.15),
+    facadeMat,
+  );
+  backClose.position.set(cx, baseElevationY + wallRise / 2, y + 0.075);
+  backClose.castShadow = castShadow;
+  backClose.receiveShadow = true;
+  g.add(sL, sR, backClose);
 
   return g;
 }
+
+/**
+ * Conjunto completo de Cobertura Superior:
+ * 1. Laje de Cobertura estrutural fechando o teto do último pavimento sobre as paredes
+ * 2. Castelo da Caixa d'Água (Reservatório Superior) apoiado sobre a Laje de Cobertura
+ * 3. Telhado fechado (Platibanda / Duas Águas / Uma Água / Laje Plana) acima da Laje
+ */
+export function buildRoofAndWaterTowerGroup(params: {
+  x: number;
+  y: number;
+  width: number;
+  depth: number;
+  baseElevationY: number;
+  roofShape: RoofShapeType;
+  roofFinish: RoofFinishMaterial;
+  slopePercent: number;
+  facadeMat: THREE.Material;
+  slabMat: THREE.Material;
+  roofMat: THREE.Material;
+  tankMat: THREE.Material;
+  pipeMat: THREE.Material;
+  isSoftwareGl: boolean;
+  showRoofShell?: boolean;
+  reservoirLiters?: number;
+}): THREE.Group {
+  const {
+    x,
+    y,
+    width,
+    depth,
+    baseElevationY,
+    roofShape,
+    roofFinish,
+    slopePercent,
+    facadeMat,
+    slabMat,
+    roofMat,
+    tankMat,
+    pipeMat,
+    isSoftwareGl,
+    showRoofShell = true,
+    reservoirLiters = 1000,
+  } = params;
+  const g = new THREE.Group();
+  const cx = x + width / 2;
+  const cz = y + depth / 2;
+  const castShadow = !isSoftwareGl;
+
+  // 1. Laje de Cobertura fechando 100% do teto sobre as paredes externas
+  const roofSlabH = 0.14;
+  const roofSlab = new THREE.Mesh(new THREE.BoxGeometry(width, roofSlabH, depth), slabMat);
+  roofSlab.position.set(cx, baseElevationY + roofSlabH / 2, cz);
+  roofSlab.castShadow = castShadow;
+  roofSlab.receiveShadow = true;
+  roofSlab.userData = {
+    bimLabel: 'Laje de Cobertura Superior',
+    bimDiscipline: 'Estrutura Conceitual',
+    bimDetail: `Laje maciça ${width.toFixed(2)}×${depth.toFixed(2)}m (e=14 cm) fechando o teto`,
+  };
+  g.add(roofSlab);
+
+  const lajeTopY = baseElevationY + roofSlabH;
+
+  // 2. Castelo da Caixa d'Água (Reservatório Superior apoiado sobre a Laje de Cobertura)
+  const towerW = Math.min(1.45, Math.max(1.05, width * 0.34));
+  const towerD = Math.min(1.45, Math.max(1.05, depth * 0.22));
+  const towerH = 1.15;
+  const towerX = x + Math.min(Math.max(0.2, width * 0.18), width - towerW - 0.2);
+  const towerZ = y + Math.min(Math.max(0.2, depth * 0.16), depth - towerD - 0.2);
+  const tCx = towerX + towerW / 2;
+  const tCz = towerZ + towerD / 2;
+
+  const casteloUserData = {
+    bimLabel: `Castelo da Caixa d'Água Superior (${reservoirLiters} L)`,
+    bimDiscipline: 'Hidráulica',
+    bimDetail: `Apoiado sobre a Laje de Cobertura · ${towerW.toFixed(2)}×${towerD.toFixed(2)}×${towerH.toFixed(2)}m`,
+  };
+
+  // Base de apoio em concreto sobre a laje
+  const pedestal = new THREE.Mesh(new THREE.BoxGeometry(towerW, 0.1, towerD), slabMat);
+  pedestal.position.set(tCx, lajeTopY + 0.05, tCz);
+  pedestal.castShadow = castShadow;
+  pedestal.receiveShadow = true;
+  pedestal.userData = casteloUserData;
+  g.add(pedestal);
+
+  // Paredes do castelo técnico em alvenaria externa
+  const wt = 0.11;
+  const tN = new THREE.Mesh(new THREE.BoxGeometry(towerW, towerH, wt), facadeMat);
+  tN.position.set(tCx, lajeTopY + towerH / 2, towerZ + wt / 2);
+  const tS = new THREE.Mesh(new THREE.BoxGeometry(towerW, towerH, wt), facadeMat);
+  tS.position.set(tCx, lajeTopY + towerH / 2, towerZ + towerD - wt / 2);
+  const tW = new THREE.Mesh(new THREE.BoxGeometry(wt, towerH, towerD), facadeMat);
+  tW.position.set(towerX + wt / 2, lajeTopY + towerH / 2, tCz);
+  const tE = new THREE.Mesh(new THREE.BoxGeometry(wt, towerH, towerD), facadeMat);
+  tE.position.set(towerX + towerW - wt / 2, lajeTopY + towerH / 2, tCz);
+  for (const m of [tN, tS, tW, tE]) {
+    m.castShadow = castShadow;
+    m.receiveShadow = true;
+    m.userData = casteloUserData;
+    g.add(m);
+  }
+
+  // Caixa d'água polietileno azul instalada dentro do castelo, sobre a laje
+  const tankR = Math.min(towerW, towerD) * 0.34;
+  const tankBody = new THREE.Mesh(new THREE.CylinderGeometry(tankR, tankR * 0.84, 0.72, 18), tankMat);
+  tankBody.position.set(tCx, lajeTopY + 0.1 + 0.36, tCz);
+  tankBody.userData = casteloUserData;
+  const tankLid = new THREE.Mesh(new THREE.CylinderGeometry(tankR * 1.04, tankR * 1.04, 0.06, 18), tankMat);
+  tankLid.position.set(tCx, lajeTopY + 0.1 + 0.74, tCz);
+  tankLid.userData = casteloUserData;
+  const colPipe = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.55, 8), pipeMat);
+  colPipe.position.set(tCx + tankR * 0.65, lajeTopY + 0.25, tCz);
+  g.add(tankBody, tankLid, colPipe);
+
+  // Tampa / cobertura própria do Castelo d'Água (visível quando telhado está fechado ou aberto)
+  const capH = 0.08;
+  const towerCap = new THREE.Mesh(
+    new THREE.BoxGeometry(towerW + 0.14, capH, towerD + 0.14),
+    showRoofShell ? roofMat : tankMat,
+  );
+  towerCap.position.set(tCx, lajeTopY + towerH + capH / 2, tCz);
+  towerCap.castShadow = castShadow;
+  towerCap.receiveShadow = true;
+  towerCap.userData = casteloUserData;
+  if (showRoofShell) {
+    g.add(towerCap);
+  }
+
+  // 3. Telhado Fechado acima da Laje de Cobertura
+  if (showRoofShell) {
+    const roofGroup = buildRoofGeometryGroup({
+      x,
+      y,
+      width,
+      depth,
+      baseElevationY: lajeTopY,
+      roofShape,
+      roofFinish,
+      slopePercent,
+      facadeMat,
+      roofMat,
+      isSoftwareGl,
+    });
+    g.add(roofGroup);
+  }
+
+  return g;
+}
+

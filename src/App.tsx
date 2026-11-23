@@ -3,6 +3,7 @@ import { onAuthStateChanged, signInWithPopup, signOut, type User } from 'firebas
 import {
   Archive,
   ArrowRight,
+  Bath,
   Box,
   Building2,
   Calculator,
@@ -17,6 +18,7 @@ import {
   PenTool,
   Redo2,
   Sparkles,
+  Trees,
   Undo2,
   Upload,
   X,
@@ -27,6 +29,7 @@ import { CinematicRenderStudio } from './components/CinematicRenderStudio';
 import { ConstructionAndStructureModule } from './components/ConstructionAndStructureModule';
 import { DocumentationAndExportModule } from './components/DocumentationAndExportModule';
 import { EngineeringComplianceModule } from './components/EngineeringComplianceModule';
+import { FinishesAndFixturesModule } from './components/FinishesAndFixturesModule';
 import { FloorPlanEditor2D } from './components/FloorPlanEditor2D';
 import { LandscapingModule } from './components/LandscapingModule';
 import { MepElectricalModule } from './components/MepElectricalModule';
@@ -61,12 +64,14 @@ import type {
 
 type PrimaryStepId =
   | 'terreno'
+  | 'paisagismo'
   | 'planta2d'
+  | 'acabamentos'
   | 'bim3d'
   | 'render_studio'
   | 'engenharia'
   | 'documentacao';
-type TerrenoSubTab = 'terreno' | 'paisagismo' | 'urbanismo';
+type TerrenoSubTab = 'terreno' | 'urbanismo';
 type PlantaSubTab = 'tipologias' | 'editor2d';
 type EngSubTab = 'quantitativos' | 'compatibilizacao' | 'eletrica' | 'hidraulica' | 'construcao';
 
@@ -81,12 +86,14 @@ const WORKFLOW_STEPS: Array<{
   label: string;
   icon: React.ComponentType<{ className?: string }>;
 }> = [
-  { id: 'terreno', num: '1', label: 'Terreno & Paisagismo', icon: MapPin },
-  { id: 'planta2d', num: '2', label: 'Tipologias & Planta 2D', icon: PenTool },
-  { id: 'bim3d', num: '3', label: 'Modelo BIM 3D', icon: Box },
-  { id: 'render_studio', num: '4', label: 'Render Cinematográfico', icon: Camera },
-  { id: 'engenharia', num: '5', label: 'Engenharia & Custos', icon: Calculator },
-  { id: 'documentacao', num: '6', label: 'Pranchas & Memoriais', icon: FileText },
+  { id: 'terreno', num: '1', label: 'Terreno & Implantação', icon: MapPin },
+  { id: 'paisagismo', num: '2', label: 'Paisagismo & Piscina', icon: Trees },
+  { id: 'planta2d', num: '3', label: 'Tipologias & Planta 2D', icon: PenTool },
+  { id: 'acabamentos', num: '4', label: 'Acabamentos & Louças', icon: Bath },
+  { id: 'bim3d', num: '5', label: 'Modelo BIM 3D', icon: Box },
+  { id: 'render_studio', num: '6', label: 'Render Cinematográfico', icon: Camera },
+  { id: 'engenharia', num: '7', label: 'Engenharia & Custos', icon: Calculator },
+  { id: 'documentacao', num: '8', label: 'Pranchas & Memoriais', icon: FileText },
 ];
 
 export function App() {
@@ -352,8 +359,7 @@ export function App() {
         setTerrenoSubTab('terreno');
         break;
       case 'paisagismo':
-        setActiveStep('terreno');
-        setTerrenoSubTab('paisagismo');
+        setActiveStep('paisagismo');
         break;
       case 'urbanismo':
         setActiveStep('terreno');
@@ -366,6 +372,9 @@ export function App() {
       case 'planta2d':
         setActiveStep('planta2d');
         setPlantaSubTab('editor2d');
+        break;
+      case 'acabamentos':
+        setActiveStep('acabamentos');
         break;
       case 'bim3d':
         setActiveStep('bim3d');
@@ -1065,7 +1074,6 @@ export function App() {
                     {(
                       [
                         ['terreno', 'Implantação (4 Etapas)'],
-                        ['paisagismo', 'Paisagismo, Piscina & Lazer'],
                         ['urbanismo', 'Leis Urbanísticas'],
                       ] as const
                     ).map(([id, label]) => (
@@ -1147,8 +1155,7 @@ export function App() {
               {activeStep === 'terreno' &&
                 (
                   [
-                    ['terreno', 'Terreno & Pavimentos'],
-                    ['paisagismo', 'Paisagismo & Lazer'],
+                    ['terreno', 'Implantação (4 Etapas)'],
                     ['urbanismo', 'Leis Urbanísticas'],
                   ] as const
                 ).map(([id, label]) => (
@@ -1244,19 +1251,19 @@ export function App() {
                 </div>
               )}
 
-              {activeStep === 'terreno' && terrenoSubTab === 'paisagismo' && (
+              {activeStep === 'terreno' && terrenoSubTab === 'urbanismo' && (
+                <div className="h-full overflow-y-auto">
+                  <UrbanismModule project={activeProject} onUpdateProject={handleUpdateProject} />
+                </div>
+              )}
+
+              {activeStep === 'paisagismo' && (
                 <div className="h-full overflow-y-auto">
                   <LandscapingModule
                     project={activeProject}
                     onUpdateProject={handleUpdateProject}
                     onOpenRenderStudio={() => setActiveStep('render_studio')}
                   />
-                </div>
-              )}
-
-              {activeStep === 'terreno' && terrenoSubTab === 'urbanismo' && (
-                <div className="h-full overflow-y-auto">
-                  <UrbanismModule project={activeProject} onUpdateProject={handleUpdateProject} />
                 </div>
               )}
 
@@ -1282,6 +1289,14 @@ export function App() {
                   onRedo={handleRedo}
                   canUndo={undoStack.length > 0}
                   canRedo={redoStack.length > 0}
+                />
+              )}
+
+              {activeStep === 'acabamentos' && (
+                <FinishesAndFixturesModule
+                  project={activeProject}
+                  onUpdateProject={handleUpdateProject}
+                  onNavigateModule={navigateFromModule}
                 />
               )}
 

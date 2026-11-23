@@ -96,10 +96,50 @@ export interface ParametricTypologyInput {
   mezzanineZone?: MezzanineZone;
   mezzanineElevationM?: number;
   mezzanineCoverageRatio?: number;
+  mezzanineSizingMode?: 'percent' | 'dimensions';
+  mezzanineCustomWidthM?: number;
+  mezzanineCustomDepthM?: number;
   mezzanineUsage?: MezzanineUsage;
   mezzanineStructureType?: MezzanineStructureType;
   mezzanineStairLayout?: MezzanineStairLayout;
   mezzanineStairSide?: 'esquerda' | 'direita';
+}
+
+export function computeMezzanineInteriorBounds(
+  width: number,
+  depth: number,
+  extWallThickness: number,
+  hasBalcony: boolean,
+): {
+  innerMinX: number;
+  innerMaxX: number;
+  innerMinY: number;
+  innerMaxY: number;
+  innerW: number;
+  innerD: number;
+  innerAreaM2: number;
+} {
+  const W = Math.max(2.8, round2(width));
+  const D = Math.max(3.6, round2(depth));
+  const extT = Math.max(0.08, round2(extWallThickness));
+  const balconyDepth = hasBalcony ? Math.min(1.2, round2(D * 0.16)) : 0;
+  const usableD = round2(D - balconyDepth);
+  const pad = round2(extT / 2);
+  const innerMinX = pad;
+  const innerMaxX = round2(W - pad);
+  const innerMinY = pad;
+  const innerMaxY = round2(usableD - pad);
+  const innerW = round2(Math.max(1.2, innerMaxX - innerMinX));
+  const innerD = round2(Math.max(1.2, innerMaxY - innerMinY));
+  return {
+    innerMinX,
+    innerMaxX,
+    innerMinY,
+    innerMaxY,
+    innerW,
+    innerD,
+    innerAreaM2: round2(innerW * innerD),
+  };
 }
 
 let uidCounter = 1;
@@ -140,6 +180,10 @@ export function generateParametricUnitLayout(
       : matName;
   // Mezanino só é permitido com pé-direito >= 3,00m e nunca conta como pavimento
   const hasMezzanine = H >= 3.0 ? Boolean(input.hasMezzanine) : false;
+  const mezzUsagePreview: MezzanineUsage = input.mezzanineUsage ?? 'dormitorio';
+  const sleepingInMezzanine =
+    hasMezzanine &&
+    (mezzUsagePreview === 'dormitorio' || mezzUsagePreview === 'dormitorio_home_office');
 
   const balconyDepth = input.hasBalcony ? Math.min(1.2, round2(D * 0.16)) : 0;
   const usableD = round2(D - balconyDepth);
@@ -254,7 +298,7 @@ export function generateParametricUnitLayout(
     });
   }
 
-  const hasSeparateBedroom = input.bedrooms >= 1 && mainRoomD >= 2.35 && W >= 3.6;
+  const hasSeparateBedroom = !sleepingInMezzanine && input.bedrooms >= 1 && mainRoomD >= 2.35 && W >= 3.6;
   const livingW = hasSeparateBedroom ? round2(Math.max(1.75, W * 0.47)) : W;
   const bedW = hasSeparateBedroom ? round2(W - livingW) : 0;
 
@@ -304,9 +348,11 @@ export function generateParametricUnitLayout(
   } else {
     rooms.push({
       id: mainRoomId,
-      code: 'EST',
-      name: 'Sala / Dormitório Integrado',
-      category: 'sala_quarto',
+      code: sleepingInMezzanine ? 'SALA' : 'EST',
+      name: sleepingInMezzanine
+        ? 'Sala de Estar / Convivência (Sob Mezanino)'
+        : 'Sala / Dormitório Integrado',
+      category: sleepingInMezzanine ? 'sala' : 'sala_quarto',
       x: 0,
       y: wetD,
       width: W,
@@ -321,7 +367,9 @@ export function generateParametricUnitLayout(
         paint: 'Tinta acrílica fosca branco gelo',
         baseboard: 'Porcelanato h=7cm',
       },
-      notes: '',
+      notes: sleepingInMezzanine
+        ? 'Área social no pavimento inferior (dormitório alocado no mezanino superior).'
+        : '',
     });
   }
 
@@ -857,27 +905,70 @@ export function generateParametricUnitLayout(
         Math.max(2.0, input.mezzanineElevationM ?? Math.min(2.25, Math.max(2.1, H - 1.25))),
       ),
     );
-    const coverageRatio = Math.min(0.6, Math.max(0.28, input.mezzanineCoverageRatio ?? 0.42));
+    const bounds = computeMezzanineInteriorBounds(W, D, extT, input.hasBalcony);
+    const sizingMode = input.mezzanineSizingMode ?? 'percent';
+    const requestedRatio = Math.min(0.65, Math.max(0.1, input.mezzanineCoverageRatio ?? 0.4));
     const usage: MezzanineUsage = input.mezzanineUsage ?? 'dormitorio';
     const structureType: MezzanineStructureType =
       input.mezzanineStructureType ?? 'metalica_madeira';
     const stairLayout: MezzanineStairLayout = input.mezzanineStairLayout ?? 'reta';
+    const hasSepGroundBed = !sleepingInMezzanine && input.bedrooms >= 1 && mainRoomD >= 2.35 && W >= 3.6;
     const stairSide: 'esquerda' | 'direita' =
-      input.mezzanineStairSide ?? (entrySide === 'lateral_direita' ? 'esquerda' : 'direita');
+      input.mezzanineStairSide ??
+      (entrySide === 'lateral_direita'
+        ? 'esquerda'
+        : entrySide === 'frente' && !hasSepGroundBed
+          ? 'esquerda'
+          : 'direita');
 
-    let mezzX = 0.08;
-    const mezzY = 0.08;
-    let mezzW = round2(W - 0.16);
-    let mezzD = round2(Math.min(usableD - 1.35, Math.max(wetD + 0.2, usableD * coverageRatio)));
+    let mezzX = bounds.innerMinX;
+    let mezzY = bounds.innerMinY;
+    let mezzW = bounds.innerW;
+    let mezzD = round2((bounds.innerAreaM2 * requestedRatio) / Math.max(0.8, mezzW));
 
-    if (mezzZone === 'lateral_esquerda') {
-      mezzW = round2(Math.max(1.65, (W - 0.16) * Math.min(0.58, coverageRatio + 0.08)));
-      mezzD = round2(usableD - 0.16);
+    if (
+      sizingMode === 'dimensions' &&
+      typeof input.mezzanineCustomWidthM === 'number' &&
+      typeof input.mezzanineCustomDepthM === 'number'
+    ) {
+      mezzW = round2(Math.min(bounds.innerW, Math.max(0.9, input.mezzanineCustomWidthM)));
+      mezzD = round2(Math.min(bounds.innerD, Math.max(0.9, input.mezzanineCustomDepthM)));
+      if (mezzZone === 'lateral_direita') {
+        mezzX = round2(bounds.innerMaxX - mezzW);
+      } else {
+        mezzX = bounds.innerMinX;
+      }
+      mezzY = bounds.innerMinY;
+    } else if (mezzZone === 'lateral_esquerda') {
+      mezzD = bounds.innerD;
+      mezzW = round2(
+        Math.min(bounds.innerW, Math.max(0.9, (bounds.innerAreaM2 * requestedRatio) / mezzD)),
+      );
+      mezzX = bounds.innerMinX;
+      mezzY = bounds.innerMinY;
     } else if (mezzZone === 'lateral_direita') {
-      mezzW = round2(Math.max(1.65, (W - 0.16) * Math.min(0.58, coverageRatio + 0.08)));
-      mezzX = round2(W - 0.08 - mezzW);
-      mezzD = round2(usableD - 0.16);
+      mezzD = bounds.innerD;
+      mezzW = round2(
+        Math.min(bounds.innerW, Math.max(0.9, (bounds.innerAreaM2 * requestedRatio) / mezzD)),
+      );
+      mezzX = round2(bounds.innerMaxX - mezzW);
+      mezzY = bounds.innerMinY;
+    } else {
+      // 'sobre_banho_cozinha' ou 'fundos': ocupa largura útil interna e profundidade proporcional à %
+      mezzW = bounds.innerW;
+      mezzD = round2(
+        Math.min(bounds.innerD, Math.max(0.8, (bounds.innerAreaM2 * requestedRatio) / mezzW)),
+      );
+      mezzX = bounds.innerMinX;
+      mezzY = bounds.innerMinY;
     }
+
+    // Garantia absoluta: mezanino 100% confinado dentro da área útil interna
+    mezzX = round2(Math.max(bounds.innerMinX, Math.min(bounds.innerMaxX - mezzW, mezzX)));
+    mezzY = round2(Math.max(bounds.innerMinY, Math.min(bounds.innerMaxY - mezzD, mezzY)));
+    const coverageRatio = round2(
+      Math.min(0.95, Math.max(0.05, (mezzW * mezzD) / Math.max(1, bounds.innerAreaM2))),
+    );
 
     mezzanine = {
       enabled: true,
@@ -885,6 +976,9 @@ export function generateParametricUnitLayout(
       elevationM,
       slabThicknessM,
       coverageRatio,
+      sizingMode,
+      customWidthM: mezzW,
+      customDepthM: mezzD,
       x: mezzX,
       y: mezzY,
       width: mezzW,
@@ -896,14 +990,41 @@ export function generateParametricUnitLayout(
       guardrailHeightM: 1.05,
     };
 
-    const mezzClearH = round2(Math.max(1.1, H - elevationM - slabThicknessM));
+    // Limitar altura das paredes internas sob o mezanino (ex.: P-INT-BWC) para não atravessarem o piso/cama superior
+    for (const w of walls) {
+      if (w.isExternal) continue;
+      const wMinX = Math.min(w.start.x, w.end.x);
+      const wMaxX = Math.max(w.start.x, w.end.x);
+      const wMinY = Math.min(w.start.y, w.end.y);
+      const wMaxY = Math.max(w.start.y, w.end.y);
+      const touchesMezX = wMaxX >= mezzX - 0.15 && wMinX <= mezzX + mezzW + 0.15;
+      const touchesMezY = wMaxY >= mezzY - 0.15 && wMinY <= mezzY + mezzD + 0.15;
+      if ((touchesMezX && touchesMezY) || mezzZone === 'sobre_banho_cozinha') {
+        w.height = round2(Math.min(w.height, elevationM));
+      } else {
+        w.height = round2(Math.min(w.height, Math.max(2.35, elevationM)));
+      }
+    }
+
+    // Ajustar pé-direito dos cômodos inferiores cobertos pelo mezanino para não atravessar a laje superior
+    for (const r of rooms) {
+      const rx0 = Math.max(r.x, mezzX);
+      const rx1 = Math.min(r.x + r.width, mezzX + mezzW);
+      const ry0 = Math.max(r.y, mezzY);
+      const ry1 = Math.min(r.y + r.depth, mezzY + mezzD);
+      if ((rx1 > rx0 + 0.15 && ry1 > ry0 + 0.15) || r.category === 'banheiro') {
+        r.ceilingHeight = round2(Math.min(r.ceilingHeight, Math.max(1.9, elevationM - 0.04)));
+      }
+    }
+
+    const mezzClearH = round2(Math.max(1.0, H - elevationM - slabThicknessM));
     const mezzRoomId = `${id}-rm-mez`;
     rooms.push({
       id: mezzRoomId,
       code: 'MEZ',
       name:
         usage === 'dormitorio'
-          ? 'Mezanino (Dormitório)'
+          ? 'Mezanino (Área de Dormir)'
           : usage === 'home_office'
             ? 'Mezanino (Home Office)'
             : usage === 'dormitorio_home_office'
@@ -922,32 +1043,48 @@ export function generateParametricUnitLayout(
         floor:
           structureType === 'madeira_estrutural' || structureType === 'metalica_madeira'
             ? 'Deck estrutural madeira naval / vinílico'
-            : 'Contrapiso + piso vinílico',
+            : structureType === 'steel_deck'
+              ? 'Steel deck c/ contrapiso nivelado e vinílico'
+              : 'Contrapiso + piso vinílico',
         wall: 'Guarda-corpo metálico tubular h=1,05m + alvenaria/drywall',
         ceiling: 'Laje / Cobertura superior',
         paint: 'Tinta acrílica fosca branco gelo',
         baseboard: 'Metálico / Madeira h=7cm',
       },
-      notes: `Mezanino técnico (cota +${elevationM.toFixed(2)}m, pé-direito útil sup. ${mezzClearH.toFixed(2)}m). Não computado como pavimento.`,
+      notes: `Mezanino 100% interno (${Math.round(coverageRatio * 100)}% da área útil · cota +${elevationM.toFixed(2)}m · PD sup. ${mezzClearH.toFixed(2)}m). Não computado como pavimento.`,
     });
 
-    // Planejamento ergonômico da escada (Fórmula de Blondel 2h + p ≈ 0,635m)
+    // Planejamento ergonômico da escada (Fórmula de Blondel 2h + p ≈ 0,635m) — chegada alinhada à borda do mezanino
     const stairSpec = computeBlondelStairSpec(elevationM, stairLayout, 'norte');
     const stairW = stairSpec.footprintW;
-    const stairD = Math.min(stairSpec.footprintD, round2(Math.max(1.35, usableD - wetD - 0.35)));
     const stairX = stairSide === 'esquerda' ? 0.1 : round2(W - stairW - 0.1);
-    let stairY = round2(Math.min(usableD - stairD - 0.12, Math.max(wetD + 0.16, mezzY + mezzD - 0.2)));
-
-    // Ajusta Y para nunca invadir P1 nem a soleira de P2
     const minYForP2 = stairX < bathW ? bathD + 0.68 : wetD + 0.14;
-    stairY = round2(Math.max(minYForP2, stairY));
+    const isFrontDoorSide =
+      entrySide === 'frente' &&
+      (hasSepGroundBed ? stairSide === 'esquerda' : stairSide === 'direita');
+    const frontClearReserve =
+      entrySide === 'frente' ? (isFrontDoorSide || input.hasBalcony ? 0.98 : 0.45) : 0.22;
+    const stairStartAnchor = round2(Math.max(minYForP2, mezzY + mezzD + 0.02));
+    const availAfterMezz = round2(usableD - stairStartAnchor - frontClearReserve);
+    let stairD =
+      availAfterMezz >= 1.35
+        ? Math.min(stairSpec.footprintD, availAfterMezz)
+        : round2(Math.max(1.2, Math.min(stairSpec.footprintD, usableD - stairStartAnchor - 0.22)));
+    let stairY = stairStartAnchor;
+
     if (
       (entrySide === 'lateral_direita' && stairSide === 'direita') ||
       (entrySide === 'lateral_esquerda' && stairSide === 'esquerda')
     ) {
-      stairY = round2(Math.min(usableD - stairD - 0.12, Math.max(wetD + 1.15, stairY)));
-    } else if (entrySide === 'frente' && stairY + stairD > usableD - 0.95) {
-      stairY = round2(Math.max(wetD + 0.12, usableD - stairD - 1.0));
+      stairY = round2(
+        Math.max(
+          mezzY + mezzD - 0.04,
+          Math.min(usableD - stairD - 0.14, Math.max(wetD + 1.15, stairY)),
+        ),
+      );
+      stairD = round2(Math.max(1.2, Math.min(stairD, usableD - stairY - 0.14)));
+    } else if (entrySide === 'frente' && stairY + stairD > usableD - frontClearReserve) {
+      stairD = round2(Math.max(1.2, Math.min(stairD, usableD - stairY - frontClearReserve)));
     }
 
     stairReservation = {
@@ -1259,57 +1396,84 @@ export function generateParametricUnitLayout(
     };
     const isLeftEntry = entrySide === 'lateral_esquerda';
 
-    // 1. Cama Casal (prioridade se não houver dormitório no mezanino)
-    const bedPrimaryX = isLeftEntry ? round2(studioBounds.maxX - 1.38) : studioBounds.minX;
-    const bedAltX = isLeftEntry ? studioBounds.minX : round2(studioBounds.maxX - 1.38);
-    const bedCandidates: Array<{ x: number; y: number; w: number; d: number; rot: number }> = [
-      { x: bedPrimaryX, y: round2(studioBounds.maxY - 1.88), w: 1.38, d: 1.88, rot: 0 },
-      { x: bedAltX, y: round2(studioBounds.maxY - 1.88), w: 1.38, d: 1.88, rot: 0 },
-      { x: bedPrimaryX, y: round2(studioBounds.maxY - 1.38), w: 1.38, d: 1.88, rot: 90 },
-    ];
-    let studioBedBox: Box2 | null = null;
-    for (const bc of bedCandidates) {
-      const boxWActual = bc.rot === 90 ? bc.d : bc.w;
-      const clampedX = bc.x + boxWActual > studioBounds.maxX ? round2(studioBounds.maxX - boxWActual) : bc.x;
-      if (
-        tryCommitFurniture({
-          id: `${id}-fur-cama`,
-          name: 'Cama Casal Padrão c/ Cabeceira',
-          category: 'cama',
-          roomId: mainRoomId,
-          x: clampedX,
-          y: bc.y,
-          width: bc.w,
-          depth: bc.d,
-          height: 0.54,
-          rotationDeg: bc.rot,
-        }, studioBounds)
-      ) {
-        studioBedBox = {
-          x: clampedX,
-          y: bc.y,
-          width: bc.rot === 90 ? bc.d : bc.w,
-          depth: bc.rot === 90 ? bc.w : bc.d,
-        };
-        break;
+    // 1. Cama Casal no térreo (SOMENTE quando a área de dormir NÃO está no mezanino!)
+    if (!sleepingInMezzanine) {
+      const bedPrimaryX = isLeftEntry ? round2(studioBounds.maxX - 1.38) : studioBounds.minX;
+      const bedAltX = isLeftEntry ? studioBounds.minX : round2(studioBounds.maxX - 1.38);
+      const bedCandidates: Array<{ x: number; y: number; w: number; d: number; rot: number }> = [
+        { x: bedPrimaryX, y: round2(studioBounds.maxY - 1.88), w: 1.38, d: 1.88, rot: 0 },
+        { x: bedAltX, y: round2(studioBounds.maxY - 1.88), w: 1.38, d: 1.88, rot: 0 },
+        { x: bedPrimaryX, y: round2(studioBounds.maxY - 1.38), w: 1.38, d: 1.88, rot: 90 },
+      ];
+      let studioBedBox: Box2 | null = null;
+      for (const bc of bedCandidates) {
+        const boxWActual = bc.rot === 90 ? bc.d : bc.w;
+        const clampedX = bc.x + boxWActual > studioBounds.maxX ? round2(studioBounds.maxX - boxWActual) : bc.x;
+        if (
+          tryCommitFurniture({
+            id: `${id}-fur-cama`,
+            name: 'Cama Casal Padrão c/ Cabeceira',
+            category: 'cama',
+            roomId: mainRoomId,
+            x: clampedX,
+            y: bc.y,
+            width: bc.w,
+            depth: bc.d,
+            height: 0.54,
+            rotationDeg: bc.rot,
+          }, studioBounds)
+        ) {
+          studioBedBox = {
+            x: clampedX,
+            y: bc.y,
+            width: bc.rot === 90 ? bc.d : bc.w,
+            depth: bc.rot === 90 ? bc.w : bc.d,
+          };
+          break;
+        }
       }
-    }
 
-    // Mesa de cabeceira adjacente à cama sem bloquear corredor
-    if (studioBedBox) {
-      const criadoX = studioBedBox.x > W * 0.4 ? round2(studioBounds.maxX - studioBedBox.width - 0.42) : round2(studioBedBox.x + studioBedBox.width + 0.04);
-      tryCommitFurniture({
-        id: `${id}-fur-criado`,
-        name: 'Mesa de Cabeceira',
-        category: 'mesa_cabeceira',
-        roomId: mainRoomId,
-        x: criadoX,
-        y: studioBedBox.y,
-        width: 0.38,
-        depth: 0.36,
-        height: 0.52,
-        rotationDeg: 0,
-      }, studioBounds);
+      // Mesa de cabeceira adjacente à cama sem bloquear corredor
+      if (studioBedBox) {
+        const criadoX = studioBedBox.x > W * 0.4 ? round2(studioBounds.maxX - studioBedBox.width - 0.42) : round2(studioBedBox.x + studioBedBox.width + 0.04);
+        tryCommitFurniture({
+          id: `${id}-fur-criado`,
+          name: 'Mesa de Cabeceira',
+          category: 'mesa_cabeceira',
+          roomId: mainRoomId,
+          x: criadoX,
+          y: studioBedBox.y,
+          width: 0.38,
+          depth: 0.36,
+          height: 0.52,
+          rotationDeg: 0,
+        }, studioBounds);
+      }
+    } else {
+      // Com área de dormir no mezanino: prioriza Sofá espaçoso na Sala de Estar térrea
+      const livingSofaW = round2(Math.min(1.65, Math.max(1.25, W * 0.42)));
+      const livingSofaCandidates = [
+        { x: isLeftEntry ? round2(studioBounds.maxX - livingSofaW) : studioBounds.minX, y: round2(studioBounds.maxY - 0.85) },
+        { x: isLeftEntry ? studioBounds.minX : round2(studioBounds.maxX - livingSofaW), y: round2(wetD + 1.25) },
+      ];
+      for (const sc of livingSofaCandidates) {
+        if (
+          tryCommitFurniture({
+            id: `${id}-fur-sofa`,
+            name: 'Sofá Estar 2–3 Lugares',
+            category: 'sofa',
+            roomId: mainRoomId,
+            x: sc.x,
+            y: sc.y,
+            width: livingSofaW,
+            depth: 0.78,
+            height: 0.84,
+            rotationDeg: 0,
+          }, studioBounds)
+        ) {
+          break;
+        }
+      }
     }
 
     // 2. Guarda-Roupa (em encosto superior direito/esquerdo longe de P1/P2/escada)
@@ -1464,14 +1628,43 @@ export function generateParametricUnitLayout(
     const mezzRoomId = `${id}-rm-mez`;
     const deckTop = round2(elevationM + slabThicknessM);
     if (usage === 'dormitorio' || usage === 'dormitorio_home_office') {
-      const canLongAlongY = mezzD >= 2.05;
-      const bedUpperW = canLongAlongY ? Math.min(1.38, round2(mezzW - 0.3)) : Math.min(1.88, round2(mezzW - 0.24));
-      const bedUpperD = canLongAlongY ? 1.88 : Math.min(1.32, round2(mezzD - 0.24));
-      const bedUpperX = round2(mezzX + Math.max(0.12, (mezzW - bedUpperW) * 0.25));
-      const bedUpperY = round2(mezzY + 0.1);
+      // Seleciona cama adequada às dimensões reais do mezanino (sem jamais extravasar a plataforma)
+      const innerMezW = Math.max(0.75, round2(mezzW - 0.18));
+      const innerMezD = Math.max(0.75, round2(mezzD - 0.18));
+      let bedUpperW = 1.38;
+      let bedUpperD = 1.88;
+      let bedRot = 0;
+      let bedLabel = 'Cama Casal Mezanino';
+
+      if (innerMezW >= 1.38 && innerMezD >= 1.88) {
+        bedUpperW = 1.38;
+        bedUpperD = 1.88;
+      } else if (innerMezW >= 1.88 && innerMezD >= 1.38) {
+        bedUpperW = 1.38;
+        bedUpperD = 1.88;
+        bedRot = 90;
+      } else if (innerMezW >= 0.92 && innerMezD >= 1.85) {
+        bedUpperW = 0.92;
+        bedUpperD = 1.85;
+        bedLabel = 'Cama Solteiro Mezanino';
+      } else if (innerMezW >= 1.85 && innerMezD >= 0.92) {
+        bedUpperW = 0.92;
+        bedUpperD = 1.85;
+        bedRot = 90;
+        bedLabel = 'Cama Solteiro Mezanino';
+      } else {
+        bedUpperW = round2(Math.min(1.25, innerMezW));
+        bedUpperD = round2(Math.min(1.75, innerMezD));
+        bedLabel = 'Colchonete / Futon Compacto Mezanino';
+      }
+
+      const occW = bedRot === 90 ? bedUpperD : bedUpperW;
+      const occD = bedRot === 90 ? bedUpperW : bedUpperD;
+      const bedUpperX = round2(mezzX + Math.max(0.08, (mezzW - occW) * 0.25));
+      const bedUpperY = round2(mezzY + 0.08);
       furniture.push({
         id: `${id}-fur-mez-cama`,
-        name: 'Cama Casal Mezanino',
+        name: bedLabel,
         category: 'cama',
         roomId: mezzRoomId,
         x: bedUpperX,
@@ -1480,10 +1673,26 @@ export function generateParametricUnitLayout(
         depth: bedUpperD,
         height: 0.45,
         elevationM: deckTop,
-        rotationDeg: 0,
+        rotationDeg: bedRot,
       });
 
-      if (usage === 'dormitorio_home_office' && mezzW - bedUpperW >= 1.25) {
+      if (mezzW - occW >= 0.55 && innerMezD >= 0.5) {
+        furniture.push({
+          id: `${id}-fur-mez-criado`,
+          name: 'Mesa de Cabeceira Mezanino',
+          category: 'mesa_cabeceira',
+          roomId: mezzRoomId,
+          x: round2(Math.min(mezzX + mezzW - 0.44, bedUpperX + occW + 0.08)),
+          y: round2(mezzY + 0.1),
+          width: 0.36,
+          depth: 0.34,
+          height: 0.44,
+          elevationM: deckTop,
+          rotationDeg: 0,
+        });
+      }
+
+      if (usage === 'dormitorio_home_office' && mezzW - occW >= 1.25 && mezzD >= 1.35) {
         const officeX = round2(mezzX + mezzW - 1.04);
         furniture.push(
           {
@@ -1967,6 +2176,63 @@ export function generateParametricUnitLayout(
       protection: 'Disjuntor 20A + DR 30mA',
       notes: 'Ponto área de serviço',
     });
+  }
+
+  if (stairReservation) {
+    const mezDeckUnder = round2(stairReservation.elevationM - 0.05);
+    const mezFloorTop = round2(stairReservation.elevationM + stairReservation.slabThicknessM);
+    const mezCeilingTop = round2(H - 0.08);
+    // Clamping de pontos de teto sob o mezanino para não atravessarem o piso superior
+    for (const ep of electricalPoints) {
+      if (ep.roomId === bathRoomId || ep.roomId === kitchenRoomId || ep.roomId === laundryRoomId) {
+        if (ep.z > mezDeckUnder) {
+          ep.z = mezDeckUnder;
+        }
+      }
+    }
+    const mezRoomRef = `${id}-rm-mez`;
+    electricalPoints.push(
+      {
+        id: `${id}-el-mez-ilum`,
+        code: 'IL-MEZ',
+        category: 'iluminacao_teto',
+        label: 'Arandela / Plafon Mezanino',
+        roomId: mezRoomRef,
+        x: round2(stairReservation.mezzX + stairReservation.mezzW / 2),
+        y: round2(stairReservation.mezzY + stairReservation.mezzD / 2),
+        z: mezCeilingTop,
+        referenceWall: 'Teto / Cobertura',
+        referenceDistance: round2(stairReservation.mezzW / 2),
+        powerVA: 100,
+        voltage: 127,
+        powerFactor: 0.92,
+        circuitId: 'C1-ILUM',
+        conductorSectionMm2: 1.5,
+        conduitDiameterMm: 20,
+        protection: 'Disjuntor 10A Curva B',
+        notes: 'Acionamento paralelo (Three-Way) com pé da escada',
+      },
+      {
+        id: `${id}-el-mez-tug`,
+        code: 'TB-MEZ-1',
+        category: 'tomada_baixa',
+        label: 'Tomada Cabeceira Mezanino + USB',
+        roomId: mezRoomRef,
+        x: round2(stairReservation.mezzX + 0.16),
+        y: round2(stairReservation.mezzY + 0.16),
+        z: round2(mezFloorTop + 0.32),
+        referenceWall: 'P-EXT-N',
+        referenceDistance: 0.16,
+        powerVA: 150,
+        voltage: 127,
+        powerFactor: 0.85,
+        circuitId: 'C2-TUG',
+        conductorSectionMm2: 2.5,
+        conduitDiameterMm: 20,
+        protection: 'Disjuntor 16A',
+        notes: 'Alimentação elétrica na área de dormir do mezanino',
+      },
+    );
   }
 
   // 6. Water Points (AF & AQ)

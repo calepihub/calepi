@@ -245,8 +245,11 @@ export const CadSheetPreview: React.FC<CadSheetPreviewProps> = ({
               PRANCHA R01 — PROJETO EXECUTIVO RENDERIZADO ({project.name})
             </div>
             <div className="text-[11px] text-slate-400">
-              Acabamentos PBR: Piso {rs.floorMaterial.replace(/_/g, ' ')} · Cobertura{' '}
-              {rs.roofMaterial.replace(/_/g, ' ')} · Esquadrias {rs.windowFrameColor.replace(/_/g, ' ')}
+              Acabamentos PBR: Parede Ext. {(rs.wallExteriorFinish || 'textura_acrilica').replace(/_/g, ' ')} · Piso{' '}
+              {rs.floorMaterial.replace(/_/g, ' ')} · Cobertura {rs.roofMaterial.replace(/_/g, ' ')} (
+              {(rs.roofShape || 'embutido_platibanda').replace(/_/g, ' ')}) · Esquadrias{' '}
+              {rs.windowFrameColor.replace(/_/g, ' ')} · Metais{' '}
+              {(project.hydraulicConfig?.sanitaryFixtures?.metalsFinish || 'cromado').replace(/_/g, ' ')}
             </div>
           </div>
           <span
@@ -263,7 +266,7 @@ export const CadSheetPreview: React.FC<CadSheetPreviewProps> = ({
               Nenhuma perspectiva 3D arquitetônica salva nesta prancha ainda
             </p>
             <p className="mt-1.5 max-w-md text-xs text-slate-400 leading-relaxed">
-              Acesse a etapa <strong className="text-slate-200">4. Modelo BIM 3D</strong>, escolha o ângulo de câmera (Perspectiva, Fachada, Aérea ou Interna) no modo <strong className="text-slate-200">Render Arquitetônico</strong> e clique em <strong className="text-emerald-300">&quot;Salvar na Prancha R01&quot;</strong> para compor automaticamente este caderno de apresentação executiva e o PDF/ZIP.
+              Acesse a etapa <strong className="text-slate-200">5. Modelo BIM 3D</strong> ou <strong className="text-slate-200">6. Render Cinematográfico</strong>, escolha o ângulo de câmera (Perspectiva, Fachada, Aérea ou Interna) e clique em <strong className="text-emerald-300">&quot;Salvar na Prancha R01&quot;</strong> para compor automaticamente este caderno de apresentação executiva e o PDF/ZIP.
             </p>
           </div>
         ) : (
@@ -599,7 +602,7 @@ export const CadSheetPreview: React.FC<CadSheetPreviewProps> = ({
                 <rect x={ox + bw - 8} y={yTop} width={8} height={flH} fill={pal.wallExtFill} stroke={pal.wallExtStroke} strokeWidth="1.3" />
                 <rect x={ox + bw * 0.35} y={yTop} width={5} height={flH} fill={pal.wallIntFill} stroke={pal.wallIntStroke} strokeWidth="1" />
                 <rect x={ox + bw * 0.68} y={yTop} width={5} height={flH} fill={pal.wallIntFill} stroke={pal.wallIntStroke} strokeWidth="1" />
-                {mez && (
+                {mez && mezUt && (
                   <g>
                     <rect
                       x={mezX}
@@ -613,8 +616,12 @@ export const CadSheetPreview: React.FC<CadSheetPreviewProps> = ({
                     <line x1={mezX + mezW - 2} y1={mezDeckY} x2={mezX + mezW - 2} y2={railTopY} stroke={pal.unitTag} strokeWidth="1" />
                     <line x1={mezX} y1={railTopY} x2={mezX + mezW} y2={railTopY} stroke={pal.unitTag} strokeWidth="0.9" strokeDasharray="3 2" />
                     <line x1={mezX + mezW + 2} y1={yBot - slabPx} x2={mezX + mezW + 24} y2={mezDeckY} stroke={pal.furniture} strokeWidth="1.3" />
-                    <text x={mezX + 6} y={mezDeckY - 6} fill={pal.unitTag} fontSize="7.5" fontFamily="monospace">
-                      MEZANINO (+{mez.elevationM.toFixed(2)}m · N/C PAV.)
+                    <text x={mezX + 4} y={mezDeckY - 6} fill={pal.unitTag} fontSize="7" fontFamily="monospace">
+                      MEZANINO (+{mez.elevationM.toFixed(2)}m · {Math.round((mez.coverageRatio || 0) * 100)}% ·{' '}
+                      {mez.structureType === 'madeira_estrutural' ? 'MADEIRA' : 'METÁLICA'})
+                    </text>
+                    <text x={mezX + 4} y={mezDeckY + mezSlabPx + 10} fill={pal.dimension} fontSize="6.5" fontFamily="monospace">
+                      PD Inf. {mez.elevationM.toFixed(2)}m | PD Sup. {round2(mezUt.ceilingHeight - mez.elevationM - mez.slabThicknessM).toFixed(2)}m
                     </text>
                   </g>
                 )}

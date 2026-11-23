@@ -114,6 +114,7 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
   canRedo,
 }) => {
   const [scope, setScope] = useState<ScopeMode>('tipologia');
+  const [mezzanineViewLayer, setMezzanineViewLayer] = useState<'completo' | 'terreo' | 'mezanino'>('completo');
   const [selectedFloorId, setSelectedFloorId] = useState<string>(project.floors[0]?.id ?? '');
   const [tool, setTool] = useState<ToolMode>('select');
   const [doorRolePreset, setDoorRolePreset] = useState<OpeningRole>('outro');
@@ -610,16 +611,24 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
     isMirrored = false,
   ) => {
     const mapX = (lx: number) => (isMirrored ? ut.width - lx : lx);
+    const hasActiveMez = !!(ut.hasMezzanine && ut.mezzanine?.enabled && ut.ceilingHeight >= 3.0);
+    const mezView = interactive && hasActiveMez ? mezzanineViewLayer : 'completo';
+    const mezStair = hasActiveMez ? ut.furniture.find((f) => f.category === 'escada') : undefined;
+
     return (
       <g>
         {/* Rooms fill & labels */}
         {layers.rooms &&
           ut.rooms.map((rm) => {
+            if (mezView === 'terreo' && rm.category === 'mezanino') return null;
             const rx = isMirrored ? ut.width - rm.x - rm.width : rm.x;
             const isSel = interactive && selected?.kind === 'room' && selected.id === rm.id;
+            const dimmed = mezView === 'mezanino' && rm.category !== 'mezanino';
             return (
               <g
                 key={rm.id}
+                opacity={dimmed ? 0.18 : 1}
+                pointerEvents={dimmed ? 'none' : undefined}
                 onPointerDown={(e) => {
                   if (!interactive || tool !== 'select') return;
                   e.stopPropagation();
@@ -631,16 +640,16 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
                   y={rm.y}
                   width={rm.width}
                   height={rm.depth}
-                  fill={isSel ? '#2F7CF6' : '#1E242E'}
-                  fillOpacity={isSel ? 0.25 : 0.45}
-                  stroke="#313947"
-                  strokeWidth="0.02"
+                  fill={isSel ? '#2F7CF6' : rm.category === 'mezanino' ? '#0891B2' : '#1E242E'}
+                  fillOpacity={isSel ? 0.25 : rm.category === 'mezanino' ? 0.14 : 0.45}
+                  stroke={rm.category === 'mezanino' ? '#22D3EE' : '#313947'}
+                  strokeWidth={rm.category === 'mezanino' ? '0.03' : '0.02'}
                 />
                 <text
                   x={rx + rm.width / 2}
                   y={rm.y + rm.depth / 2 - 0.08}
                   textAnchor="middle"
-                  fill="#94A3B8"
+                  fill={rm.category === 'mezanino' ? '#67E8F9' : '#94A3B8'}
                   fontSize="0.2"
                   fontFamily="Plus Jakarta Sans, sans-serif"
                 >
@@ -650,7 +659,7 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
                   x={rx + rm.width / 2}
                   y={rm.y + rm.depth / 2 + 0.16}
                   textAnchor="middle"
-                  fill="#64748B"
+                  fill={rm.category === 'mezanino' ? '#22D3EE' : '#64748B'}
                   fontSize="0.16"
                   fontFamily="JetBrains Mono, monospace"
                 >
@@ -660,9 +669,80 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
             );
           })}
 
+        {/* Mezanino: Plataforma, Estrutura (Metálica/Madeira) e Guarda-Corpo */}
+        {hasActiveMez && ut.mezzanine && (() => {
+          const mez = ut.mezzanine;
+          const mx = isMirrored ? ut.width - mez.x - mez.width : mez.x;
+          const isWood = mez.structureType === 'madeira_estrutural';
+          const beamStroke = isWood ? '#D97706' : '#38BDF8';
+          const joistCount = Math.max(1, Math.floor(mez.width / 0.65) - 1);
+          const showAsUpper = mezView === 'mezanino';
+          const pctLabel = Math.round((mez.coverageRatio || 0) * 100);
+          return (
+            <g pointerEvents="none">
+              <rect
+                x={mx}
+                y={mez.y}
+                width={mez.width}
+                height={mez.depth}
+                fill={showAsUpper ? 'rgba(34, 211, 238, 0.14)' : 'rgba(34, 211, 238, 0.05)'}
+                stroke="#22D3EE"
+                strokeWidth={showAsUpper ? '0.045' : '0.025'}
+                strokeDasharray={showAsUpper ? undefined : '0.14 0.09'}
+              />
+              {/* Vigas secundárias / barrotes da estrutura do mezanino */}
+              {Array.from({ length: joistCount }).map((_, ji) => {
+                const jx = mx + ((ji + 1) * mez.width) / (joistCount + 1);
+                return (
+                  <line
+                    key={`mez-joist-${ji}`}
+                    x1={jx}
+                    y1={mez.y + 0.04}
+                    x2={jx}
+                    y2={mez.y + mez.depth - 0.04}
+                    stroke={beamStroke}
+                    strokeOpacity={showAsUpper ? 0.55 : 0.25}
+                    strokeWidth="0.022"
+                    strokeDasharray="0.10 0.06"
+                  />
+                );
+              })}
+              {/* Guarda-corpo indicado em planta superior */}
+              {showAsUpper && mez.y + mez.depth < ut.depth - 0.55 && (
+                <line
+                  x1={mx + 0.04}
+                  y1={mez.y + mez.depth - 0.02}
+                  x2={mx + mez.width - 0.04}
+                  y2={mez.y + mez.depth - 0.02}
+                  stroke="#F59E0B"
+                  strokeWidth="0.05"
+                />
+              )}
+              <text
+                x={mx + mez.width / 2}
+                y={mez.y + 0.24}
+                textAnchor="middle"
+                fill="#22D3EE"
+                fontSize="0.13"
+                fontWeight={showAsUpper ? 'bold' : undefined}
+                fontFamily="JetBrains Mono, monospace"
+              >
+                {showAsUpper
+                  ? `MEZANINO +${mez.elevationM.toFixed(2)}m (${mez.width.toFixed(2)}×${mez.depth.toFixed(2)}m · ${pctLabel}% · ${isWood ? 'MADEIRA' : 'METÁLICA'})`
+                  : `PROJ. MEZANINO (+${mez.elevationM.toFixed(2)}m · ${pctLabel}%)`}
+              </text>
+            </g>
+          );
+        })()}
+
         {/* Furniture (Detailed Architectural CAD Blocks) */}
         {layers.furniture &&
           ut.furniture.map((f) => {
+            const isStair = f.category === 'escada';
+            const isUpper = (f.elevationM ?? 0) >= 1.0 && !isStair;
+            if (mezView === 'terreo' && isUpper) return null;
+            const dimmedGround = mezView === 'mezanino' && !isUpper && !isStair;
+
             const rot = ((f.rotationDeg % 360) + 360) % 360;
             const w = rot === 90 || rot === 270 ? f.depth : f.width;
             const d = rot === 90 || rot === 270 ? f.width : f.depth;
@@ -671,8 +751,10 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
             return (
               <g
                 key={f.id}
+                opacity={dimmedGround ? 0.2 : 1}
+                pointerEvents={dimmedGround ? 'none' : undefined}
                 onPointerDown={(e) => {
-                  if (!interactive || tool !== 'select') return;
+                  if (!interactive || tool !== 'select' || dimmedGround) return;
                   e.stopPropagation();
                   setSelected({ kind: 'furniture', id: f.id });
                   const pt = clientToWorld(e.clientX, e.clientY);
@@ -683,7 +765,7 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
                     offsetY: pt.y - f.y,
                   });
                 }}
-                className={interactive && tool === 'select' ? 'cursor-move' : ''}
+                className={interactive && tool === 'select' && !dimmedGround ? 'cursor-move' : ''}
               >
                 <FurnitureCadBlock
                   category={f.category}
@@ -698,7 +780,7 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
                   detailed={true}
                   stairSpec={f.stairSpec}
                 />
-                {interactive && (
+                {interactive && !dimmedGround && (
                   <text
                     x={fx + w / 2}
                     y={f.y + d + 0.08}
@@ -706,36 +788,30 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
                     fill={(f.elevationM ?? 0) > 0.5 ? '#22D3EE' : '#94A3B8'}
                     fontSize="0.09"
                   >
-                    {f.name.split(' ')[0]}
+                    {isStair
+                      ? mezView === 'mezanino'
+                        ? 'CHEGA ↑'
+                        : 'SOBE ↑'
+                      : f.name.split(' ')[0]}
                   </text>
                 )}
               </g>
             );
           })}
 
-        {/* Projeção do Mezanino (linha tracejada técnica em planta) */}
-        {ut.hasMezzanine && ut.mezzanine?.enabled && ut.ceilingHeight >= 3.0 && (
+        {/* Indicador de Chegada da Escada no Mezanino */}
+        {mezView === 'mezanino' && mezStair && (
           <g pointerEvents="none">
             <rect
-              x={isMirrored ? ut.width - ut.mezzanine.x - ut.mezzanine.width : ut.mezzanine.x}
-              y={ut.mezzanine.y}
-              width={ut.mezzanine.width}
-              height={ut.mezzanine.depth}
-              fill="rgba(34, 211, 238, 0.06)"
-              stroke="#22D3EE"
+              x={isMirrored ? ut.width - mezStair.x - mezStair.width : mezStair.x}
+              y={mezStair.y - 0.06}
+              width={mezStair.width}
+              height={0.14}
+              fill="#F59E0B"
+              fillOpacity={0.35}
+              stroke="#F59E0B"
               strokeWidth="0.025"
-              strokeDasharray="0.14 0.09"
             />
-            <text
-              x={(isMirrored ? ut.width - ut.mezzanine.x - ut.mezzanine.width : ut.mezzanine.x) + ut.mezzanine.width / 2}
-              y={ut.mezzanine.y + 0.24}
-              textAnchor="middle"
-              fill="#22D3EE"
-              fontSize="0.14"
-              fontFamily="JetBrains Mono, monospace"
-            >
-              PROJ. MEZANINO (+{ut.mezzanine.elevationM.toFixed(2)}m)
-            </text>
           </g>
         )}
 
@@ -747,11 +823,14 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
               !w.isExternal &&
               ((w.material || '').toLowerCase().includes('drywall') ||
                 (w.material || '').toLowerCase().includes('gesso'));
+            const wallDim = mezView === 'mezanino' && !w.isExternal ? 0.25 : 1;
             return (
               <g
                 key={w.id}
+                opacity={wallDim}
+                pointerEvents={mezView === 'mezanino' && !w.isExternal ? 'none' : undefined}
                 onPointerDown={(e) => {
-                  if (!interactive || tool !== 'select') return;
+                  if (!interactive || tool !== 'select' || (mezView === 'mezanino' && !w.isExternal)) return;
                   e.stopPropagation();
                   setSelected({ kind: 'wall', id: w.id });
                   const pt = clientToWorld(e.clientX, e.clientY);
@@ -935,12 +1014,15 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
         {/* Electrical & Special Points */}
         {layers.electrical &&
           ut.electricalPoints.map((ep) => {
+            const isMezEp = ep.roomId.endsWith('-rm-mez') || ep.code.includes('MEZ');
+            if (mezView === 'terreo' && isMezEp) return null;
+            const epDim = mezView === 'mezanino' && !isMezEp ? 0.2 : 1;
             const isSpec = ['dados', 'tv', 'antena_tv', 'wifi_ap', 'cftv', 'rack_ti', 'interfone'].includes(
               ep.category,
             );
-            const col = isSpec ? '#C084FC' : '#F59E0B';
+            const col = isMezEp ? '#22D3EE' : isSpec ? '#C084FC' : '#F59E0B';
             return (
-              <g key={ep.id} transform={`translate(${mapX(ep.x)}, ${ep.y})`}>
+              <g key={ep.id} opacity={epDim} transform={`translate(${mapX(ep.x)}, ${ep.y})`}>
                 <ElectricalSymbolSvg category={ep.category} cx={0} cy={0} r={0.08} color={col} bg="#111317" />
                 <text x="0.12" y="0.04" fill={col} fontSize="0.1" fontFamily="JetBrains Mono, monospace">
                   {ep.code}
@@ -1068,21 +1150,55 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
           </div>
 
           {scope === 'tipologia' ? (
-            <select
-              value={activeUt?.id ?? ''}
-              onChange={(e) => {
-                onSelectUnitType(e.target.value);
-                setSelected(null);
-              }}
-              aria-label="Selecionar tipologia"
-              className="px-2.5 py-1 text-xs rounded bg-[#14161A] border border-[#2A2F38] text-white"
-            >
-              {project.unitTypes.map((ut) => (
-                <option key={ut.id} value={ut.id}>
-                  {ut.code} — {ut.width}×{ut.depth}m ({round2(ut.width * ut.depth)}m²)
-                </option>
-              ))}
-            </select>
+            <>
+              <select
+                value={activeUt?.id ?? ''}
+                onChange={(e) => {
+                  onSelectUnitType(e.target.value);
+                  setSelected(null);
+                }}
+                aria-label="Selecionar tipologia"
+                className="px-2.5 py-1 text-xs rounded bg-[#14161A] border border-[#2A2F38] text-white"
+              >
+                {project.unitTypes.map((ut) => (
+                  <option key={ut.id} value={ut.id}>
+                    {ut.code} — {ut.width}×{ut.depth}m ({round2(ut.width * ut.depth)}m²)
+                  </option>
+                ))}
+              </select>
+
+              {activeUt?.hasMezzanine && activeUt?.mezzanine?.enabled && activeUt.ceilingHeight >= 3.0 && (
+                <div
+                  className="flex items-center p-0.5 rounded bg-[#14161A] border border-cyan-500/40"
+                  role="group"
+                  aria-label="Nível de visualização do mezanino"
+                >
+                  {(
+                    [
+                      ['completo', 'Vista Completa'],
+                      ['terreo', 'Térreo'],
+                      ['mezanino', 'Mezanino'],
+                    ] as const
+                  ).map(([id, lbl]) => (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => {
+                        setMezzanineViewLayer(id);
+                        setSelected(null);
+                      }}
+                      className={`px-2 py-1 text-[11px] font-medium rounded whitespace-nowrap transition-colors ${
+                        mezzanineViewLayer === id
+                          ? 'bg-cyan-600 text-white'
+                          : 'text-cyan-300/80 hover:text-white'
+                      }`}
+                    >
+                      {lbl}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
           ) : (
             <select
               value={activeFloor?.id ?? ''}

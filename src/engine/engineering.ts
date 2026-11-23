@@ -787,7 +787,47 @@ export function runCompatibilityAnalysis(project: Project): ClashIssue[] {
         });
       }
       if (ut.mezzanine?.enabled) {
-        if (ut.mezzanine.elevationM < 2.0) {
+        const mez = ut.mezzanine;
+        const balconyD = ut.hasBalcony ? Math.min(1.2, round2(ut.depth * 0.16)) : 0;
+        const usableD = round2(ut.depth - balconyD);
+        const wallPad = Math.max(0.04, round2((ut.walls.find((w) => w.isExternal)?.thickness ?? 0.15) / 2));
+        if (
+          mez.x < wallPad - 0.02 ||
+          mez.y < wallPad - 0.02 ||
+          mez.x + mez.width > ut.width - wallPad + 0.02 ||
+          mez.y + mez.depth > usableD - wallPad + 0.02
+        ) {
+          issues.push({
+            id: `clash-mez-bounds-${ut.id}`,
+            severity: 'CRITICO',
+            disciplines: 'Arquitetura × Mezanino',
+            elementsInvolved: ['Plataforma Mezanino', 'Paredes Externas'],
+            location: `Tipologia ${ut.code}`,
+            floorName: 'Tipologia Padrão',
+            roomName: 'Mezanino',
+            description: `Mezanino extrapola a área útil interna de ${ut.code} (invadindo parede externa ou varanda).`,
+            reason: 'O mezanino deve permanecer 100% contido dentro do perímetro interno da kitnet.',
+            suggestion: 'Re-gerar mezanino ou reduzir largura/profundidade para caber dentro da área interna.',
+            status: 'pendente',
+            targetUnitTypeId: ut.id,
+          });
+        }
+        if (mez.elevationM < 1.95) {
+          issues.push({
+            id: `clash-mez-under-${ut.id}`,
+            severity: 'CRITICO',
+            disciplines: 'Arquitetura × Mezanino',
+            elementsInvolved: ['Plataforma Mezanino'],
+            location: `Tipologia ${ut.code}`,
+            floorName: 'Tipologia Padrão',
+            roomName: 'Mezanino',
+            description: `Altura livre sob o mezanino insuficiente (${mez.elevationM.toFixed(2)} m < 1,95 m).`,
+            reason: 'Compromete circulação e uso do pavimento térreo (sala, cozinha ou banheiro abaixo).',
+            suggestion: 'Elevar cota do mezanino para >= 2,05 m (e aumentar pé-direito geral se necessário).',
+            status: 'pendente',
+            targetUnitTypeId: ut.id,
+          });
+        } else if (mez.elevationM < 2.05) {
           issues.push({
             id: `clash-mez-under-${ut.id}`,
             severity: 'ATENCAO',
@@ -796,17 +836,31 @@ export function runCompatibilityAnalysis(project: Project): ClashIssue[] {
             location: `Tipologia ${ut.code}`,
             floorName: 'Tipologia Padrão',
             roomName: 'Mezanino',
-            description: `Altura livre sob o mezanino abaixo de 2,00 m (${ut.mezzanine.elevationM.toFixed(2)} m).`,
-            reason: 'Circulação inferior pode apresentar desconforto ergonômico.',
-            suggestion: 'Ajustar cota do mezanino para >= 2,05 m (se pé-direito permitir).',
+            description: `Altura livre sob o mezanino justa (${mez.elevationM.toFixed(2)} m; recomendado >= 2,05 m).`,
+            reason: 'Circulação inferior pode ficar baixa dependendo de forro ou luminárias.',
+            suggestion: 'Ajustar cota do mezanino para >= 2,05 m.',
             status: 'pendente',
             targetUnitTypeId: ut.id,
           });
         }
-        const upperClear = round2(
-          ut.ceilingHeight - ut.mezzanine.elevationM - ut.mezzanine.slabThicknessM,
-        );
-        if (upperClear < 1.1) {
+        const upperClear = round2(ut.ceilingHeight - mez.elevationM - mez.slabThicknessM);
+        const needsStanding = mez.usage === 'home_office';
+        if (upperClear < 1.0) {
+          issues.push({
+            id: `clash-mez-upper-${ut.id}`,
+            severity: 'CRITICO',
+            disciplines: 'Arquitetura × Mezanino',
+            elementsInvolved: ['Mezanino'],
+            location: `Tipologia ${ut.code}`,
+            floorName: 'Tipologia Padrão',
+            roomName: 'Mezanino',
+            description: `Pé-direito útil superior crítico no mezanino (${upperClear.toFixed(2)} m < 1,00 m).`,
+            reason: 'Altura insuficiente até para sentar-se ou utilizar a cama com conforto mínimo.',
+            suggestion: 'Elevar o pé-direito total da kitnet (>= 3,40 m) ou reduzir a cota inferior.',
+            status: 'pendente',
+            targetUnitTypeId: ut.id,
+          });
+        } else if (upperClear < (needsStanding ? 1.85 : 1.15)) {
           issues.push({
             id: `clash-mez-upper-${ut.id}`,
             severity: 'ATENCAO',
@@ -816,8 +870,30 @@ export function runCompatibilityAnalysis(project: Project): ClashIssue[] {
             floorName: 'Tipologia Padrão',
             roomName: 'Mezanino',
             description: `Pé-direito útil superior reduzido no mezanino (${upperClear.toFixed(2)} m).`,
-            reason: 'Recomenda-se altura mínima livre >= 1,10 m (dormitório) ou >= 2,00 m (permanência em pé).',
-            suggestion: 'Aumentar pé-direito da kitnet ou reduzir ligeiramente a cota do deck.',
+            reason: needsStanding
+              ? 'Uso Home Office recomenda >= 1,85 m para circulação confortável.'
+              : 'Área de dormir recomenda >= 1,15 m para sentar-se confortavelmente na cama.',
+            suggestion: 'Aumentar pé-direito da kitnet ou ajustar a altura do mezanino.',
+            status: 'pendente',
+            targetUnitTypeId: ut.id,
+          });
+        }
+        const mezAreaM2 = round2(mez.width * mez.depth);
+        if (
+          (mez.usage === 'dormitorio' || mez.usage === 'dormitorio_home_office') &&
+          mezAreaM2 < 3.4
+        ) {
+          issues.push({
+            id: `clash-mez-area-${ut.id}`,
+            severity: 'ATENCAO',
+            disciplines: 'Arquitetura × Ergonomia',
+            elementsInvolved: ['Mezanino (Área de Dormir)'],
+            location: `Tipologia ${ut.code}`,
+            floorName: 'Tipologia Padrão',
+            roomName: 'Mezanino',
+            description: `Área do mezanino (${mezAreaM2.toFixed(2)} m² — ${Math.round(mez.coverageRatio * 100)}%) muito enxuta para dormitório completo.`,
+            reason: 'Cama solteiro + acesso exige ao menos ~3,5 m²; cama casal + circulação recomenda >= 5,5 m² (>= 30%).',
+            suggestion: 'Aumentar porcentagem do mezanino (30%–50%) ou ajustar dimensões em metros.',
             status: 'pendente',
             targetUnitTypeId: ut.id,
           });

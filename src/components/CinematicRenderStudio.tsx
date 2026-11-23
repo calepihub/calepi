@@ -26,7 +26,7 @@ import {
   buildBotanicalPlant3D,
   buildGourmetArea3D,
   buildPool3D,
-  buildRoofGeometryGroup,
+  buildRoofAndWaterTowerGroup,
 } from '../engine/botanical3D';
 import {
   getBoundingBox,
@@ -818,18 +818,35 @@ export const CinematicRenderStudio: React.FC<CinematicRenderStudioProps> = ({
         : rs.windowFrameColor === 'madeira'
           ? 0x7c4d2b
           : 0x1b2028;
+    const glassTintHex =
+      rs.glassType === 'temperado_verde_solar'
+        ? 0x7dd3b0
+        : rs.glassType === 'temperado_fume'
+          ? 0x475569
+          : 0xaad8ff;
+    const doorHex =
+      rs.interiorDoorMaterial === 'madeira_pintada_branca'
+        ? 0xf1f5f9
+        : rs.interiorDoorMaterial === 'mdf_melaminico_cinza'
+          ? 0x64748b
+          : rs.interiorDoorMaterial === 'aluminio_vidro'
+            ? 0x334155
+            : 0x8f5d38;
     const matFrame = new THREE.MeshStandardMaterial({ color: frameHex, roughness: 0.35, metalness: 0.58 });
     const matGlass = new THREE.MeshPhysicalMaterial({
-      color: 0xaad8ff,
+      color: glassTintHex,
       transparent: true,
-      opacity: nightOn ? 0.25 : 0.38,
+      opacity: rs.glassType === 'temperado_fume' ? 0.5 : nightOn ? 0.25 : 0.38,
       roughness: 0.05,
       metalness: 0.1,
       reflectivity: 0.92,
     });
-    const matDoor = new THREE.MeshStandardMaterial({ color: 0x8f5d38, roughness: 0.55 });
+    const matDoor = new THREE.MeshStandardMaterial({ color: doorHex, roughness: 0.55 });
     const matWood = new THREE.MeshStandardMaterial({ color: 0x6b4423, roughness: 0.66 });
+    const matSteel = new THREE.MeshStandardMaterial({ color: 0x262c36, roughness: 0.34, metalness: 0.78 });
     const matLightSlab = new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.78 });
+    const matTankBlue = new THREE.MeshStandardMaterial({ color: 0x1d6fd6, roughness: 0.36, metalness: 0.08 });
+    const matPipeBlue = new THREE.MeshStandardMaterial({ color: 0x3b82f6, roughness: 0.38 });
 
     const mapUnitPt = (
       inst: { x: number; y: number; rotationDeg: number; mirrored: boolean },
@@ -896,12 +913,30 @@ export const CinematicRenderStudio: React.FC<CinematicRenderStudioProps> = ({
           opsByWall.set(op.wallId, list);
         }
 
+        const hasMezUt = !!(ut.hasMezzanine && ut.mezzanine?.enabled && ut.ceilingHeight >= 3.0);
+        const mezCfgUt = ut.mezzanine;
+
         for (const w of ut.walls as Wall[]) {
           const len = getWallLength(w);
           if (len < 0.05) continue;
           const pA = mapUnitPt(inst, ut.width, w.start.x, w.start.y);
           const pB = mapUnitPt(inst, ut.width, w.end.x, w.end.y);
-          const geom = buildWallWithOpenings(len, w.height, w.thickness, opsByWall.get(w.id) ?? []);
+          let effectiveWallH = w.height;
+          if (!w.isExternal && hasMezUt && mezCfgUt) {
+            const wMinX = Math.min(w.start.x, w.end.x);
+            const wMaxX = Math.max(w.start.x, w.end.x);
+            const wMinY = Math.min(w.start.y, w.end.y);
+            const wMaxY = Math.max(w.start.y, w.end.y);
+            const touchesMez =
+              wMaxX >= mezCfgUt.x - 0.15 &&
+              wMinX <= mezCfgUt.x + mezCfgUt.width + 0.15 &&
+              wMaxY >= mezCfgUt.y - 0.15 &&
+              wMinY <= mezCfgUt.y + mezCfgUt.depth + 0.15;
+            if (touchesMez || w.code.includes('BWC')) {
+              effectiveWallH = Math.min(w.height, mezCfgUt.elevationM);
+            }
+          }
+          const geom = buildWallWithOpenings(len, effectiveWallH, w.thickness, opsByWall.get(w.id) ?? []);
           const wallMesh = new THREE.Mesh(geom, w.isExternal ? matExt : matInt);
           wallMesh.position.set((pA.x + pB.x) / 2, baseY + floor.slabThickness, (pA.z + pB.z) / 2);
           wallMesh.rotation.y = -Math.atan2(pB.z - pA.z, pB.x - pA.x);
@@ -941,16 +976,178 @@ export const CinematicRenderStudio: React.FC<CinematicRenderStudioProps> = ({
           }
         }
 
-        // Furniture simplified high-impact solids
+        // Mezanino completo no Render Cinematográfico (estrutura metálica ou madeira + guarda-corpo com vão)
+        if (ut.hasMezzanine && ut.mezzanine?.enabled && ut.ceilingHeight >= 3.0) {
+          const mez = ut.mezzanine;
+          const mezCenter = mapUnitPt(inst, ut.width, mez.x + mez.width / 2, mez.y + mez.depth / 2);
+          const mezDeckY = baseY + floor.slabThickness + mez.elevationM;
+          const isWoodMez = mez.structureType === 'madeira_estrutural';
+          const deckMat =
+            mez.structureType === 'concreto_armado'
+              ? matLightSlab
+              : mez.structureType === 'steel_deck'
+                ? matSteel
+                : matWood;
+          const beamMat = isWoodMez ? matWood : mez.structureType === 'concreto_armado' ? matLightSlab : matSteel;
+
+          const deckMesh = new THREE.Mesh(
+            new THREE.BoxGeometry(mez.width, mez.slabThicknessM, mez.depth),
+            deckMat,
+          );
+          deckMesh.position.set(mezCenter.x, mezDeckY + mez.slabThicknessM / 2, mezCenter.z);
+          deckMesh.rotation.y = -(inst.rotationDeg * Math.PI) / 180;
+          deckMesh.castShadow = !isSoftwareGl;
+          deckMesh.receiveShadow = !isSoftwareGl;
+          group.add(deckMesh);
+
+          const bathRoom = ut.rooms.find((r) => r.category === 'banheiro');
+          if (bathRoom) {
+            const bc = mapUnitPt(
+              inst,
+              ut.width,
+              bathRoom.x + bathRoom.width / 2,
+              bathRoom.y + bathRoom.depth / 2,
+            );
+            const bathCeil = new THREE.Mesh(
+              new THREE.BoxGeometry(bathRoom.width + 0.08, 0.06, bathRoom.depth + 0.08),
+              matInt,
+            );
+            bathCeil.position.set(bc.x, mezDeckY - 0.03, bc.z);
+            bathCeil.rotation.y = -(inst.rotationDeg * Math.PI) / 180;
+            bathCeil.receiveShadow = !isSoftwareGl;
+            group.add(bathCeil);
+          }
+
+          const beamH = isWoodMez ? 0.14 : 0.12;
+          const beamW = isWoodMez ? 0.08 : 0.06;
+          for (const edgeY of [mez.y + beamW / 2, mez.y + mez.depth - beamW / 2]) {
+            const bp = mapUnitPt(inst, ut.width, mez.x + mez.width / 2, edgeY);
+            const mainBeam = new THREE.Mesh(new THREE.BoxGeometry(mez.width, beamH, beamW), beamMat);
+            mainBeam.position.set(bp.x, mezDeckY - beamH / 2, bp.z);
+            mainBeam.rotation.y = -(inst.rotationDeg * Math.PI) / 180;
+            mainBeam.castShadow = !isSoftwareGl;
+            group.add(mainBeam);
+          }
+          const joistCount = Math.max(2, Math.round(mez.width / 0.6));
+          for (let j = 0; j <= joistCount; j++) {
+            const lx = mez.x + beamW / 2 + ((mez.width - beamW) * j) / joistCount;
+            const jp = mapUnitPt(inst, ut.width, lx, mez.y + mez.depth / 2);
+            const joist = new THREE.Mesh(
+              new THREE.BoxGeometry(beamW * 0.75, beamH * 0.85, mez.depth - beamW * 1.5),
+              beamMat,
+            );
+            joist.position.set(jp.x, mezDeckY - (beamH * 0.85) / 2, jp.z);
+            joist.rotation.y = -(inst.rotationDeg * Math.PI) / 180;
+            group.add(joist);
+          }
+
+          const colCorners = [
+            { lx: mez.x + 0.06, ly: mez.y + 0.06 },
+            { lx: mez.x + mez.width - 0.06, ly: mez.y + 0.06 },
+            { lx: mez.x + 0.06, ly: mez.y + mez.depth - 0.06 },
+            { lx: mez.x + mez.width - 0.06, ly: mez.y + mez.depth - 0.06 },
+          ];
+          for (const corner of colCorners) {
+            const cp = mapUnitPt(inst, ut.width, corner.lx, corner.ly);
+            const colMesh = new THREE.Mesh(new THREE.BoxGeometry(0.08, mez.elevationM, 0.08), beamMat);
+            colMesh.position.set(cp.x, baseY + floor.slabThickness + mez.elevationM / 2, cp.z);
+            colMesh.rotation.y = -(inst.rotationDeg * Math.PI) / 180;
+            colMesh.castShadow = !isSoftwareGl;
+            group.add(colMesh);
+          }
+
+          const railH = mez.guardrailHeightM || 1.05;
+          const stairItem = ut.furniture.find((f) => f.category === 'escada');
+          const addCineRail = (lx0: number, ly0: number, lx1: number, ly1: number) => {
+            const p0 = mapUnitPt(inst, ut.width, lx0, ly0);
+            const p1 = mapUnitPt(inst, ut.width, lx1, ly1);
+            const rLen = Math.hypot(p1.x - p0.x, p1.z - p0.z);
+            if (rLen < 0.2) return;
+            const rAng = Math.atan2(p1.z - p0.z, p1.x - p0.x);
+            const topBar = new THREE.Mesh(new THREE.BoxGeometry(rLen, 0.04, 0.04), matSteel);
+            topBar.position.set((p0.x + p1.x) / 2, mezDeckY + mez.slabThicknessM + railH, (p0.z + p1.z) / 2);
+            topBar.rotation.y = -rAng;
+            const glassPane = new THREE.Mesh(new THREE.BoxGeometry(rLen - 0.04, railH * 0.86, 0.015), matGlass);
+            glassPane.position.set((p0.x + p1.x) / 2, mezDeckY + mez.slabThicknessM + railH * 0.48, (p0.z + p1.z) / 2);
+            glassPane.rotation.y = -rAng;
+            group.add(topBar, glassPane);
+          };
+
+          if (mez.y + mez.depth < ut.depth - 0.55) {
+            const edgeY = mez.y + mez.depth - 0.03;
+            const startX = mez.x + 0.05;
+            const endX = mez.x + mez.width - 0.05;
+            if (
+              stairItem &&
+              stairItem.y <= mez.y + mez.depth + 0.45 &&
+              stairItem.y + stairItem.depth >= mez.y + mez.depth - 0.45
+            ) {
+              const gStart = Math.max(startX, stairItem.x - 0.06);
+              const gEnd = Math.min(endX, stairItem.x + stairItem.width + 0.06);
+              if (gStart - startX >= 0.2) addCineRail(startX, edgeY, gStart, edgeY);
+              if (endX - gEnd >= 0.2) addCineRail(gEnd, edgeY, endX, edgeY);
+            } else {
+              addCineRail(startX, edgeY, endX, edgeY);
+            }
+          }
+          if (mez.x + mez.width < ut.width - 0.55) {
+            addCineRail(mez.x + mez.width - 0.03, mez.y + 0.05, mez.x + mez.width - 0.03, mez.y + mez.depth - 0.05);
+          }
+          if (mez.x > 0.55) {
+            addCineRail(mez.x + 0.03, mez.y + 0.05, mez.x + 0.03, mez.y + mez.depth - 0.05);
+          }
+        }
+
+        // Furniture & Stepped Blondel Staircase
+        const hasUpperBed = !!(
+          ut.hasMezzanine &&
+          ut.mezzanine?.enabled &&
+          ut.furniture.some((bf) => bf.category === 'cama' && (bf.elevationM ?? 0) >= 1.2)
+        );
         for (const f of ut.furniture) {
+          if (
+            hasUpperBed &&
+            (f.category === 'cama' || f.category === 'mesa_cabeceira') &&
+            (f.elevationM ?? 0) < 0.5
+          ) {
+            continue;
+          }
           const fc = mapUnitPt(inst, ut.width, f.x + f.width / 2, f.y + f.depth / 2);
+          if (f.category === 'escada') {
+            const sg = new THREE.Group();
+            sg.position.set(fc.x, baseY + floor.slabThickness, fc.z);
+            sg.rotation.y = -((inst.rotationDeg + f.rotationDeg) * Math.PI) / 180;
+            const steps = Math.max(5, f.stairSpec?.steps ?? 9);
+            const totalRise = Math.max(1.8, f.height);
+            const riser = totalRise / steps;
+            const runDepth = f.depth / steps;
+            for (let s = 0; s < steps; s++) {
+              const tread = new THREE.Mesh(
+                new THREE.BoxGeometry(f.width - 0.04, 0.045, Math.max(0.22, runDepth * 1.05)),
+                matWood,
+              );
+              tread.position.set(0, riser * (s + 1), f.depth / 2 - runDepth * (s + 0.5));
+              tread.castShadow = !isSoftwareGl;
+              sg.add(tread);
+            }
+            const strLen = Math.hypot(f.depth, totalRise);
+            const strAng = Math.atan2(totalRise, f.depth);
+            for (const sideX of [-f.width / 2 + 0.03, f.width / 2 - 0.03]) {
+              const stringer = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.1, strLen), matSteel);
+              stringer.position.set(sideX, totalRise / 2, 0);
+              stringer.rotation.x = strAng;
+              sg.add(stringer);
+            }
+            group.add(sg);
+            continue;
+          }
           const fMesh = new THREE.Mesh(
             new THREE.BoxGeometry(f.width, Math.max(0.25, f.height * 0.7), f.depth),
             f.category === 'cama' || f.category === 'sofa'
               ? new THREE.MeshStandardMaterial({ color: 0xe2e8f0, roughness: 0.85 })
               : matWood,
           );
-          fMesh.position.set(fc.x, baseY + floor.slabThickness + (f.elevationM ?? 0) + (f.height * 0.35), fc.z);
+          fMesh.position.set(fc.x, baseY + floor.slabThickness + (f.elevationM ?? 0) + f.height * 0.35, fc.z);
           fMesh.rotation.y = -((inst.rotationDeg + f.rotationDeg) * Math.PI) / 180;
           fMesh.castShadow = !isSoftwareGl;
           fMesh.receiveShadow = !isSoftwareGl;
@@ -959,23 +1156,47 @@ export const CinematicRenderStudio: React.FC<CinematicRenderStudioProps> = ({
       });
     });
 
-    // Authentic 3D Roof matching selected roofShape + roofMaterial
+    // Laje de Cobertura + Castelo da Caixa d'Água sobre a laje + Telhado Fechado
     if (Number.isFinite(minBX)) {
       const topFl = project.floors[project.floors.length - 1];
-      const roofBaseY = (topFl?.elevation ?? 0) + (topFl?.floorToFloorHeight ?? 2.95);
+      const maxTopWallHeight = Math.max(
+        topFl?.floorToFloorHeight ?? 2.95,
+        ...((topFl?.units ?? []).map((u) => {
+          const unitUt = project.unitTypes.find((t) => t.id === u.unitTypeId);
+          return unitUt ? unitUt.ceilingHeight + (topFl?.slabThickness ?? 0.15) : 0;
+        })),
+      );
+      const roofBaseY = (topFl?.elevation ?? 0) + maxTopWallHeight;
+      const totalUnitsCine = project.floors.reduce((s, f) => s + f.units.length, 0);
+      const totalResLiters = Math.max(
+        1000,
+        Math.round(
+          Math.max(1, totalUnitsCine) *
+            (project.hydraulicConfig.occupantsPerUnit || 2) *
+            (project.hydraulicConfig.litersPerPersonDay || 150) *
+            (project.hydraulicConfig.reserveDays || 2) *
+            0.4,
+        ),
+      );
+      const extWallPad = Math.max(0.08, (project.constructionMethod.externalWallThickness || 0.15) / 2);
       group.add(
-        buildRoofGeometryGroup({
-          x: minBX - 0.15,
-          y: minBZ - 0.15,
-          width: maxBX - minBX + 0.3,
-          depth: maxBZ - minBZ + 0.3,
+        buildRoofAndWaterTowerGroup({
+          x: minBX - extWallPad,
+          y: minBZ - extWallPad,
+          width: Math.max(1.5, maxBX - minBX + extWallPad * 2),
+          depth: Math.max(1.5, maxBZ - minBZ + extWallPad * 2),
           baseElevationY: roofBaseY,
           roofShape: rs.roofShape ?? 'platibanda',
           roofFinish: rs.roofMaterial,
           slopePercent: project.constructionMethod.roofSlopePercent,
           facadeMat: matExt,
+          slabMat: matLightSlab,
           roofMat: matRoof,
+          tankMat: matTankBlue,
+          pipeMat: matPipeBlue,
           isSoftwareGl,
+          showRoofShell: true,
+          reservoirLiters: totalResLiters,
         }),
       );
     }

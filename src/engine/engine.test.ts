@@ -48,6 +48,10 @@ import {
 } from './exporters';
 import { generateAllMemorials } from './memorialGenerator';
 import { autoPopulateLandscaping } from './landscaping';
+import {
+  getNormalizedSanitaryFixtures,
+  syncFinishesToTypologyRooms,
+} from './finishesCatalog';
 
 test('Geometry: Shoelace polygon area & perimeter for 12x25m site', () => {
   const verts = buildSiteVerticesFromDimensions(12, 12, 25, 25);
@@ -925,11 +929,12 @@ test('Ergonomic Interior Layout Matrix: zero overlapping furniture, zero blocked
     hasMezzanine: boolean;
     ceilingH: number;
     entrySide: 'frente' | 'lateral_direita' | 'lateral_esquerda';
+    mezzanineUsage?: 'dormitorio' | 'home_office';
   }> = [
     { w: 3.0, d: 4.8, bedrooms: 0, hasLaundry: true, hasMezzanine: false, ceilingH: 2.8, entrySide: 'frente' },
     { w: 3.4, d: 5.2, bedrooms: 0, hasLaundry: true, hasMezzanine: false, ceilingH: 2.8, entrySide: 'lateral_direita' },
     { w: 3.8, d: 5.5, bedrooms: 1, hasLaundry: true, hasMezzanine: false, ceilingH: 2.8, entrySide: 'lateral_esquerda' },
-    { w: 4.5, d: 6.2, bedrooms: 1, hasLaundry: true, hasMezzanine: true, ceilingH: 3.4, entrySide: 'frente' },
+    { w: 4.5, d: 6.2, bedrooms: 1, hasLaundry: true, hasMezzanine: true, ceilingH: 3.4, entrySide: 'frente', mezzanineUsage: 'home_office' },
     { w: 4.2, d: 5.8, bedrooms: 0, hasLaundry: false, hasMezzanine: true, ceilingH: 3.5, entrySide: 'lateral_direita' },
   ];
 
@@ -955,6 +960,7 @@ test('Ergonomic Interior Layout Matrix: zero overlapping furniture, zero blocked
       hasLaundry: cfg.hasLaundry,
       hasBalcony: false,
       hasMezzanine: cfg.hasMezzanine,
+      mezzanineUsage: cfg.mezzanineUsage,
       accessible: false,
       extWallThickness: 0.15,
       intWallThickness: 0.1,
@@ -1068,6 +1074,196 @@ test('Landscaping & Leisure: autoPopulateLandscaping avoids building footprints 
   assert.ok(paisagismoBudget.every((e) => e.unitPrice !== null && e.unitPrice > 0));
 });
 
+test('Finishes, Sanitary Ware, Metals, Showers, Drains & Roof specs sync to rooms, quantities, and memorials', () => {
+  const base = createDefaultDemoProject();
+  const customProj: Project = {
+    ...base,
+    renderSettings: {
+      ...base.renderSettings,
+      wallExteriorFinish: 'tijolinho_aparente',
+      wallInteriorFinish: 'cimento_queimado',
+      wetWallBathroom: 'azulejo_metro',
+      wetWallKitchen: 'porcelanato_acetinado',
+      floorMaterial: 'madeira_carvalho',
+      wetFloorMaterial: 'porcelanato_antiderrapante',
+      baseboardType: 'poliestireno_branco_10cm',
+      ceilingType: 'forro_madeira_cumaru',
+      roofShape: 'duas_aguas',
+      roofMaterial: 'ceramica_terracota',
+      interiorDoorMaterial: 'madeira_verniz_natural',
+      glassType: 'temperado_fume',
+    },
+    hydraulicConfig: {
+      ...base.hydraulicConfig,
+      sanitaryFixtures: {
+        ...getNormalizedSanitaryFixtures(base),
+        toiletType: 'convencional_valvula',
+        sanitaryWareColor: 'preto_fosco',
+        showerType: 'ducha_aquecedor_gas',
+        washbasinType: 'pia_esculpida_porcelanato',
+        washbasinFaucet: 'monocomando_mesa',
+        kitchenSinkType: 'quartzo_cuba_esculpida',
+        kitchenFaucet: 'monocomando_gourmet_extensivel',
+        laundryTubType: 'inox_embutida',
+        drainType: 'ralo_linear_oculto',
+        metalsFinish: 'preto_fosco',
+      },
+    },
+  };
 
+  const syncedProj = syncFinishesToTypologyRooms(customProj);
 
+  const allRooms = syncedProj.unitTypes.flatMap((u) => u.rooms);
+  const bwcRoom = allRooms.find((r) => r.category === 'banheiro');
+  const dryRoom = allRooms.find(
+    (r) => r.category !== 'banheiro' && r.category !== 'cozinha' && r.category !== 'area_servico',
+  );
+  assert.ok(bwcRoom && dryRoom);
+  assert.ok(bwcRoom.finishes.floor.includes('Antiderrapante'));
+  assert.ok(bwcRoom.finishes.wall.includes('Azulejo Metrô'));
+  assert.ok(dryRoom.finishes.floor.includes('Madeira Carvalho'));
+  assert.ok(dryRoom.finishes.ceiling.includes('Madeira Nobre'));
+
+  const qty = calculateQuantities(syncedProj);
+  const san01 = qty.items.find((i) => i.code === 'SAN-01');
+  const mob01 = qty.items.find((i) => i.code === 'MOB-01');
+  assert.ok(san01 && san01.description.includes('Ralo Linear Inox Oculto'));
+  assert.ok(mob01 && mob01.description.includes('Preto Fosco'));
+  assert.ok(mob01 && mob01.description.includes('Válvula na Parede'));
+
+  const memorials = generateAllMemorials(syncedProj);
+  const archMem = memorials.find((m) => m.key === 'arquitetonico');
+  assert.ok(archMem);
+  assert.ok(archMem.content.includes('10. COBERTURA E ESQUADRIAS'));
+  assert.ok(archMem.content.includes('11. CADERNO DE ACABAMENTOS'));
+  assert.ok(archMem.content.includes('Telhado Aparente Duas Águas'));
+  assert.ok(archMem.content.includes('Tijolinho Aparente Terracota'));
+  assert.ok(archMem.content.includes('Preto Fosco'));
+  assert.ok(archMem.content.includes('Ducha Parede AQ/AF'));
+  assert.ok(archMem.content.includes('Ralo Linear Inox Oculto'));
+});
+
+test('Mezzanine Overhaul: 100% interior containment, 10/20/30/50% & dimension sizing, sleeping upstairs / living downstairs, metallic/wood structure', () => {
+  // 1. Test 10%, 20%, 30%, 50% and exact dimensions with balcony enabled (must stay 100% inside interior perimeter)
+  const ratios = [0.1, 0.2, 0.3, 0.5];
+  for (const ratio of ratios) {
+    const utPct = generateParametricUnitLayout({
+      code: `MZ-${Math.round(ratio * 100)}`,
+      name: `Kit Mezanino ${Math.round(ratio * 100)}%`,
+      width: 4.5,
+      depth: 7.0,
+      ceilingHeight: 3.8,
+      bedrooms: 1,
+      hasLaundry: true,
+      hasBalcony: true,
+      hasMezzanine: true,
+      accessible: false,
+      extWallThickness: 0.15,
+      intWallThickness: 0.095,
+      constructionSystem: 'alvenaria_convencional',
+      entrySide: 'frente',
+      mezzanineZone: 'sobre_banho_cozinha',
+      mezzanineElevationM: 2.25,
+      mezzanineSizingMode: 'percent',
+      mezzanineCoverageRatio: ratio,
+      mezzanineUsage: 'dormitorio',
+      mezzanineStructureType: 'metalica_madeira',
+    });
+
+    assert.ok(utPct.mezzanine?.enabled);
+    // 100% inside interior walls and never over balcony (depth 7.0 - 1.25 balcony = 5.75 - halfWall 0.075)
+    assert.ok(utPct.mezzanine.x >= 0.07);
+    assert.ok(utPct.mezzanine.y >= 0.07);
+    assert.ok(utPct.mezzanine.x + utPct.mezzanine.width <= utPct.width - 0.07);
+    assert.ok(utPct.mezzanine.y + utPct.mezzanine.depth <= utPct.depth - 1.25 - 0.07);
+
+    // Interior bathroom walls must stop at mezzanine elevationM (never slice through upper bed!)
+    const bwcWalls = utPct.walls.filter((w) => !w.isExternal && w.code.includes('BWC'));
+    assert.ok(bwcWalls.length >= 2);
+    assert.ok(bwcWalls.every((w) => w.height <= 2.25), 'BWC interior walls must never pierce the mezzanine');
+
+    // Stair arrives at mezzanine edge without cutting under/into the slab
+    const mezStair = utPct.furniture.find((f) => f.category === 'escada');
+    assert.ok(mezStair && mezStair.y >= utPct.mezzanine.y + utPct.mezzanine.depth - 0.1);
+
+    // Program separation: ground floor becomes SALA with zero duplicate ground bed; bed is upstairs
+    const groundSala = utPct.rooms.find((r) => r.code === 'SALA' && r.category === 'sala');
+    assert.ok(groundSala, 'Ground floor main room must become SALA when mezzanine hosts sleeping');
+    const beds = utPct.furniture.filter((f) => f.category === 'cama');
+    assert.equal(beds.length, 1, 'Must have exactly 1 bed (upstairs only, no duplicate ground bed)');
+    assert.ok((beds[0].elevationM ?? 0) >= 2.2, 'Bed must sit on top of the mezzanine deck');
+
+    // Upstairs electrical points generated
+    assert.ok(utPct.electricalPoints.some((ep) => ep.code === 'IL-MEZ'));
+    assert.ok(utPct.electricalPoints.some((ep) => ep.code === 'TB-MEZ-1'));
+  }
+
+  // 2. Exact dimensions mode clamped strictly inside interior area + Madeira Estrutural
+  const utDim = generateParametricUnitLayout({
+    code: 'MZ-DIM',
+    name: 'Mezanino Madeira Sob Medida',
+    width: 4.0,
+    depth: 6.0,
+    ceilingHeight: 3.7,
+    bedrooms: 0,
+    hasLaundry: false,
+    hasBalcony: false,
+    hasMezzanine: true,
+    accessible: false,
+    extWallThickness: 0.15,
+    intWallThickness: 0.095,
+    constructionSystem: 'alvenaria_convencional',
+    entrySide: 'frente',
+    mezzanineZone: 'sobre_banho_cozinha',
+    mezzanineElevationM: 2.15,
+    mezzanineSizingMode: 'dimensions',
+    mezzanineCustomWidthM: 3.0,
+    mezzanineCustomDepthM: 2.4,
+    mezzanineUsage: 'dormitorio_home_office',
+    mezzanineStructureType: 'madeira_estrutural',
+  });
+  assert.ok(utDim.mezzanine);
+  assert.equal(utDim.mezzanine.width, 3.0);
+  assert.equal(utDim.mezzanine.depth, 2.4);
+  assert.equal(utDim.mezzanine.structureType, 'madeira_estrutural');
+
+  const base = createBlankProject({
+    name: 'Edifício Mezanino Sob Medida',
+    client: '',
+    municipality: 'Rio de Janeiro',
+    state: 'RJ',
+    front: 12,
+    depth: 25,
+    floorsCount: 1,
+    methodId: 'alvenaria_convencional',
+  });
+  const projDim = autoDistributeUnitsAcrossFloors({ ...base, unitTypes: [utDim] }, utDim.id);
+  const qtyDim = calculateQuantities(projDim);
+  const mez01 = qtyDim.items.find((i) => i.code === 'MEZ-01');
+  assert.ok(mez01 && mez01.description.includes('Madeira Estrutural'));
+
+  const memDim = generateAllMemorials(projDim).find((m) => m.key === 'arquitetonico');
+  assert.ok(memDim && memDim.content.includes('Madeira Estrutural') && memDim.content.includes('100% interno'));
+
+  // 3. Engineering validation catches out-of-bounds mezzanine and tight under-clearance
+  const violatedProj: Project = {
+    ...projDim,
+    unitTypes: projDim.unitTypes.map((u) =>
+      u.mezzanine
+        ? {
+            ...u,
+            mezzanine: {
+              ...u.mezzanine,
+              elevationM: 1.85,
+              x: -0.2,
+              width: u.width + 0.5,
+            },
+          }
+        : u,
+    ),
+  };
+  const violClashes = runCompatibilityAnalysis(violatedProj);
+  assert.ok(violClashes.some((c) => c.id.startsWith('clash-mez-bounds-') && c.severity === 'CRITICO'));
+  assert.ok(violClashes.some((c) => c.id.startsWith('clash-mez-under-') && c.severity === 'CRITICO'));
+});
 

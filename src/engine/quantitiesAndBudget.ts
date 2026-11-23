@@ -16,6 +16,14 @@ import type {
   Project,
   UnitType,
 } from '../types/project';
+import {
+  DRAIN_OPTIONS,
+  METALS_FINISH_OPTIONS,
+  SHOWER_OPTIONS,
+  TOILET_OPTIONS,
+  findLabel,
+  getNormalizedSanitaryFixtures,
+} from './finishesCatalog';
 
 export interface QuantityItem {
   id: string;
@@ -49,6 +57,7 @@ export interface QuantitiesReport {
 }
 
 export function calculateQuantities(project: Project): QuantitiesReport {
+  const sanFix = getNormalizedSanitaryFixtures(project);
   const unitCounts = new Map<string, number>();
   let totalUnits = 0;
   let totalCommonAreaM2 = 0;
@@ -404,7 +413,7 @@ export function calculateQuantities(project: Project): QuantitiesReport {
       id: 'q-floor',
       code: 'REV-01',
       discipline: 'Arquitetura',
-      description: 'Pisos e Revestimento Cerâmico/Porcelanato de Piso',
+      description: `Piso Interno (${(project.renderSettings.floorMaterial || 'porcelanato_cinza').replace(/_/g, ' ')}) & Molhados (${(project.renderSettings.wetFloorMaterial || 'porcelanato_antiderrapante').replace(/_/g, ' ')})`,
       unit: 'm²',
       netQuantity: round2(totalFloorAreaM2),
       lossFactorPercent: 10,
@@ -418,7 +427,7 @@ export function calculateQuantities(project: Project): QuantitiesReport {
       id: 'q-tile-wall',
       code: 'REV-02',
       discipline: 'Arquitetura',
-      description: 'Revestimento Cerâmico de Paredes (Áreas Molhadas)',
+      description: `Revestimento de Paredes Áreas Molhadas (BWC: ${(project.renderSettings.wetWallBathroom || 'porcelanato_marmorizado').replace(/_/g, ' ')} / Coz: ${(project.renderSettings.wetWallKitchen || 'azulejo_metro').replace(/_/g, ' ')})`,
       unit: 'm²',
       netQuantity: round2(totalWetWallTileM2),
       lossFactorPercent: 10,
@@ -464,7 +473,7 @@ export function calculateQuantities(project: Project): QuantitiesReport {
       id: 'q-paint',
       code: 'PIN-01',
       discipline: 'Arquitetura',
-      description: 'Pintura Interna (Paredes Secas + Tetos)',
+      description: `Pintura / Acabamento Parede Interna (${(project.renderSettings.wallInteriorFinish || 'pintura_fosca').replace(/_/g, ' ')}) e Fachada (${(project.renderSettings.wallExteriorFinish || 'textura_acrilica').replace(/_/g, ' ')})`,
       unit: 'm²',
       netQuantity: round2(totalPaintAreaM2),
       lossFactorPercent: 5,
@@ -478,7 +487,7 @@ export function calculateQuantities(project: Project): QuantitiesReport {
       id: 'q-ceiling',
       code: 'FOR-01',
       discipline: 'Arquitetura',
-      description: 'Forro / Acabamento de Teto',
+      description: `Forro / Acabamento de Teto (${(project.renderSettings.ceilingType || 'gesso_drywall_tabica').replace(/_/g, ' ')})`,
       unit: 'm²',
       netQuantity: round2(totalCeilingAreaM2),
       lossFactorPercent: 5,
@@ -492,7 +501,7 @@ export function calculateQuantities(project: Project): QuantitiesReport {
       id: 'q-baseboard',
       code: 'ROD-01',
       discipline: 'Arquitetura',
-      description: 'Rodapés',
+      description: `Rodapés (${(project.renderSettings.baseboardType || 'porcelanato_10cm').replace(/_/g, ' ')})`,
       unit: 'm',
       netQuantity: round2(totalBaseboardM),
       lossFactorPercent: 8,
@@ -557,24 +566,39 @@ export function calculateQuantities(project: Project): QuantitiesReport {
         ]
       : []),
     ...(totalMezzanineAreaM2 > 0
-      ? [
-          {
-            id: 'q-mezzanine',
-            code: 'MEZ-01',
-            discipline: 'Estrutura' as const,
-            description: 'Plataforma de Mezanino (Estrutura + Deck + Guarda-Corpo h=1,05m)',
-            unit: 'm²',
-            netQuantity: round2(totalMezzanineAreaM2),
-            lossFactorPercent: 5,
-            grossQuantity: round2(totalMezzanineAreaM2 * 1.05),
-            measurementCriterion: 'Área da plataforma do mezanino (não computado como pavimento)',
-            sourceOrigin: 'Mezaninos habilitados em tipologias com pé-direito >= 3,00m',
-            calculationMemory: `Σ(A_mezanino × N_unid) = ${round2(totalMezzanineAreaM2)} m² (+5% = ${round2(totalMezzanineAreaM2 * 1.05)} m²)`,
-            unitTypeBreakdown: breakdownByUt((ut) =>
-              ut.hasMezzanine && ut.mezzanine?.enabled ? round2(ut.mezzanine.width * ut.mezzanine.depth) : 0,
-            ),
-          },
-        ]
+      ? (() => {
+          const mezSample = project.unitTypes.find(
+            (u) => u.hasMezzanine && u.mezzanine?.enabled && u.ceilingHeight >= 3.0,
+          )?.mezzanine;
+          const stLbl =
+            mezSample?.structureType === 'madeira_estrutural'
+              ? 'Estrutura em Madeira Estrutural + Deck'
+              : mezSample?.structureType === 'steel_deck'
+                ? 'Estrutura Metálica + Steel Deck'
+                : mezSample?.structureType === 'concreto_armado'
+                  ? 'Laje Concreto Armado'
+                  : 'Estrutura Metálica + Deck Madeira';
+          const elevTxt = mezSample ? ` · Cota +${mezSample.elevationM.toFixed(2)}m` : '';
+          const pctTxt = mezSample ? ` (${Math.round(mezSample.coverageRatio * 100)}% área interna)` : '';
+          return [
+            {
+              id: 'q-mezzanine',
+              code: 'MEZ-01',
+              discipline: 'Estrutura' as const,
+              description: `Plataforma de Mezanino (${stLbl} + Guarda-Corpo h=1,05m${elevTxt})`,
+              unit: 'm²',
+              netQuantity: round2(totalMezzanineAreaM2),
+              lossFactorPercent: 5,
+              grossQuantity: round2(totalMezzanineAreaM2 * 1.05),
+              measurementCriterion: `Área da plataforma 100% interna do mezanino${pctTxt} (não computado como pavimento)`,
+              sourceOrigin: 'Mezaninos habilitados em tipologias com pé-direito >= 3,00m',
+              calculationMemory: `Σ(A_mezanino × N_unid) = ${round2(totalMezzanineAreaM2)} m² (+5% = ${round2(totalMezzanineAreaM2 * 1.05)} m²) · ${stLbl}`,
+              unitTypeBreakdown: breakdownByUt((ut) =>
+                ut.hasMezzanine && ut.mezzanine?.enabled ? round2(ut.mezzanine.width * ut.mezzanine.depth) : 0,
+              ),
+            },
+          ];
+        })()
       : []),
     ...(totalMezzanineStairs > 0
       ? [
@@ -740,14 +764,14 @@ export function calculateQuantities(project: Project): QuantitiesReport {
       id: 'q-san-pts',
       code: 'SAN-01',
       discipline: 'Sanitária',
-      description: 'Pontos e Dispositivos Sanitários (Saídas, Ralos, Caixas)',
+      description: `Pontos e Dispositivos Sanitários (Saídas, ${findLabel(DRAIN_OPTIONS, sanFix.drainType)}, Caixas)`,
       unit: 'pt',
       netQuantity: totalDrainagePoints,
       lossFactorPercent: 0,
       grossQuantity: totalDrainagePoints,
       measurementCriterion: 'Contagem direta da rede sanitária modelada',
       sourceOrigin: 'Módulo Sanitário e Esgoto',
-      calculationMemory: `${totalDrainagePoints} elementos sanitários`,
+      calculationMemory: `${totalDrainagePoints} elementos sanitários (${findLabel(DRAIN_OPTIONS, sanFix.drainType)})`,
       unitTypeBreakdown: {},
     },
     {
@@ -768,14 +792,14 @@ export function calculateQuantities(project: Project): QuantitiesReport {
       id: 'q-mob-pts',
       code: 'MOB-01',
       discipline: 'Mobiliário',
-      description: 'Louças, Bancadas e Mobiliário Previstos em Planta',
+      description: `Louças, Metais (${findLabel(METALS_FINISH_OPTIONS, sanFix.metalsFinish)}), Chuveiros e Bancadas — ${findLabel(TOILET_OPTIONS, sanFix.toiletType)}`,
       unit: 'un',
       netQuantity: totalFurniture,
       lossFactorPercent: 0,
       grossQuantity: totalFurniture,
-      measurementCriterion: 'Contagem direta de itens de mobiliário nas unidades',
-      sourceOrigin: 'Módulo Mobiliário e Equipamentos',
-      calculationMemory: `${totalFurniture} itens cadastrados`,
+      measurementCriterion: 'Contagem direta de itens de mobiliário, louças e chuveiros nas unidades',
+      sourceOrigin: 'Módulo Mobiliário & Acabamentos',
+      calculationMemory: `${totalFurniture} itens · Bacia: ${findLabel(TOILET_OPTIONS, sanFix.toiletType)} · Chuveiro: ${findLabel(SHOWER_OPTIONS, sanFix.showerType)}`,
       unitTypeBreakdown: {},
     },
     ...(extSurfaceAreaM2 > 0

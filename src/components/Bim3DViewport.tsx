@@ -40,10 +40,15 @@ import {
 } from '../engine/implantation';
 import { createDefaultLandscaping } from '../engine/landscaping';
 import {
+  getMetalsColorHex,
+  getNormalizedSanitaryFixtures,
+  getSanitaryWareHex,
+} from '../engine/finishesCatalog';
+import {
   buildBotanicalPlant3D,
   buildGourmetArea3D,
   buildPool3D,
-  buildRoofGeometryGroup,
+  buildRoofAndWaterTowerGroup,
 } from '../engine/botanical3D';
 import { nextId } from '../engine/parametricGenerator';
 import type {
@@ -249,6 +254,7 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
 
   const [sectionCutHeight, setSectionCutHeight] = useState<number>(12);
   const [explodedOffset, setExplodedOffset] = useState<number>(0);
+  const [showRoofShell, setShowRoofShell] = useState<boolean>(true);
   const [selectedInfo, setSelectedInfo] = useState<{
     label: string;
     discipline: string;
@@ -1047,10 +1053,34 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
       metalness: 0.06,
       clippingPlanes,
     });
+    const fx = getNormalizedSanitaryFixtures(project);
+    const metalsHex = getMetalsColorHex(fx.metalsFinish);
+    const wareHex = getSanitaryWareHex(fx.sanitaryWareColor);
+    const glassTintHex =
+      rs.glassType === 'temperado_verde_solar'
+        ? 0x7dd3b0
+        : rs.glassType === 'temperado_fume'
+          ? 0x475569
+          : 0xa5d8ff;
+    const doorLeafHex =
+      rs.interiorDoorMaterial === 'madeira_pintada_branca'
+        ? 0xf1f5f9
+        : rs.interiorDoorMaterial === 'mdf_melaminico_cinza'
+          ? 0x64748b
+          : rs.interiorDoorMaterial === 'aluminio_vidro'
+            ? 0x334155
+            : 0x8f5d38;
+    const kitchenCounterHex =
+      fx.kitchenSinkType === 'quartzo_cuba_esculpida'
+        ? 0xe7e3da
+        : fx.kitchenSinkType === 'inox_monobloco'
+          ? 0xb8c1cc
+          : 0x26292e;
+
     const matGlass = new THREE.MeshPhysicalMaterial({
-      color: 0xa5d8ff,
+      color: glassTintHex,
       transparent: true,
-      opacity: 0.36,
+      opacity: rs.glassType === 'temperado_fume' ? 0.52 : 0.36,
       roughness: 0.06,
       metalness: 0.15,
       reflectivity: 0.9,
@@ -1063,15 +1093,15 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
       clippingPlanes,
     });
     const matDoor = new THREE.MeshStandardMaterial({
-      color: 0x8f5d38,
-      roughness: 0.58,
-      metalness: 0.05,
+      color: doorLeafHex,
+      roughness: rs.interiorDoorMaterial === 'aluminio_vidro' ? 0.35 : 0.58,
+      metalness: rs.interiorDoorMaterial === 'aluminio_vidro' ? 0.55 : 0.05,
       clippingPlanes,
     });
     const matHandle = new THREE.MeshStandardMaterial({
-      color: 0xd1d5db,
-      roughness: 0.25,
-      metalness: 0.85,
+      color: metalsHex,
+      roughness: fx.metalsFinish === 'preto_fosco' ? 0.45 : 0.25,
+      metalness: fx.metalsFinish === 'preto_fosco' ? 0.5 : 0.85,
       clippingPlanes,
     });
     const matWoodDark = new THREE.MeshStandardMaterial({
@@ -1090,21 +1120,21 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
       clippingPlanes,
     });
     const matWetFur = new THREE.MeshStandardMaterial({
-      color: 0xf8fafc,
-      roughness: 0.22,
-      metalness: 0.12,
+      color: wareHex,
+      roughness: fx.sanitaryWareColor === 'branco_gelo' ? 0.2 : 0.48,
+      metalness: 0.08,
       clippingPlanes,
     });
     const matStoneCounter = new THREE.MeshStandardMaterial({
-      color: 0x26292e,
-      roughness: 0.35,
-      metalness: 0.1,
+      color: kitchenCounterHex,
+      roughness: fx.kitchenSinkType === 'inox_monobloco' ? 0.28 : 0.35,
+      metalness: fx.kitchenSinkType === 'inox_monobloco' ? 0.78 : 0.1,
       clippingPlanes,
     });
     const matStainless = new THREE.MeshStandardMaterial({
-      color: 0xd1d5db,
-      roughness: 0.22,
-      metalness: 0.88,
+      color: metalsHex,
+      roughness: fx.metalsFinish === 'preto_fosco' ? 0.48 : 0.22,
+      metalness: fx.metalsFinish === 'preto_fosco' ? 0.45 : 0.88,
       clippingPlanes,
     });
     const matBlackGlass = new THREE.MeshStandardMaterial({
@@ -1159,6 +1189,12 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
     const matColdWater = new THREE.MeshStandardMaterial({
       color: 0x3b82f6,
       roughness: 0.35,
+      clippingPlanes,
+    });
+    const matTankBlue = new THREE.MeshStandardMaterial({
+      color: 0x1d6fd6,
+      roughness: 0.38,
+      metalness: 0.08,
       clippingPlanes,
     });
     const matHotWater = new THREE.MeshStandardMaterial({
@@ -1294,6 +1330,9 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
             openingsByWall.set(op.wallId, arr);
           }
 
+          const hasMezUt = !!(ut.hasMezzanine && ut.mezzanine?.enabled && ut.ceilingHeight >= 3.0);
+          const mezCfgUt = ut.mezzanine;
+
           for (const w of ut.walls as Wall[]) {
             const len = getWallLength(w);
             if (len < 0.05) continue;
@@ -1303,12 +1342,28 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
             const mz = (pA.z + pB.z) / 2;
             const angle = Math.atan2(pB.z - pA.z, pB.x - pA.x);
 
+            let effectiveWallH = w.height;
+            if (!w.isExternal && hasMezUt && mezCfgUt) {
+              const wMinX = Math.min(w.start.x, w.end.x);
+              const wMaxX = Math.max(w.start.x, w.end.x);
+              const wMinY = Math.min(w.start.y, w.end.y);
+              const wMaxY = Math.max(w.start.y, w.end.y);
+              const touchesMez =
+                wMaxX >= mezCfgUt.x - 0.15 &&
+                wMinX <= mezCfgUt.x + mezCfgUt.width + 0.15 &&
+                wMaxY >= mezCfgUt.y - 0.15 &&
+                wMinY <= mezCfgUt.y + mezCfgUt.depth + 0.15;
+              if (touchesMez || w.code.includes('BWC')) {
+                effectiveWallH = Math.min(w.height, mezCfgUt.elevationM);
+              }
+            }
+
             const wallOps = openingsByWall.get(w.id) ?? [];
             const wallGeom = isArchRender
-              ? buildWallWithOpeningsGeometry(len, w.height, w.thickness, wallOps)
+              ? buildWallWithOpeningsGeometry(len, effectiveWallH, w.thickness, wallOps)
               : (() => {
-                  const g = new THREE.BoxGeometry(len, w.height, w.thickness);
-                  g.translate(0, w.height / 2, 0);
+                  const g = new THREE.BoxGeometry(len, effectiveWallH, w.thickness);
+                  g.translate(0, effectiveWallH / 2, 0);
                   return g;
                 })();
 
@@ -1467,12 +1522,15 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
           const mez = ut.mezzanine;
           const mezCenter = mapUnitPt(inst, ut.width, mez.x + mez.width / 2, mez.y + mez.depth / 2);
           const mezDeckY = baseY + floor.slabThickness + mez.elevationM;
+          const isWoodMez = mez.structureType === 'madeira_estrutural';
           const deckMat =
             mez.structureType === 'concreto_armado'
               ? matSlab
-              : mez.structureType === 'madeira_estrutural'
-              ? matWoodDark
-              : matWoodDark;
+              : mez.structureType === 'steel_deck'
+                ? matSteelBeam
+                : matWoodDark;
+          const beamMat = isWoodMez ? matWoodDark : mez.structureType === 'concreto_armado' ? matSlab : matSteelBeam;
+
           const deckMesh = new THREE.Mesh(
             new THREE.BoxGeometry(mez.width, mez.slabThicknessM, mez.depth),
             deckMat,
@@ -1484,9 +1542,52 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
           deckMesh.userData = {
             bimLabel: `Mezanino +${mez.elevationM.toFixed(2)}m — Unid. ${inst.unitNumber}`,
             bimDiscipline: 'Arquitetura',
-            bimDetail: `${mez.width.toFixed(2)}×${mez.depth.toFixed(2)}m · Estrutura ${mez.structureType} (Não computado como andar)`,
+            bimDetail: `${mez.width.toFixed(2)}×${mez.depth.toFixed(2)}m (${Math.round((mez.coverageRatio || 0) * 100)}%) · Estrutura ${mez.structureType.replace(/_/g, ' ')}`,
           };
           group.add(deckMesh);
+
+          // Forro/laje fechando o teto do banheiro térreo quando o mezanino é compacto (ex. 10%–20%)
+          const bathRoom = ut.rooms.find((r) => r.category === 'banheiro');
+          if (bathRoom) {
+            const bc = mapUnitPt(
+              inst,
+              ut.width,
+              bathRoom.x + bathRoom.width / 2,
+              bathRoom.y + bathRoom.depth / 2,
+            );
+            const bathCeil = new THREE.Mesh(
+              new THREE.BoxGeometry(bathRoom.width + 0.08, 0.06, bathRoom.depth + 0.08),
+              matDrywall,
+            );
+            bathCeil.position.set(bc.x, mezDeckY - 0.03, bc.z);
+            bathCeil.rotation.y = -(inst.rotationDeg * Math.PI) / 180;
+            bathCeil.receiveShadow = !isSoftwareGl;
+            group.add(bathCeil);
+          }
+
+          // Vigas estruturais principais (bordas) + barrotes/perfis secundários sob o deck
+          const beamH = isWoodMez ? 0.14 : 0.12;
+          const beamW = isWoodMez ? 0.08 : 0.06;
+          for (const edgeY of [mez.y + beamW / 2, mez.y + mez.depth - beamW / 2]) {
+            const bp = mapUnitPt(inst, ut.width, mez.x + mez.width / 2, edgeY);
+            const mainBeam = new THREE.Mesh(new THREE.BoxGeometry(mez.width, beamH, beamW), beamMat);
+            mainBeam.position.set(bp.x, mezDeckY - beamH / 2, bp.z);
+            mainBeam.rotation.y = -(inst.rotationDeg * Math.PI) / 180;
+            mainBeam.castShadow = !isSoftwareGl;
+            group.add(mainBeam);
+          }
+          const joistCount = Math.max(2, Math.round(mez.width / 0.6));
+          for (let j = 0; j <= joistCount; j++) {
+            const lx = mez.x + beamW / 2 + ((mez.width - beamW) * j) / joistCount;
+            const jp = mapUnitPt(inst, ut.width, lx, mez.y + mez.depth / 2);
+            const joist = new THREE.Mesh(
+              new THREE.BoxGeometry(beamW * 0.75, beamH * 0.85, mez.depth - beamW * 1.5),
+              beamMat,
+            );
+            joist.position.set(jp.x, mezDeckY - (beamH * 0.85) / 2, jp.z);
+            joist.rotation.y = -(inst.rotationDeg * Math.PI) / 180;
+            group.add(joist);
+          }
 
           // Corner support columns
           const colCorners = [
@@ -1499,7 +1600,7 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
             const cp = mapUnitPt(inst, ut.width, corner.lx, corner.ly);
             const colMesh = new THREE.Mesh(
               new THREE.BoxGeometry(0.08, mez.elevationM, 0.08),
-              mez.structureType === 'madeira_estrutural' ? matWoodDark : matSteelBeam,
+              beamMat,
             );
             colMesh.position.set(cp.x, baseY + floor.slabThickness + mez.elevationM / 2, cp.z);
             colMesh.rotation.y = -(inst.rotationDeg * Math.PI) / 180;
@@ -1507,13 +1608,14 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
             group.add(colMesh);
           }
 
-          // Guardrail (guarda-corpo 1,05m) on open interior edge(s)
+          // Guardrail (guarda-corpo 1,05m) nas bordas abertas, respeitando o vão de chegada da escada
           const railH = mez.guardrailHeightM || 1.05;
+          const stairItem = ut.furniture.find((f) => f.category === 'escada');
           const addRailSegment = (lx0: number, ly0: number, lx1: number, ly1: number) => {
             const p0 = mapUnitPt(inst, ut.width, lx0, ly0);
             const p1 = mapUnitPt(inst, ut.width, lx1, ly1);
             const rLen = Math.hypot(p1.x - p0.x, p1.z - p0.z);
-            if (rLen < 0.25) return;
+            if (rLen < 0.2) return;
             const rAng = Math.atan2(p1.z - p0.z, p1.x - p0.x);
             const topBar = new THREE.Mesh(
               new THREE.BoxGeometry(rLen, 0.04, 0.04),
@@ -1544,19 +1646,47 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
           };
 
           if (mez.y + mez.depth < ut.depth - 0.55) {
-            addRailSegment(mez.x + 0.05, mez.y + mez.depth - 0.03, mez.x + mez.width - 0.05, mez.y + mez.depth - 0.03);
+            const edgeY = mez.y + mez.depth - 0.03;
+            const startX = mez.x + 0.05;
+            const endX = mez.x + mez.width - 0.05;
+            if (
+              stairItem &&
+              stairItem.y <= mez.y + mez.depth + 0.45 &&
+              stairItem.y + stairItem.depth >= mez.y + mez.depth - 0.45
+            ) {
+              const gStart = Math.max(startX, stairItem.x - 0.06);
+              const gEnd = Math.min(endX, stairItem.x + stairItem.width + 0.06);
+              if (gStart - startX >= 0.2) addRailSegment(startX, edgeY, gStart, edgeY);
+              if (endX - gEnd >= 0.2) addRailSegment(gEnd, edgeY, endX, edgeY);
+            } else {
+              addRailSegment(startX, edgeY, endX, edgeY);
+            }
           }
           if (mez.x + mez.width < ut.width - 0.55) {
-            addRailSegment(mez.x + mez.width - 0.03, mez.y + 0.05, mez.x + mez.width - 0.03, mez.y + mez.depth - 0.05);
+            const edgeX = mez.x + mez.width - 0.03;
+            addRailSegment(edgeX, mez.y + 0.05, edgeX, mez.y + mez.depth - 0.05);
           }
           if (mez.x > 0.55) {
-            addRailSegment(mez.x + 0.03, mez.y + 0.05, mez.x + 0.03, mez.y + mez.depth - 0.05);
+            const edgeX = mez.x + 0.03;
+            addRailSegment(edgeX, mez.y + 0.05, edgeX, mez.y + mez.depth - 0.05);
           }
         }
 
         // Multi-part Architectural Furniture (including elevated mezzanine furniture & 3D Blondel staircase)
         if (layers.mobiliario) {
+          const hasUpperBed = !!(
+            ut.hasMezzanine &&
+            ut.mezzanine?.enabled &&
+            ut.furniture.some((bf) => bf.category === 'cama' && (bf.elevationM ?? 0) >= 1.2)
+          );
           for (const f of ut.furniture) {
+            if (
+              hasUpperBed &&
+              (f.category === 'cama' || f.category === 'mesa_cabeceira') &&
+              (f.elevationM ?? 0) < 0.5
+            ) {
+              continue;
+            }
             const fc = mapUnitPt(inst, ut.width, f.x + f.width / 2, f.y + f.depth / 2);
             const rotY = -((inst.rotationDeg + f.rotationDeg) * Math.PI) / 180;
             const fy0 = baseY + floor.slabThickness + (f.elevationM ?? 0);
@@ -1717,21 +1847,55 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
               addPart(0.02, f.height * 0.45, 0.03, f.height * 0.65, matFrame, -f.width * 0.35, f.depth / 2 + 0.02);
               addPart(0.02, f.height * 0.22, 0.03, f.height * 0.2, matFrame, -f.width * 0.35, f.depth / 2 + 0.02);
             } else if (isArchRender && f.category === 'vaso_sanitario') {
-              addPart(f.width * 0.85, 0.38, f.depth * 0.72, 0.19, matWetFur, 0, 0.05, true);
-              addPart(f.width * 0.9, 0.36, 0.16, 0.56, matWetFur, 0, -f.depth / 2 + 0.09);
-              addPart(0.06, 0.02, 0.04, 0.75, matStainless, 0, -f.depth / 2 + 0.09);
+              const bowlZ = fx.toiletType === 'suspensa_embutida' ? 0.1 : 0.05;
+              const bowlY = fx.toiletType === 'suspensa_embutida' ? 0.25 : 0.19;
+              addPart(f.width * 0.85, 0.34, f.depth * 0.72, bowlY, matWetFur, 0, bowlZ, true);
+              if (
+                fx.toiletType === 'caixa_acoplada_dual' ||
+                fx.toiletType === 'caixa_acoplada_monobloco'
+              ) {
+                addPart(f.width * 0.9, 0.36, 0.16, 0.56, matWetFur, 0, -f.depth / 2 + 0.09);
+                addPart(0.06, 0.02, 0.04, 0.75, matStainless, 0, -f.depth / 2 + 0.09);
+              } else {
+                // Wall flush plate (Hydra / built-in concealed tank)
+                addPart(0.16, 0.11, 0.02, 1.05, matStainless, 0, -f.depth / 2 - 0.01);
+              }
             } else if (isArchRender && f.category === 'lavatorio') {
-              addPart(f.width * 0.9, 0.55, f.depth * 0.88, 0.52, matWoodDark, 0, 0, true);
-              addPart(f.width, 0.05, f.depth, 0.83, matWetFur);
-              addPart(0.03, 0.16, 0.03, 0.92, matStainless, 0, -f.depth * 0.32);
+              if (fx.washbasinType === 'lavatorio_coluna_suspensa') {
+                addPart(f.width * 0.88, 0.14, f.depth * 0.84, 0.78, matWetFur, 0, 0, true);
+              } else {
+                addPart(f.width * 0.9, 0.55, f.depth * 0.88, 0.52, matWoodDark, 0, 0, true);
+                addPart(f.width, 0.05, f.depth, 0.82, matStoneCounter);
+                if (fx.washbasinType === 'cuba_apoio_granito') {
+                  addPart(f.width * 0.68, 0.12, f.depth * 0.66, 0.9, matWetFur);
+                } else {
+                  addPart(f.width * 0.65, 0.03, f.depth * 0.6, 0.85, matWetFur);
+                }
+              }
+              addPart(0.03, 0.2, 0.03, 0.96, matStainless, 0, -f.depth * 0.32);
             } else if (isArchRender && f.category === 'espelho') {
               addPart(f.width, f.height, 0.03, 1.45, matMirror, 0, 0, true);
             } else if (isArchRender && f.category === 'chuveiro') {
-              addPart(0.03, 0.03, 0.28, 2.08, matStainless, 0, 0.1, true);
-              addPart(0.16, 0.03, 0.16, 2.05, matStainless, 0, 0.22);
+              if (fx.showerType === 'ducha_teto_monocomando') {
+                addPart(0.03, 0.26, 0.03, 2.28, matStainless, 0, 0.18, true);
+                addPart(0.24, 0.025, 0.24, 2.15, matStainless, 0, 0.18);
+              } else if (
+                fx.showerType === 'eletrico_multitemperatura' ||
+                fx.showerType === 'ducha_eletronica_haste'
+              ) {
+                addPart(0.04, 0.04, 0.3, 2.08, matWetFur, 0, 0.1, true);
+                addPart(0.22, 0.09, 0.22, 2.04, matWetFur, 0, 0.24);
+              } else {
+                addPart(0.03, 0.03, 0.28, 2.08, matStainless, 0, 0.1, true);
+                addPart(0.18, 0.03, 0.18, 2.05, matStainless, 0, 0.22);
+              }
             } else if (isArchRender && f.category === 'box') {
               addPart(f.width, 0.05, f.depth, 0.025, matTileWet, 0, 0, true);
-              addPart(0.12, 0.02, 0.12, 0.055, matStainless, 0, 0);
+              if (fx.drainType === 'ralo_linear_oculto') {
+                addPart(f.width * 0.78, 0.015, 0.07, 0.055, matStainless, 0, -f.depth * 0.36);
+              } else {
+                addPart(0.12, 0.02, 0.12, 0.055, matStainless, 0, 0);
+              }
               const glassBox = new THREE.Mesh(
                 new THREE.BoxGeometry(f.width - 0.02, 1.9, 0.02),
                 matGlass,
@@ -1880,16 +2044,24 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
       }
     }
 
-    // 4. Parametric Roof Geometry (Platibanda / Duas Águas / Uma Água / Laje Plana)
+    // 4. Conjunto Laje de Cobertura + Castelo da Caixa d'Água sobre a Laje + Telhado Fechado
     if (layers.cobertura && !isInternalView && Number.isFinite(minBuildingX)) {
       const topFlIdx = Math.max(0, project.floors.length - 1);
       const topFl = project.floors[topFlIdx];
+      const maxTopWallHeight = Math.max(
+        topFl?.floorToFloorHeight ?? 2.95,
+        ...((topFl?.units ?? []).map((u) => {
+          const unitUt = project.unitTypes.find((t) => t.id === u.unitTypeId);
+          return unitUt ? unitUt.ceilingHeight + (topFl?.slabThickness ?? 0.15) : 0;
+        })),
+      );
       const roofY =
         (topFl?.elevation ?? 0) +
-        (topFl?.floorToFloorHeight ?? 2.95) +
+        maxTopWallHeight +
         topFlIdx * explodedOffset;
-      const rW = maxBuildingX - minBuildingX + 0.65;
-      const rD = maxBuildingZ - minBuildingZ + 0.65;
+      const extWallPad = Math.max(0.08, (project.constructionMethod.externalWallThickness || 0.15) / 2);
+      const rW = Math.max(1.5, maxBuildingX - minBuildingX + extWallPad * 2);
+      const rD = Math.max(1.5, maxBuildingZ - minBuildingZ + extWallPad * 2);
       const rX = (minBuildingX + maxBuildingX) / 2;
       const rZ = (minBuildingZ + maxBuildingZ) / 2;
 
@@ -1903,7 +2075,18 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
         clippingPlanes,
       });
 
-      const roofGroup = buildRoofGeometryGroup({
+      const totalResLiters = Math.max(
+        1000,
+        Math.round(
+          Math.max(1, totalUnitsPlaced) *
+            (project.hydraulicConfig.occupantsPerUnit || 2) *
+            (project.hydraulicConfig.litersPerPersonDay || 150) *
+            (project.hydraulicConfig.reserveDays || 2) *
+            0.4,
+        ),
+      );
+
+      const roofGroup = buildRoofAndWaterTowerGroup({
         x: rX - rW / 2,
         y: rZ - rD / 2,
         width: rW,
@@ -1913,11 +2096,16 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
         roofFinish: rs.roofMaterial,
         slopePercent: project.constructionMethod.roofSlopePercent,
         facadeMat: matExtWall,
+        slabMat: matSlab,
         roofMat: matRoof,
+        tankMat: matTankBlue,
+        pipeMat: matColdWater,
         isSoftwareGl,
+        showRoofShell,
+        reservoirLiters: totalResLiters,
       });
       roofGroup.traverse((obj) => {
-        if ((obj as THREE.Mesh).isMesh) {
+        if ((obj as THREE.Mesh).isMesh && !obj.userData?.bimLabel) {
           obj.userData = {
             bimLabel: 'Cobertura do Empreendimento',
             bimDiscipline: 'Cobertura',
@@ -2047,6 +2235,7 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
     activeCameraPreset,
     selectedInternalUnitIdx,
     selectedOpening3D,
+    showRoofShell,
   ]);
 
   const setCameraPreset = (
@@ -2427,6 +2616,19 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
                         </button>
                       );
                     })}
+                    {layers.cobertura && (
+                      <button
+                        type="button"
+                        onClick={() => setShowRoofShell((s) => !s)}
+                        className={`inline-flex items-center gap-1.5 rounded border px-3 py-1.5 text-xs font-medium transition ${
+                          !showRoofShell
+                            ? 'border-cyan-500 bg-cyan-500/20 text-cyan-200'
+                            : 'border-slate-700 bg-[#14161A] text-slate-300 hover:text-white'
+                        }`}
+                      >
+                        {showRoofShell ? 'Abrir Telhado (Ver Laje + Castelo)' : 'Fechar Telhado Completo'}
+                      </button>
+                    )}
                   </div>
 
                   {selectedOpening3D &&
