@@ -12,7 +12,8 @@ export type ConstructionStageName =
   | '05. Instalações Elétricas e Especiais'
   | '06. Instalações Hidrossanitárias'
   | '07. Impermeabilização, Revestimentos e Pintura'
-  | '08. Esquadrias, Louças e Bancadas';
+  | '08. Esquadrias, Louças e Bancadas'
+  | '09. Paisagismo e Áreas Externas';
 
 export interface SinapiRJReferenceItem {
   internalCode: string;
@@ -404,6 +405,50 @@ export const SINAPI_RJ_CATALOG: Record<string, SinapiRJReferenceItem> = {
     materialRatio: 0.76,
     stageGroup: '08. Esquadrias, Louças e Bancadas',
     category: 'equipamento',
+  },
+  'EXT-01': {
+    internalCode: 'EXT-01',
+    sinapiCode: '92396',
+    sinapiDescription: 'Pavimentação externa (piso intertravado / antiderrapante / brita / areia / deck) c/ preparo de sub-base (SINAPI-RJ)',
+    unit: 'm²',
+    priceDesoneradoRJ: 118.4,
+    priceNaoDesoneradoRJ: 129.8,
+    materialRatio: 0.64,
+    stageGroup: '09. Paisagismo e Áreas Externas',
+    category: 'servico',
+  },
+  'PAI-01': {
+    internalCode: 'PAI-01',
+    sinapiCode: '101420',
+    sinapiDescription: 'Piscina em alvenaria estrutural/vinil ou fibra c/ borda antiderrapante, casa de máquinas e filtragem completa (SINAPI-RJ)',
+    unit: 'm²',
+    priceDesoneradoRJ: 1680.0,
+    priceNaoDesoneradoRJ: 1840.0,
+    materialRatio: 0.68,
+    stageGroup: '09. Paisagismo e Áreas Externas',
+    category: 'servico',
+  },
+  'PAI-02': {
+    internalCode: 'PAI-02',
+    sinapiCode: '102154',
+    sinapiDescription: 'Área gourmet equipada c/ pergolado, bancada em granito, pia e churrasqueira alvenaria refratária (SINAPI-RJ)',
+    unit: 'm²',
+    priceDesoneradoRJ: 1420.0,
+    priceNaoDesoneradoRJ: 1560.0,
+    materialRatio: 0.65,
+    stageGroup: '09. Paisagismo e Áreas Externas',
+    category: 'servico',
+  },
+  'PAI-03': {
+    internalCode: 'PAI-03',
+    sinapiCode: '98504',
+    sinapiDescription: 'Paisagismo: plantio de árvores, frutíferas, palmeiras e espécies ornamentais c/ terra vegetal e adubação (SINAPI-RJ)',
+    unit: 'un',
+    priceDesoneradoRJ: 265.0,
+    priceNaoDesoneradoRJ: 294.0,
+    materialRatio: 0.62,
+    stageGroup: '09. Paisagismo e Áreas Externas',
+    category: 'material',
   },
 };
 

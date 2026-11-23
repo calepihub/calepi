@@ -6,6 +6,7 @@ import {
   Box,
   Building2,
   Calculator,
+  Camera,
   Cloud,
   CloudOff,
   FileText,
@@ -22,10 +23,12 @@ import {
 } from 'lucide-react';
 import { AssistantDrawer } from './components/AssistantDrawer';
 import { Bim3DViewport } from './components/Bim3DViewport';
+import { CinematicRenderStudio } from './components/CinematicRenderStudio';
 import { ConstructionAndStructureModule } from './components/ConstructionAndStructureModule';
 import { DocumentationAndExportModule } from './components/DocumentationAndExportModule';
 import { EngineeringComplianceModule } from './components/EngineeringComplianceModule';
 import { FloorPlanEditor2D } from './components/FloorPlanEditor2D';
+import { LandscapingModule } from './components/LandscapingModule';
 import { MepElectricalModule } from './components/MepElectricalModule';
 import { MepHydraulicSanitaryModule } from './components/MepHydraulicSanitaryModule';
 import { ProjectHub } from './components/ProjectHub';
@@ -56,8 +59,14 @@ import type {
   UnitType,
 } from './types/project';
 
-type PrimaryStepId = 'terreno' | 'planta2d' | 'bim3d' | 'engenharia' | 'documentacao';
-type TerrenoSubTab = 'terreno' | 'urbanismo';
+type PrimaryStepId =
+  | 'terreno'
+  | 'planta2d'
+  | 'bim3d'
+  | 'render_studio'
+  | 'engenharia'
+  | 'documentacao';
+type TerrenoSubTab = 'terreno' | 'paisagismo' | 'urbanismo';
 type PlantaSubTab = 'tipologias' | 'editor2d';
 type EngSubTab = 'quantitativos' | 'compatibilizacao' | 'eletrica' | 'hidraulica' | 'construcao';
 
@@ -72,11 +81,12 @@ const WORKFLOW_STEPS: Array<{
   label: string;
   icon: React.ComponentType<{ className?: string }>;
 }> = [
-  { id: 'terreno', num: '1', label: 'Terreno & Implantação', icon: MapPin },
+  { id: 'terreno', num: '1', label: 'Terreno & Paisagismo', icon: MapPin },
   { id: 'planta2d', num: '2', label: 'Tipologias & Planta 2D', icon: PenTool },
   { id: 'bim3d', num: '3', label: 'Modelo BIM 3D', icon: Box },
-  { id: 'engenharia', num: '4', label: 'Engenharia & Custos', icon: Calculator },
-  { id: 'documentacao', num: '5', label: 'Pranchas & Memoriais', icon: FileText },
+  { id: 'render_studio', num: '4', label: 'Render Cinematográfico', icon: Camera },
+  { id: 'engenharia', num: '5', label: 'Engenharia & Custos', icon: Calculator },
+  { id: 'documentacao', num: '6', label: 'Pranchas & Memoriais', icon: FileText },
 ];
 
 export function App() {
@@ -341,6 +351,10 @@ export function App() {
         setActiveStep('terreno');
         setTerrenoSubTab('terreno');
         break;
+      case 'paisagismo':
+        setActiveStep('terreno');
+        setTerrenoSubTab('paisagismo');
+        break;
       case 'urbanismo':
         setActiveStep('terreno');
         setTerrenoSubTab('urbanismo');
@@ -355,6 +369,9 @@ export function App() {
         break;
       case 'bim3d':
         setActiveStep('bim3d');
+        break;
+      case 'render_studio':
+        setActiveStep('render_studio');
         break;
       case 'eletrica':
         setActiveStep('engenharia');
@@ -1048,6 +1065,7 @@ export function App() {
                     {(
                       [
                         ['terreno', 'Implantação (4 Etapas)'],
+                        ['paisagismo', 'Paisagismo, Piscina & Lazer'],
                         ['urbanismo', 'Leis Urbanísticas'],
                       ] as const
                     ).map(([id, label]) => (
@@ -1130,6 +1148,7 @@ export function App() {
                 (
                   [
                     ['terreno', 'Terreno & Pavimentos'],
+                    ['paisagismo', 'Paisagismo & Lazer'],
                     ['urbanismo', 'Leis Urbanísticas'],
                   ] as const
                 ).map(([id, label]) => (
@@ -1225,6 +1244,16 @@ export function App() {
                 </div>
               )}
 
+              {activeStep === 'terreno' && terrenoSubTab === 'paisagismo' && (
+                <div className="h-full overflow-y-auto">
+                  <LandscapingModule
+                    project={activeProject}
+                    onUpdateProject={handleUpdateProject}
+                    onOpenRenderStudio={() => setActiveStep('render_studio')}
+                  />
+                </div>
+              )}
+
               {activeStep === 'terreno' && terrenoSubTab === 'urbanismo' && (
                 <div className="h-full overflow-y-auto">
                   <UrbanismModule project={activeProject} onUpdateProject={handleUpdateProject} />
@@ -1258,6 +1287,14 @@ export function App() {
 
               {activeStep === 'bim3d' && (
                 <Bim3DViewport
+                  project={activeProject}
+                  onUpdateProject={handleUpdateProject}
+                  onSaveRender={handleSaveRenderToCloud}
+                />
+              )}
+
+              {activeStep === 'render_studio' && (
+                <CinematicRenderStudio
                   project={activeProject}
                   onUpdateProject={handleUpdateProject}
                   onSaveRender={handleSaveRenderToCloud}

@@ -145,14 +145,19 @@ export function generateParametricUnitLayout(
   const usableD = round2(D - balconyDepth);
 
   // Bathroom dimensions (adapted for NBR 9050 if accessible)
-  const bathW = input.accessible ? Math.min(round2(W * 0.55), 2.1) : Math.min(round2(W * 0.45), 1.7);
-  const bathD = input.accessible ? Math.min(round2(usableD * 0.36), 2.2) : Math.min(round2(usableD * 0.32), 1.85);
+  const bathW = input.accessible
+    ? Math.min(round2(W * 0.54), 2.1)
+    : Math.max(1.26, Math.min(round2(W * 0.43), 1.68));
+  const bathD = input.accessible
+    ? Math.min(round2(usableD * 0.36), 2.2)
+    : Math.max(1.75, Math.min(round2(usableD * 0.33), 1.88));
 
-  const laundryD = input.hasLaundry ? 1.15 : 0;
   const kitchenW = round2(W - bathW);
-  const kitchenD = round2(Math.max(1.85, bathD));
-
-  const mainRoomD = round2(usableD - kitchenD - (input.bedrooms > 0 ? 0 : 0));
+  const kitchenD = input.hasLaundry
+    ? round2(Math.max(bathD + 0.25, Math.min(2.3, usableD * 0.4)))
+    : round2(Math.max(1.85, bathD));
+  const wetD = round2(Math.max(bathD, kitchenD));
+  const mainRoomD = round2(usableD - wetD);
 
   const rooms: Room[] = [];
   const walls: Wall[] = [];
@@ -196,9 +201,9 @@ export function generateParametricUnitLayout(
     notes: input.accessible ? 'Prevê área de manobra Ø 1,50m (NBR 9050).' : '',
   });
 
-  // Kitchen at top-right (x: bathW..W, y: 0..kitchenD)
-  const effectiveKitchenW = input.hasLaundry ? round2(kitchenW - 0.0) : kitchenW;
-  const kDepth = input.hasLaundry ? round2(kitchenD - 0.0) : kitchenD;
+  // Kitchen at top-right (x: bathW..W)
+  const effectiveKitchenW = kitchenW;
+  const cozDepth = input.hasLaundry ? round2(Math.min(1.32, kitchenD * 0.6)) : kitchenD;
   rooms.push({
     id: kitchenRoomId,
     code: 'COZ',
@@ -207,7 +212,7 @@ export function generateParametricUnitLayout(
     x: bathW,
     y: 0,
     width: effectiveKitchenW,
-    depth: input.hasLaundry ? round2(kDepth * 0.65) : kDepth,
+    depth: cozDepth,
     ceilingHeight: H,
     naturalLightingArea: 0.9,
     ventilationArea: 0.45,
@@ -232,9 +237,9 @@ export function generateParametricUnitLayout(
       name: 'Área de Serviço',
       category: 'area_servico',
       x: bathW,
-      y: round2(kDepth * 0.65),
+      y: cozDepth,
       width: effectiveKitchenW,
-      depth: round2(kDepth * 0.35),
+      depth: round2(kitchenD - cozDepth),
       ceilingHeight: H,
       naturalLightingArea: 0.4,
       ventilationArea: 0.2,
@@ -249,17 +254,18 @@ export function generateParametricUnitLayout(
     });
   }
 
-  // Living / Bedroom zone (y: kitchenD .. usableD)
-  if (input.bedrooms >= 1 && mainRoomD >= 2.2 && W >= 3.6) {
-    const livingW = round2(W * 0.46);
-    const bedW = round2(W - livingW);
+  const hasSeparateBedroom = input.bedrooms >= 1 && mainRoomD >= 2.35 && W >= 3.6;
+  const livingW = hasSeparateBedroom ? round2(Math.max(1.75, W * 0.47)) : W;
+  const bedW = hasSeparateBedroom ? round2(W - livingW) : 0;
+
+  if (hasSeparateBedroom) {
     rooms.push({
       id: mainRoomId,
       code: 'SALA',
       name: 'Sala de Estar',
       category: 'sala',
       x: 0,
-      y: kitchenD,
+      y: wetD,
       width: livingW,
       depth: mainRoomD,
       ceilingHeight: H,
@@ -280,7 +286,7 @@ export function generateParametricUnitLayout(
       name: 'Dormitório',
       category: 'quarto',
       x: livingW,
-      y: kitchenD,
+      y: wetD,
       width: bedW,
       depth: mainRoomD,
       ceilingHeight: H,
@@ -302,7 +308,7 @@ export function generateParametricUnitLayout(
       name: 'Sala / Dormitório Integrado',
       category: 'sala_quarto',
       x: 0,
-      y: kitchenD,
+      y: wetD,
       width: W,
       depth: mainRoomD,
       ceilingHeight: H,
@@ -426,17 +432,15 @@ export function generateParametricUnitLayout(
     },
   );
 
-  const hasSeparateBedroom = input.bedrooms >= 1 && mainRoomD >= 2.2 && W >= 3.6;
-  const livingW = hasSeparateBedroom ? round2(W * 0.46) : W;
-  const bedW = hasSeparateBedroom ? round2(W - livingW) : 0;
-
   // Optional bedroom dividing wall (Porta de Quarto sempre 0,70m fixo)
+  let wBedId: string | undefined;
+  let p3Offset = 0.18;
   if (hasSeparateBedroom) {
-    const wBedId = `${id}-w-bed`;
+    wBedId = `${id}-w-bed`;
     walls.push({
       id: wBedId,
       code: 'P-INT-DORM',
-      start: { x: livingW, y: kitchenD },
+      start: { x: livingW, y: wetD },
       end: { x: livingW, y: usableD },
       thickness: intT,
       height: H,
@@ -445,6 +449,7 @@ export function generateParametricUnitLayout(
       constructionSystem: sys,
       loadBearing: false,
     });
+    p3Offset = 0.16;
     openings.push({
       id: `${id}-op-p-dorm`,
       code: 'P3',
@@ -453,12 +458,12 @@ export function generateParametricUnitLayout(
       role: 'quarto',
       openingKind: 'porta_abrir',
       subtype: 'Porta de quarto 70x210cm (padrão fixo)',
-      offsetAlongWall: 0.2,
+      offsetAlongWall: p3Offset,
       width: 0.7,
       height: 2.1,
       sillHeight: 0,
       thickness: 0.035,
-      swingDirection: 'right_in',
+      swingDirection: 'right_out', // Abre para dentro do dormitório (+X), liberando a Sala
       material: 'Madeira semi-oca pintada',
     });
   }
@@ -484,38 +489,39 @@ export function generateParametricUnitLayout(
   const bathDoorWidth = 0.6;
 
   let entryWallId = wRightId;
-  let entryOffset = round2(Math.max(0.25, kitchenD + 0.25));
+  let entryOffset = round2(Math.min(usableD - entryDoorWidth - 0.16, wetD + 0.18));
   let entrySwing: Opening['swingDirection'] = 'left_in';
 
   if (entrySide === 'lateral_esquerda') {
     entryWallId = wLeftId; // (0, usableD) -> (0, 0)
-    entryOffset = round2(Math.max(0.18, usableD - (kitchenD + 0.25 + entryDoorWidth)));
+    entryOffset = round2(Math.max(0.16, usableD - (wetD + 0.18 + entryDoorWidth)));
     entrySwing = 'right_in';
   } else if (entrySide === 'frente') {
     entryWallId = wBottomId; // (W, usableD) -> (0, usableD)
     if (hasSeparateBedroom) {
       // Coloca P1 no canto inferior esquerdo da Sala de Estar (x: 0.16..0.96)
-      entryOffset = round2(Math.max(bedW + 0.2, W - 0.96));
+      entryOffset = round2(Math.max(bedW + 0.16, W - 0.96));
     } else {
-      // Coloca P1 no canto inferior direito (x: W-1.00..W-0.20)
-      entryOffset = 0.2;
+      // Coloca P1 no canto inferior direito (x: W-0.96..W-0.16)
+      entryOffset = 0.16;
     }
     entrySwing = 'left_in';
   }
 
-  let mainWinOffset = round2(Math.max(0.3, (W - 1.5) / 2));
-  let mainWinWidth = Math.min(1.6, round2(W - 0.8));
+  let mainWinOffset = round2(Math.max(0.28, (W - 1.5) / 2));
+  let mainWinWidth = Math.min(1.5, round2(W - 0.72));
   if (entrySide === 'frente') {
     if (hasSeparateBedroom) {
-      mainWinWidth = round2(Math.min(1.3, Math.max(0.8, bedW - 0.55)));
-      mainWinOffset = round2(Math.max(0.2, (bedW - mainWinWidth) / 2));
+      mainWinWidth = round2(Math.min(1.25, Math.max(0.8, bedW - 0.48)));
+      mainWinOffset = round2(Math.max(0.18, (bedW - mainWinWidth) / 2));
     } else {
-      const maxWinSpace = Math.max(0.8, round2(W - 1.35));
-      mainWinWidth = round2(Math.min(1.35, maxWinSpace));
-      mainWinOffset = round2(entryOffset + entryDoorWidth + 0.24);
+      const maxWinSpace = Math.max(0.75, round2(W - 1.32));
+      mainWinWidth = round2(Math.min(1.3, maxWinSpace));
+      mainWinOffset = round2(entryOffset + entryDoorWidth + 0.22);
     }
   }
 
+  const bathDoorOffset = round2(Math.max(0.56, bathW - bathDoorWidth - 0.1));
   openings.push(
     {
       id: `${id}-op-entry`,
@@ -541,12 +547,13 @@ export function generateParametricUnitLayout(
       role: 'banheiro',
       openingKind: 'porta_abrir',
       subtype: 'Porta de banheiro 60x210cm (padrão fixo)',
-      offsetAlongWall: round2(Math.max(0.68, bathW - bathDoorWidth - 0.12)),
+      offsetAlongWall: bathDoorOffset,
       width: bathDoorWidth,
       height: 2.1,
       sillHeight: 0,
       thickness: 0.035,
-      swingDirection: 'right_in',
+      // Abre para dentro do BWC (quando não-PNE) liberando integralmente a circulação externa
+      swingDirection: input.accessible ? 'right_in' : 'right_out',
       material: 'Madeira resistente à umidade',
     },
     {
@@ -571,7 +578,7 @@ export function generateParametricUnitLayout(
       type: 'janela',
       openingKind: 'vitro_basculante',
       subtype: 'Vitrô basculante banheiro',
-      offsetAlongWall: round2(Math.max(0.2, (bathW - 0.6) / 2)),
+      offsetAlongWall: round2(Math.max(0.18, (bathW - 0.6) / 2)),
       width: 0.6,
       height: 0.6,
       sillHeight: 1.6,
@@ -586,8 +593,8 @@ export function generateParametricUnitLayout(
       type: 'janela',
       openingKind: 'janela_correr',
       subtype: 'Janela cozinha de correr',
-      offsetAlongWall: round2(bathW + Math.max(0.25, (kitchenW - 1.0) / 2)),
-      width: Math.min(1.0, round2(kitchenW - 0.4)),
+      offsetAlongWall: round2(bathW + Math.max(0.22, (kitchenW - 0.95) / 2)),
+      width: Math.min(0.95, round2(Math.max(0.55, kitchenW - 0.4))),
       height: 0.9,
       sillHeight: 1.25,
       thickness: 0.06,
@@ -596,10 +603,74 @@ export function generateParametricUnitLayout(
     },
   );
 
-  // 4. Furniture & Sanitary Fixtures (meticulously planned, zero-clash ergonomics)
-  const boxW = round2(Math.min(0.88, bathW * 0.48));
-  const boxD = 0.85;
-  const lavY = round2(Math.max(boxD + 0.16, bathD - 0.48));
+  // 4. Planejamento Ergonômico e Anti-Colisão de Mobiliário e Circulação
+  // Helper geométrico interno: reserva zonas de abertura (P1/P2/P3), corredores de passagem e escada ANTES de locar móveis
+  interface Box2 {
+    x: number;
+    y: number;
+    width: number;
+    depth: number;
+  }
+  const boxesOverlap = (a: Box2, b: Box2, tol = 0.015): boolean =>
+    a.x + tol < b.x + b.width &&
+    a.x + a.width - tol > b.x &&
+    a.y + tol < b.y + b.depth &&
+    a.y + a.depth - tol > b.y;
+  const padBox = (r: Box2, p: number): Box2 => ({
+    x: r.x - p,
+    y: r.y - p,
+    width: r.width + p * 2,
+    depth: r.depth + p * 2,
+  });
+
+  // Zonas livres obrigatórias nas soleiras e arcos de porta
+  const reservedZones: Box2[] = [];
+
+  // P1 zona de varredura + área de desembarque interna (0,90 x 0,90m)
+  const p1KeepClear: Box2 =
+    entrySide === 'lateral_direita'
+      ? { x: W - 1.0, y: wetD + 0.12, width: 0.92, depth: 1.0 }
+      : entrySide === 'lateral_esquerda'
+        ? { x: 0.08, y: wetD + 0.12, width: 0.92, depth: 1.0 }
+        : hasSeparateBedroom
+          ? { x: 0.12, y: usableD - 0.98, width: 0.98, depth: 0.92 }
+          : { x: W - 1.08, y: usableD - 0.98, width: 0.98, depth: 0.92 };
+  reservedZones.push(p1KeepClear);
+
+  // P2 zona externa e interna do BWC (mínimo 0,62m livre à frente da porta fora e dentro)
+  const p2OutsideThreshold: Box2 = {
+    x: round2(Math.max(0.06, bathDoorOffset - 0.08)),
+    y: bathD,
+    width: bathDoorWidth + 0.16,
+    depth: 0.65,
+  };
+  reservedZones.push(p2OutsideThreshold);
+
+  // Corredor reto desobstruído ligando P1 à Cozinha/BWC (mín. 0,65m)
+  const p1ToWetAisle: Box2 =
+    entrySide === 'lateral_direita'
+      ? { x: bathW + 0.05, y: wetD - 0.1, width: Math.min(1.0, kitchenW - 0.66), depth: 1.1 }
+      : entrySide === 'lateral_esquerda'
+        ? { x: 0.1, y: bathD, width: 0.95, depth: 0.85 }
+        : { x: round2(Math.max(0.14, p1KeepClear.x)), y: usableD - 1.25, width: 0.8, depth: 0.45 };
+  reservedZones.push(p1ToWetAisle);
+
+  if (hasSeparateBedroom) {
+    // P3 abre para dentro do DORM (+X): manter livre o quadrante de abertura e a soleira na Sala
+    reservedZones.push(
+      { x: livingW - 0.72, y: wetD + 0.1, width: 0.72, depth: 0.95 }, // Soleira na Sala
+      { x: livingW + 0.05, y: wetD + 0.08, width: 0.82, depth: 0.95 }, // Folha no Dormitório
+    );
+  }
+
+  // 4A. Banheiro (sem colisão com P2 e com circulação central desobstruída)
+  const boxW = round2(Math.min(0.84, Math.max(0.7, bathW * 0.48)));
+  const boxD = 0.82;
+  const vasoW = 0.4;
+  const vasoD = 0.62;
+  const lavW = round2(Math.min(0.48, Math.max(0.4, bathDoorOffset - 0.16)));
+  const lavD = 0.38;
+  const lavY = round2(Math.max(boxD + 0.14, bathD - lavD - 0.08));
 
   furniture.push(
     {
@@ -607,8 +678,8 @@ export function generateParametricUnitLayout(
       name: 'Box Vidro Temperado + Ralo Linear',
       category: 'box',
       roomId: bathRoomId,
-      x: 0.08,
-      y: 0.08,
+      x: 0.06,
+      y: 0.06,
       width: boxW,
       depth: boxD,
       height: 1.95,
@@ -621,7 +692,7 @@ export function generateParametricUnitLayout(
       name: 'Ducha / Misturador BWC',
       category: 'chuveiro',
       roomId: bathRoomId,
-      x: round2(0.08 + boxW / 2 - 0.11),
+      x: round2(0.06 + boxW / 2 - 0.11),
       y: 0.1,
       width: 0.22,
       depth: 0.22,
@@ -634,10 +705,10 @@ export function generateParametricUnitLayout(
       name: 'Bacia Sanitária c/ Caixa Acoplada',
       category: 'vaso_sanitario',
       roomId: bathRoomId,
-      x: round2(Math.max(boxW + 0.18, bathW - 0.48)),
-      y: 0.1,
-      width: 0.4,
-      depth: 0.64,
+      x: round2(Math.max(0.06 + boxW + 0.08, bathW - vasoW - 0.08)),
+      y: 0.08,
+      width: vasoW,
+      depth: vasoD,
       height: 0.78,
       rotationDeg: 0,
       requiresWater: true,
@@ -648,10 +719,10 @@ export function generateParametricUnitLayout(
       name: 'Gabinete c/ Cuba e Torneira BWC',
       category: 'lavatorio',
       roomId: bathRoomId,
-      x: 0.1,
+      x: 0.08,
       y: lavY,
-      width: 0.52,
-      depth: 0.4,
+      width: lavW,
+      depth: lavD,
       height: 0.85,
       rotationDeg: 0,
       requiresWater: true,
@@ -662,22 +733,32 @@ export function generateParametricUnitLayout(
       name: 'Espelho Lapidado BWC',
       category: 'espelho',
       roomId: bathRoomId,
-      x: 0.12,
-      y: round2(lavY + 0.34),
-      width: 0.48,
+      x: 0.1,
+      y: round2(lavY + lavD - 0.05),
+      width: round2(Math.max(0.34, lavW - 0.04)),
       depth: 0.03,
       height: 0.72,
       rotationDeg: 0,
     },
+  );
+
+  // 4B. Cozinha e Área de Serviço (corredor >= 0.85m desobstruído ao lado da bancada e lavanderia)
+  const fridgeW = 0.6;
+  const fridgeD = 0.6;
+  const bancadaW = round2(Math.min(1.4, Math.max(0.84, kitchenW - 0.8)));
+  const bancadaD = 0.56;
+  const cooktopW = round2(Math.min(0.48, Math.max(0.38, bancadaW * 0.42)));
+
+  furniture.push(
     {
       id: `${id}-fur-bancada`,
       name: 'Bancada Granito c/ Cuba Inox e Torneira',
       category: 'bancada',
       roomId: kitchenRoomId,
-      x: round2(bathW + 0.1),
+      x: round2(bathW + 0.08),
       y: 0.08,
-      width: round2(Math.min(1.45, Math.max(0.95, kitchenW - 0.82))),
-      depth: 0.58,
+      width: bancadaW,
+      depth: bancadaD,
       height: 0.9,
       rotationDeg: 0,
       requiresWater: true,
@@ -688,9 +769,9 @@ export function generateParametricUnitLayout(
       name: 'Cooktop 2 Bocas Indução/Gás',
       category: 'cooktop',
       roomId: kitchenRoomId,
-      x: round2(bathW + 0.1 + Math.min(1.45, Math.max(0.95, kitchenW - 0.82)) - 0.56),
+      x: round2(bathW + 0.08 + bancadaW - cooktopW - 0.06),
       y: 0.16,
-      width: 0.5,
+      width: cooktopW,
       depth: 0.36,
       height: 0.08,
       rotationDeg: 0,
@@ -701,10 +782,10 @@ export function generateParametricUnitLayout(
       name: 'Refrigerador Frost Free',
       category: 'geladeira',
       roomId: kitchenRoomId,
-      x: round2(W - 0.72),
+      x: round2(W - fridgeW - 0.08),
       y: 0.08,
-      width: 0.62,
-      depth: 0.62,
+      width: fridgeW,
+      depth: fridgeD,
       height: 1.75,
       rotationDeg: 0,
       requiresPower: true,
@@ -712,18 +793,21 @@ export function generateParametricUnitLayout(
   );
 
   if (input.hasLaundry) {
+    // Aparelhos alinhados à parede direita (voltados para Oeste), preservando corredor reto >= 0,85m junto à parede do BWC
+    const tanqueY = 0.76;
+    const maqY = 1.32;
     furniture.push(
       {
         id: `${id}-fur-tanque`,
         name: 'Tanque Inox / Louça c/ Torneira',
         category: 'tanque',
         roomId: laundryRoomId,
-        x: round2(bathW + 0.12),
-        y: round2(kDepth * 0.65 + 0.04),
-        width: 0.52,
+        x: round2(W - 0.56),
+        y: tanqueY,
+        width: 0.48,
         depth: 0.48,
         height: 0.85,
-        rotationDeg: 0,
+        rotationDeg: 270,
         requiresWater: true,
         requiresDrain: true,
       },
@@ -732,12 +816,12 @@ export function generateParametricUnitLayout(
         name: 'Máquina de Lavar Roupas',
         category: 'maquina_lavar',
         roomId: laundryRoomId,
-        x: round2(W - 0.68),
-        y: round2(kDepth * 0.65 + 0.04),
-        width: 0.58,
-        depth: 0.56,
+        x: round2(W - 0.62),
+        y: maqY,
+        width: 0.54,
+        depth: 0.54,
         height: 0.88,
-        rotationDeg: 0,
+        rotationDeg: 270,
         requiresPower: true,
         requiresWater: true,
         requiresDrain: true,
@@ -745,262 +829,24 @@ export function generateParametricUnitLayout(
     );
   }
 
-  if (hasSeparateBedroom) {
-    const rackX = entrySide === 'lateral_esquerda' && mainRoomD < 4.1 ? 0.5 : 0.14;
-    const rackY =
-      entrySide === 'frente'
-        ? round2(kitchenD + 0.74)
-        : entrySide === 'lateral_esquerda' && mainRoomD >= 4.1
-          ? round2(kitchenD + 1.2)
-          : round2(kitchenD + 0.85);
-    const sofaY =
-      entrySide === 'frente'
-        ? round2(kitchenD + 1.58)
-        : entrySide === 'lateral_esquerda' && mainRoomD >= 4.1
-          ? round2(kitchenD + 1.95)
-          : round2(kitchenD + 1.8);
-    const mesaX = entrySide === 'frente' ? round2(Math.max(1.06, livingW - 0.64)) : 0.14;
-    const mesaY = entrySide === 'frente' ? round2(usableD - 1.15) : round2(usableD - 0.68);
-    const mesaW = entrySide === 'frente' ? 0.5 : 1.0;
-    const mesaD = entrySide === 'frente' ? 0.95 : 0.52;
-    const cadeiraX = entrySide === 'frente' ? round2(Math.max(1.06, livingW - 0.6)) : 0.42;
-    const cadeiraY = entrySide === 'frente' ? round2(usableD - 1.66) : round2(usableD - 1.2);
-
-    furniture.push(
-      {
-        id: `${id}-fur-cama`,
-        name: 'Cama Casal Padrão c/ Cabeceira',
-        category: 'cama',
-        roomId: bedroomRoomId,
-        x: round2(W - 1.48),
-        y: round2(usableD - 2.0),
-        width: 1.38,
-        depth: 1.88,
-        height: 0.54,
-        rotationDeg: 0,
-      },
-      {
-        id: `${id}-fur-criado`,
-        name: 'Mesa de Cabeceira',
-        category: 'mesa_cabeceira',
-        roomId: bedroomRoomId,
-        x: round2(Math.max(livingW + 0.14, W - 1.98)),
-        y: round2(usableD - 1.98),
-        width: 0.42,
-        depth: 0.38,
-        height: 0.52,
-        rotationDeg: 0,
-      },
-      {
-        id: `${id}-fur-armario`,
-        name: 'Guarda-Roupa 2 Portas de Correr',
-        category: 'guarda_roupa',
-        roomId: bedroomRoomId,
-        x: round2(W - 1.32),
-        y: round2(kitchenD + 1.35),
-        width: 1.2,
-        depth: 0.54,
-        height: 2.15,
-        rotationDeg: 0,
-      },
-      {
-        id: `${id}-fur-rack`,
-        name: 'Rack Painel TV Sala',
-        category: 'rack_tv',
-        roomId: mainRoomId,
-        x: rackX,
-        y: rackY,
-        width: Math.min(1.15, round2(livingW - rackX - 0.2)),
-        depth: 0.35,
-        height: 0.52,
-        rotationDeg: 0,
-      },
-      {
-        id: `${id}-fur-tv`,
-        name: 'Smart TV 43" + Ponto Antena/HDMI',
-        category: 'tv',
-        roomId: mainRoomId,
-        x: round2(rackX + 0.08),
-        y: round2(rackY + 0.04),
-        width: Math.min(0.96, round2(livingW - rackX - 0.36)),
-        depth: 0.06,
-        height: 0.56,
-        rotationDeg: 0,
-        requiresPower: true,
-      },
-      {
-        id: `${id}-fur-sofa`,
-        name: 'Sofá Retrátil 2 Lugares',
-        category: 'sofa',
-        roomId: mainRoomId,
-        x: 0.14,
-        y: sofaY,
-        width: Math.min(1.35, round2(livingW - 0.3)),
-        depth: 0.75,
-        height: 0.82,
-        rotationDeg: 0,
-      },
-      {
-        id: `${id}-fur-mesa`,
-        name: 'Mesa Refeições / Home Office',
-        category: 'mesa',
-        roomId: mainRoomId,
-        x: mesaX,
-        y: mesaY,
-        width: mesaW,
-        depth: mesaD,
-        height: 0.75,
-        rotationDeg: 0,
-      },
-      {
-        id: `${id}-fur-cadeira`,
-        name: 'Cadeira Ergonômica',
-        category: 'cadeira',
-        roomId: mainRoomId,
-        x: cadeiraX,
-        y: cadeiraY,
-        width: 0.44,
-        depth: 0.44,
-        height: 0.85,
-        rotationDeg: 0,
-      },
-    );
-  } else {
-    // Integrated Studio Layout (clear of P2 bathroom swing and P1 entry swing for all 3 entry sides)
-    const isLeftEntry = entrySide === 'lateral_esquerda';
-    const isFrontEntry = entrySide === 'frente';
-    const topStartX = round2(bathW + 0.08);
-    const availTopW =
-      entrySide === 'lateral_direita'
-        ? Math.max(1.2, round2(W - topStartX - 0.54))
-        : Math.max(1.2, round2(W - topStartX - 0.14));
-    const rackW = round2(Math.min(0.92, availTopW * 0.47));
-    const wardX = round2(topStartX + rackW + 0.06);
-    const wardW = round2(Math.min(1.05, Math.max(0.6, availTopW - rackW - 0.06)));
-    const tvW = round2(Math.min(0.84, rackW - 0.08));
-
-    const bedX = isLeftEntry ? round2(W - 1.5) : 0.12;
-    const criadoX = isLeftEntry ? round2(W - 1.96) : 1.56;
-    const deskX = isLeftEntry
-      ? 0.14
-      : isFrontEntry
-        ? round2(Math.min(1.62, Math.max(1.56, W - 2.1)))
-        : round2(W - 1.15);
-    const deskW = isFrontEntry
-      ? round2(Math.min(0.95, Math.max(0.65, W - 1.06 - deskX)))
-      : 1.02;
-    const chairX = isLeftEntry
-      ? 0.42
-      : isFrontEntry
-        ? round2(deskX + deskW / 2 - 0.22)
-        : round2(W - 0.86);
-
-    furniture.push(
-      {
-        id: `${id}-fur-rack`,
-        name: 'Rack Painel TV / Multimídia',
-        category: 'rack_tv',
-        roomId: mainRoomId,
-        x: topStartX,
-        y: round2(kitchenD + 0.1),
-        width: rackW,
-        depth: 0.35,
-        height: 0.5,
-        rotationDeg: 0,
-      },
-      {
-        id: `${id}-fur-tv`,
-        name: 'Smart TV 43" + Ponto Antena/HDMI',
-        category: 'tv',
-        roomId: mainRoomId,
-        x: round2(topStartX + (rackW - tvW) / 2),
-        y: round2(kitchenD + 0.14),
-        width: tvW,
-        depth: 0.06,
-        height: 0.56,
-        rotationDeg: 0,
-        requiresPower: true,
-      },
-      {
-        id: `${id}-fur-armario`,
-        name: 'Guarda-Roupa 2 Portas de Correr',
-        category: 'guarda_roupa',
-        roomId: mainRoomId,
-        x: wardX,
-        y: round2(kitchenD + 0.1),
-        width: wardW,
-        depth: 0.52,
-        height: 2.15,
-        rotationDeg: 0,
-      },
-      {
-        id: `${id}-fur-cama`,
-        name: 'Cama Casal Padrão c/ Cabeceira',
-        category: 'cama',
-        roomId: mainRoomId,
-        x: bedX,
-        y: round2(usableD - 1.98),
-        width: 1.38,
-        depth: 1.88,
-        height: 0.54,
-        rotationDeg: 0,
-      },
-      {
-        id: `${id}-fur-criado`,
-        name: 'Mesa de Cabeceira',
-        category: 'mesa_cabeceira',
-        roomId: mainRoomId,
-        x: criadoX,
-        y: round2(usableD - 1.98),
-        width: 0.4,
-        depth: 0.36,
-        height: 0.52,
-        rotationDeg: 0,
-      },
-      {
-        id: `${id}-fur-mesa`,
-        name: 'Mesa Refeições / Home Office',
-        category: 'mesa',
-        roomId: mainRoomId,
-        x: deskX,
-        y: round2(usableD - 0.64),
-        width: deskW,
-        depth: 0.52,
-        height: 0.75,
-        rotationDeg: 0,
-      },
-      {
-        id: `${id}-fur-cadeira`,
-        name: 'Cadeira Ergonômica',
-        category: 'cadeira',
-        roomId: mainRoomId,
-        x: chairX,
-        y: round2(usableD - 1.16),
-        width: 0.44,
-        depth: 0.44,
-        height: 0.85,
-        rotationDeg: 0,
-      },
-    );
-
-    if (mainRoomD >= 3.85) {
-      furniture.push({
-        id: `${id}-fur-sofa`,
-        name: 'Sofá Compacto 2 Lugares',
-        category: 'sofa',
-        roomId: mainRoomId,
-        x: isLeftEntry ? 0.14 : round2(W - 1.4),
-        y: round2(kitchenD + 1.35),
-        width: 1.28,
-        depth: 0.7,
-        height: 0.82,
-        rotationDeg: 0,
-      });
-    }
-  }
-
-  // 4B. Mezanino Condicional (apenas se pé-direito >= 3,00m — nunca conta como pavimento)
+  // 4C. Mezanino Condicional — reserva a caixa da escada ANTES do mobiliário térreo para nunca sobrepor nada
   let mezzanine: MezzanineConfig | undefined;
+  let stairReservation: {
+    x: number;
+    y: number;
+    width: number;
+    depth: number;
+    elevationM: number;
+    slabThicknessM: number;
+    mezzX: number;
+    mezzY: number;
+    mezzW: number;
+    mezzD: number;
+    mezzClearH: number;
+    usage: MezzanineUsage;
+    stairSpec: ReturnType<typeof computeBlondelStairSpec>;
+  } | null = null;
+
   if (hasMezzanine) {
     const mezzZone: MezzanineZone = input.mezzanineZone ?? 'sobre_banho_cozinha';
     const slabThicknessM = 0.12;
@@ -1020,9 +866,9 @@ export function generateParametricUnitLayout(
       input.mezzanineStairSide ?? (entrySide === 'lateral_direita' ? 'esquerda' : 'direita');
 
     let mezzX = 0.08;
-    let mezzY = 0.08;
+    const mezzY = 0.08;
     let mezzW = round2(W - 0.16);
-    let mezzD = round2(Math.min(usableD - 1.35, Math.max(kitchenD + 0.25, usableD * coverageRatio)));
+    let mezzD = round2(Math.min(usableD - 1.35, Math.max(wetD + 0.2, usableD * coverageRatio)));
 
     if (mezzZone === 'lateral_esquerda') {
       mezzW = round2(Math.max(1.65, (W - 0.16) * Math.min(0.58, coverageRatio + 0.08)));
@@ -1088,41 +934,38 @@ export function generateParametricUnitLayout(
     // Planejamento ergonômico da escada (Fórmula de Blondel 2h + p ≈ 0,635m)
     const stairSpec = computeBlondelStairSpec(elevationM, stairLayout, 'norte');
     const stairW = stairSpec.footprintW;
-    const stairD = Math.min(stairSpec.footprintD, round2(Math.max(1.4, usableD - kitchenD - 0.35)));
-    let stairX = stairSide === 'esquerda' ? 0.12 : round2(W - stairW - 0.12);
-    let stairY =
-      mezzZone === 'sobre_banho_cozinha' || mezzZone === 'fundos'
-        ? round2(Math.min(usableD - stairD - 0.14, Math.max(kitchenD + 0.14, mezzY + mezzD - 0.25)))
-        : round2(Math.min(usableD - stairD - 0.14, kitchenD + 0.18));
+    const stairD = Math.min(stairSpec.footprintD, round2(Math.max(1.35, usableD - wetD - 0.35)));
+    const stairX = stairSide === 'esquerda' ? 0.1 : round2(W - stairW - 0.1);
+    let stairY = round2(Math.min(usableD - stairD - 0.12, Math.max(wetD + 0.16, mezzY + mezzD - 0.2)));
 
-    // Garante que a escada não bloqueie a porta de entrada P1 nem a porta do banheiro P2
-    if (entrySide === 'lateral_direita' && stairSide === 'direita') {
-      stairY = round2(Math.min(usableD - stairD - 0.14, Math.max(kitchenD + 1.18, stairY)));
-    } else if (entrySide === 'lateral_esquerda' && stairSide === 'esquerda') {
-      stairY = round2(Math.min(usableD - stairD - 0.14, Math.max(kitchenD + 1.18, stairY)));
-    } else if (entrySide === 'frente' && stairY + stairD > usableD - 0.52) {
-      stairY = round2(Math.max(kitchenD + 0.12, usableD - stairD - 0.56));
+    // Ajusta Y para nunca invadir P1 nem a soleira de P2
+    const minYForP2 = stairX < bathW ? bathD + 0.68 : wetD + 0.14;
+    stairY = round2(Math.max(minYForP2, stairY));
+    if (
+      (entrySide === 'lateral_direita' && stairSide === 'direita') ||
+      (entrySide === 'lateral_esquerda' && stairSide === 'esquerda')
+    ) {
+      stairY = round2(Math.min(usableD - stairD - 0.12, Math.max(wetD + 1.15, stairY)));
+    } else if (entrySide === 'frente' && stairY + stairD > usableD - 0.95) {
+      stairY = round2(Math.max(wetD + 0.12, usableD - stairD - 1.0));
     }
 
-    // Remove/reposiciona móveis térreos que conflitem com a projeção da escada no térreo
-    const keepSafeFurniture: FurnitureItem[] = [];
-    const wetCategories = new Set(['box', 'chuveiro', 'vaso_sanitario', 'lavatorio', 'espelho', 'bancada', 'cooktop', 'geladeira', 'tanque', 'maquina_lavar']);
-    for (const f of furniture) {
-      if (wetCategories.has(f.category)) {
-        keepSafeFurniture.push(f);
-        continue;
-      }
-      const overlapsStair =
-        f.x < stairX + stairW + 0.08 &&
-        f.x + f.width > stairX - 0.08 &&
-        f.y < stairY + stairD + 0.08 &&
-        f.y + f.depth > stairY - 0.08;
-      if (!overlapsStair) {
-        keepSafeFurniture.push(f);
-      }
-    }
-    furniture.length = 0;
-    furniture.push(...keepSafeFurniture);
+    stairReservation = {
+      x: stairX,
+      y: stairY,
+      width: stairW,
+      depth: stairD,
+      elevationM,
+      slabThicknessM,
+      mezzX,
+      mezzY,
+      mezzW,
+      mezzD,
+      mezzClearH,
+      usage,
+      stairSpec,
+    };
+    reservedZones.push(padBox({ x: stairX, y: stairY, width: stairW, depth: stairD }, 0.12));
 
     furniture.push({
       id: `${id}-fur-escada`,
@@ -1138,9 +981,488 @@ export function generateParametricUnitLayout(
       rotationDeg: 0,
       stairSpec,
     });
+  }
 
+  // 4D. Colocação verificada de móveis (sempre sem sobreposição, respeitando portas e passagem >= 0.55m)
+  const placedBoxes: Box2[] = [...reservedZones];
+  const tryCommitFurniture = (
+    item: FurnitureItem,
+    bounds: { minX: number; maxX: number; minY: number; maxY: number },
+    clearanceZone?: Box2,
+  ): boolean => {
+    const rot = ((item.rotationDeg % 360) + 360) % 360;
+    const w = rot === 90 || rot === 270 ? item.depth : item.width;
+    const d = rot === 90 || rot === 270 ? item.width : item.depth;
+    const box: Box2 = { x: item.x, y: item.y, width: w, depth: d };
+    if (
+      box.x < bounds.minX - 0.005 ||
+      box.y < bounds.minY - 0.005 ||
+      box.x + box.width > bounds.maxX + 0.005 ||
+      box.y + box.depth > bounds.maxY + 0.005
+    ) {
+      return false;
+    }
+    if (placedBoxes.some((b) => boxesOverlap(box, b, 0.02))) {
+      return false;
+    }
+    if (clearanceZone && placedBoxes.some((b) => boxesOverlap(clearanceZone, b, 0.02))) {
+      return false;
+    }
+    furniture.push(item);
+    placedBoxes.push(box);
+    if (clearanceZone) {
+      placedBoxes.push(clearanceZone);
+    }
+    return true;
+  };
+
+  if (hasSeparateBedroom) {
+    // --- DORMITÓRIO PRIVATIVO (x: livingW .. W, y: wetD .. usableD) ---
+    const dormBounds = {
+      minX: round2(livingW + 0.08),
+      maxX: round2(W - 0.08),
+      minY: round2(wetD + 0.08),
+      maxY: round2(usableD - 0.08),
+    };
+    const dormAvailW = dormBounds.maxX - dormBounds.minX;
+    const dormAvailD = dormBounds.maxY - dormBounds.minY;
+
+    // Tentativa 1: Cama vertical na quina inferior direita (1.38 x 1.88);
+    // Tentativa 2: Cama rotacionada horizontal se quarto compacto em profundidade (1.88 x 1.38)
+    const bedVertOk =
+      dormAvailD >= 2.45 &&
+      tryCommitFurniture({
+        id: `${id}-fur-cama`,
+        name: 'Cama Casal Padrão c/ Cabeceira',
+        category: 'cama',
+        roomId: bedroomRoomId,
+        x: round2(dormBounds.maxX - 1.38),
+        y: round2(dormBounds.maxY - 1.88),
+        width: 1.38,
+        depth: 1.88,
+        height: 0.54,
+        rotationDeg: 0,
+      }, dormBounds);
+
+    let bedPlacedBox: Box2 | null = bedVertOk
+      ? { x: round2(dormBounds.maxX - 1.38), y: round2(dormBounds.maxY - 1.88), width: 1.38, depth: 1.88 }
+      : null;
+
+    if (!bedPlacedBox) {
+      const horizW = Math.min(1.88, round2(dormAvailW - 0.04));
+      const horizD = 1.38;
+      if (
+        tryCommitFurniture({
+          id: `${id}-fur-cama`,
+          name: 'Cama Casal Padrão c/ Cabeceira',
+          category: 'cama',
+          roomId: bedroomRoomId,
+          x: round2(dormBounds.maxX - horizW),
+          y: round2(dormBounds.maxY - horizD),
+          width: horizD,
+          depth: horizW,
+          height: 0.54,
+          rotationDeg: 90,
+        }, dormBounds)
+      ) {
+        bedPlacedBox = { x: round2(dormBounds.maxX - horizW), y: round2(dormBounds.maxY - horizD), width: horizW, depth: horizD };
+      }
+    }
+
+    // Mesa de cabeceira ao lado da cama (somente se não fechar corredor mínimo de 0,50m)
+    if (bedPlacedBox) {
+      const candCriado: Array<{ x: number; y: number }> = [
+        { x: round2(bedPlacedBox.x - 0.44), y: round2(bedPlacedBox.y) },
+        { x: round2(bedPlacedBox.x), y: round2(bedPlacedBox.y - 0.42) },
+      ];
+      for (const cc of candCriado) {
+        if (
+          tryCommitFurniture({
+            id: `${id}-fur-criado`,
+            name: 'Mesa de Cabeceira',
+            category: 'mesa_cabeceira',
+            roomId: bedroomRoomId,
+            x: cc.x,
+            y: cc.y,
+            width: 0.4,
+            depth: 0.36,
+            height: 0.52,
+            rotationDeg: 0,
+          }, dormBounds)
+        ) {
+          break;
+        }
+      }
+    }
+
+    // Guarda-roupa no Dormitório: busca encosto superior ou parede leste longe da cama e de P3
+    const wardCandidates: Array<{ x: number; y: number; w: number; d: number; rot: number }> = [
+      {
+        x: round2(Math.max(livingW + 0.88, dormBounds.maxX - 1.15)),
+        y: dormBounds.minY,
+        w: round2(Math.min(1.15, dormBounds.maxX - (livingW + 0.88))),
+        d: 0.52,
+        rot: 0,
+      },
+      {
+        x: round2(dormBounds.maxX - 0.52),
+        y: dormBounds.minY,
+        w: 0.52,
+        d: round2(Math.min(1.15, dormAvailD * 0.42)),
+        rot: 90,
+      },
+      {
+        x: dormBounds.minX,
+        y: round2(Math.max(wetD + 1.05, dormBounds.maxY - 1.1)),
+        w: 0.5,
+        d: 1.0,
+        rot: 90,
+      },
+    ];
+    for (const wc of wardCandidates) {
+      if (wc.w < 0.46 || wc.d < 0.46) continue;
+      if (
+        tryCommitFurniture({
+          id: `${id}-fur-armario`,
+          name: 'Guarda-Roupa 2 Portas de Correr',
+          category: 'guarda_roupa',
+          roomId: bedroomRoomId,
+          x: wc.x,
+          y: wc.y,
+          width: wc.rot === 90 ? wc.d : wc.w,
+          depth: wc.rot === 90 ? wc.w : wc.d,
+          height: 2.15,
+          rotationDeg: wc.rot,
+        }, dormBounds)
+      ) {
+        break;
+      }
+    }
+
+    // --- SALA DE ESTAR (x: 0 .. livingW, y: wetD .. usableD) ---
+    const salaBounds = {
+      minX: 0.1,
+      maxX: round2(livingW - 0.1),
+      minY: round2(wetD + 0.08),
+      maxY: round2(usableD - 0.08),
+    };
+    const sofaW = round2(Math.min(1.32, Math.max(1.05, (salaBounds.maxX - salaBounds.minX) - 0.25)));
+    const rackW = round2(Math.min(1.1, sofaW));
+    const sofaCandidates = [
+      { x: salaBounds.minX, y: round2(wetD + 1.55) },
+      { x: salaBounds.minX, y: round2(usableD - 0.88) },
+      { x: round2(salaBounds.maxX - sofaW), y: round2(usableD - 1.5) },
+      { x: salaBounds.minX, y: round2(wetD + 0.85) },
+    ];
+    let placedSofa: Box2 | null = null;
+    for (const sc of sofaCandidates) {
+      if (
+        tryCommitFurniture({
+          id: `${id}-fur-sofa`,
+          name: 'Sofá Retrátil 2 Lugares',
+          category: 'sofa',
+          roomId: mainRoomId,
+          x: sc.x,
+          y: sc.y,
+          width: sofaW,
+          depth: 0.72,
+          height: 0.82,
+          rotationDeg: 0,
+        }, salaBounds)
+      ) {
+        placedSofa = { x: sc.x, y: sc.y, width: sofaW, depth: 0.72 };
+        break;
+      }
+    }
+
+    const rackCandidates = placedSofa
+      ? [
+          { x: placedSofa.x, y: round2(placedSofa.y - 0.92) },
+          { x: placedSofa.x, y: round2(placedSofa.y + 1.02) },
+          { x: salaBounds.minX, y: round2(wetD + 0.72) },
+        ]
+      : [{ x: salaBounds.minX, y: round2(wetD + 0.72) }];
+    for (const rc of rackCandidates) {
+      if (
+        tryCommitFurniture({
+          id: `${id}-fur-rack`,
+          name: 'Rack Painel TV Sala',
+          category: 'rack_tv',
+          roomId: mainRoomId,
+          x: rc.x,
+          y: rc.y,
+          width: rackW,
+          depth: 0.34,
+          height: 0.52,
+          rotationDeg: 0,
+        }, salaBounds)
+      ) {
+        const tvW = round2(Math.min(0.92, rackW - 0.12));
+        furniture.push({
+          id: `${id}-fur-tv`,
+          name: 'Smart TV 43" + Ponto Antena/HDMI',
+          category: 'tv',
+          roomId: mainRoomId,
+          x: round2(rc.x + (rackW - tvW) / 2),
+          y: round2(rc.y + 0.04),
+          width: tvW,
+          depth: 0.06,
+          height: 0.56,
+          rotationDeg: 0,
+          requiresPower: true,
+        });
+        break;
+      }
+    }
+
+    const deskSlotsSala = [
+      { x: salaBounds.minX, y: round2(salaBounds.maxY - 0.52), w: 0.92, d: 0.48, cx: salaBounds.minX + 0.24, cy: round2(salaBounds.maxY - 1.0) },
+      { x: round2(salaBounds.maxX - 0.5), y: round2(salaBounds.maxY - 0.96), w: 0.48, d: 0.9, cx: round2(salaBounds.maxX - 0.98), cy: round2(salaBounds.maxY - 0.72) },
+    ];
+    for (const ds of deskSlotsSala) {
+      if (
+        tryCommitFurniture({
+          id: `${id}-fur-mesa`,
+          name: 'Mesa Refeições / Home Office',
+          category: 'mesa',
+          roomId: mainRoomId,
+          x: ds.x,
+          y: ds.y,
+          width: ds.w,
+          depth: ds.d,
+          height: 0.75,
+          rotationDeg: 0,
+        }, salaBounds)
+      ) {
+        tryCommitFurniture({
+          id: `${id}-fur-cadeira`,
+          name: 'Cadeira Ergonômica',
+          category: 'cadeira',
+          roomId: mainRoomId,
+          x: ds.cx,
+          y: ds.cy,
+          width: 0.44,
+          depth: 0.44,
+          height: 0.85,
+          rotationDeg: 0,
+        }, salaBounds);
+        break;
+      }
+    }
+  } else {
+    // --- ESTÚDIO INTEGRADO (x: 0 .. W, y: wetD .. usableD) ---
+    const studioBounds = {
+      minX: 0.1,
+      maxX: round2(W - 0.1),
+      minY: round2(wetD + 0.08),
+      maxY: round2(usableD - 0.08),
+    };
+    const isLeftEntry = entrySide === 'lateral_esquerda';
+
+    // 1. Cama Casal (prioridade se não houver dormitório no mezanino)
+    const bedPrimaryX = isLeftEntry ? round2(studioBounds.maxX - 1.38) : studioBounds.minX;
+    const bedAltX = isLeftEntry ? studioBounds.minX : round2(studioBounds.maxX - 1.38);
+    const bedCandidates: Array<{ x: number; y: number; w: number; d: number; rot: number }> = [
+      { x: bedPrimaryX, y: round2(studioBounds.maxY - 1.88), w: 1.38, d: 1.88, rot: 0 },
+      { x: bedAltX, y: round2(studioBounds.maxY - 1.88), w: 1.38, d: 1.88, rot: 0 },
+      { x: bedPrimaryX, y: round2(studioBounds.maxY - 1.38), w: 1.38, d: 1.88, rot: 90 },
+    ];
+    let studioBedBox: Box2 | null = null;
+    for (const bc of bedCandidates) {
+      const boxWActual = bc.rot === 90 ? bc.d : bc.w;
+      const clampedX = bc.x + boxWActual > studioBounds.maxX ? round2(studioBounds.maxX - boxWActual) : bc.x;
+      if (
+        tryCommitFurniture({
+          id: `${id}-fur-cama`,
+          name: 'Cama Casal Padrão c/ Cabeceira',
+          category: 'cama',
+          roomId: mainRoomId,
+          x: clampedX,
+          y: bc.y,
+          width: bc.w,
+          depth: bc.d,
+          height: 0.54,
+          rotationDeg: bc.rot,
+        }, studioBounds)
+      ) {
+        studioBedBox = {
+          x: clampedX,
+          y: bc.y,
+          width: bc.rot === 90 ? bc.d : bc.w,
+          depth: bc.rot === 90 ? bc.w : bc.d,
+        };
+        break;
+      }
+    }
+
+    // Mesa de cabeceira adjacente à cama sem bloquear corredor
+    if (studioBedBox) {
+      const criadoX = studioBedBox.x > W * 0.4 ? round2(studioBounds.maxX - studioBedBox.width - 0.42) : round2(studioBedBox.x + studioBedBox.width + 0.04);
+      tryCommitFurniture({
+        id: `${id}-fur-criado`,
+        name: 'Mesa de Cabeceira',
+        category: 'mesa_cabeceira',
+        roomId: mainRoomId,
+        x: criadoX,
+        y: studioBedBox.y,
+        width: 0.38,
+        depth: 0.36,
+        height: 0.52,
+        rotationDeg: 0,
+      }, studioBounds);
+    }
+
+    // 2. Guarda-Roupa (em encosto superior direito/esquerdo longe de P1/P2/escada)
+    const wardW = round2(Math.min(1.08, Math.max(0.75, kitchenW * 0.52)));
+    const wardCandidates: Array<{ x: number; y: number; w: number; d: number; rot: number }> = [
+      { x: round2(W - wardW - 0.14), y: studioBounds.minY, w: wardW, d: 0.52, rot: 0 },
+      { x: round2(bathW + 0.08), y: studioBounds.minY, w: wardW, d: 0.52, rot: 0 },
+      { x: studioBounds.minX, y: round2(bathD + 0.68), w: 0.52, d: 0.96, rot: 90 },
+      { x: round2(studioBounds.maxX - 0.52), y: round2(wetD + 1.12), w: 0.52, d: 0.96, rot: 90 },
+    ];
+    for (const wc of wardCandidates) {
+      if (
+        tryCommitFurniture({
+          id: `${id}-fur-armario`,
+          name: 'Guarda-Roupa 2 Portas de Correr',
+          category: 'guarda_roupa',
+          roomId: mainRoomId,
+          x: wc.x,
+          y: wc.y,
+          width: wc.rot === 90 ? wc.d : wc.w,
+          depth: wc.rot === 90 ? wc.w : wc.d,
+          height: 2.15,
+          rotationDeg: wc.rot,
+        }, studioBounds, {
+          x: wc.x - 0.04,
+          y: wc.y + wc.d,
+          width: wc.w + 0.08,
+          depth: wc.rot === 0 ? 0.35 : 0.05,
+        })
+      ) {
+        break;
+      }
+    }
+
+    // 3. Home Office / Mesa de Refeições + Cadeira (orientada de frente para a mesa)
+    const deskCandidates = [
+      { x: round2(studioBounds.maxX - 0.98), y: round2(studioBounds.maxY - 0.52), w: 0.96, d: 0.5, cx: round2(studioBounds.maxX - 0.72), cy: round2(studioBounds.maxY - 1.0) },
+      { x: studioBounds.minX, y: round2(studioBounds.maxY - 0.52), w: 0.96, d: 0.5, cx: round2(studioBounds.minX + 0.26), cy: round2(studioBounds.maxY - 1.0) },
+      { x: round2(Math.max(studioBounds.minX, W / 2 - 0.46)), y: round2(studioBounds.maxY - 0.52), w: 0.9, d: 0.5, cx: round2(Math.max(studioBounds.minX + 0.22, W / 2 - 0.22)), cy: round2(studioBounds.maxY - 1.0) },
+    ];
+    for (const dc of deskCandidates) {
+      if (
+        tryCommitFurniture({
+          id: `${id}-fur-mesa`,
+          name: 'Mesa Refeições / Home Office',
+          category: 'mesa',
+          roomId: mainRoomId,
+          x: dc.x,
+          y: dc.y,
+          width: dc.w,
+          depth: dc.d,
+          height: 0.75,
+          rotationDeg: 0,
+        }, studioBounds)
+      ) {
+        tryCommitFurniture({
+          id: `${id}-fur-cadeira`,
+          name: 'Cadeira Ergonômica',
+          category: 'cadeira',
+          roomId: mainRoomId,
+          x: dc.cx,
+          y: dc.cy,
+          width: 0.44,
+          depth: 0.44,
+          height: 0.85,
+          rotationDeg: 0,
+        }, studioBounds);
+        break;
+      }
+    }
+
+    // 4. Rack TV + Smart TV
+    const rackW = round2(Math.min(0.95, Math.max(0.75, kitchenW * 0.48)));
+    const rackCandidates = [
+      { x: round2(bathW + 0.08), y: studioBounds.minY },
+      { x: round2(W - rackW - 0.14), y: studioBounds.minY },
+      { x: round2(studioBounds.maxX - rackW), y: round2(wetD + 1.15) },
+    ];
+    for (const rc of rackCandidates) {
+      if (
+        tryCommitFurniture({
+          id: `${id}-fur-rack`,
+          name: 'Rack Painel TV / Multimídia',
+          category: 'rack_tv',
+          roomId: mainRoomId,
+          x: rc.x,
+          y: rc.y,
+          width: rackW,
+          depth: 0.34,
+          height: 0.5,
+          rotationDeg: 0,
+        }, studioBounds)
+      ) {
+        const tvW = round2(Math.min(0.84, rackW - 0.1));
+        furniture.push({
+          id: `${id}-fur-tv`,
+          name: 'Smart TV 43" + Ponto Antena/HDMI',
+          category: 'tv',
+          roomId: mainRoomId,
+          x: round2(rc.x + (rackW - tvW) / 2),
+          y: round2(rc.y + 0.04),
+          width: tvW,
+          depth: 0.06,
+          height: 0.56,
+          rotationDeg: 0,
+          requiresPower: true,
+        });
+        break;
+      }
+    }
+
+    // 5. Sofá Compacto (somente se couber confortavelmente sem fechar a passagem)
+    if (mainRoomD >= 3.2) {
+      const sofaW = 1.24;
+      const sofaCandidates = [
+        { x: isLeftEntry ? studioBounds.minX : round2(studioBounds.maxX - sofaW), y: round2(wetD + 1.25) },
+        { x: round2(studioBounds.maxX - sofaW), y: round2(studioBounds.maxY - 1.78) },
+      ];
+      for (const sc of sofaCandidates) {
+        if (
+          tryCommitFurniture({
+            id: `${id}-fur-sofa`,
+            name: 'Sofá Compacto 2 Lugares',
+            category: 'sofa',
+            roomId: mainRoomId,
+            x: sc.x,
+            y: sc.y,
+            width: sofaW,
+            depth: 0.68,
+            height: 0.82,
+            rotationDeg: 0,
+          }, studioBounds)
+        ) {
+          break;
+        }
+      }
+    }
+  }
+
+  // 4E. Mobiliário elevado no Mezanino (nível +elevationM)
+  if (stairReservation) {
+    const {
+      elevationM,
+      slabThicknessM,
+      mezzX,
+      mezzY,
+      mezzW,
+      mezzD,
+      mezzClearH,
+      usage,
+    } = stairReservation;
+    const mezzRoomId = `${id}-rm-mez`;
     const deckTop = round2(elevationM + slabThicknessM);
-    // Mobiliário superior no mezanino (nível elevado)
     if (usage === 'dormitorio' || usage === 'dormitorio_home_office') {
       const canLongAlongY = mezzD >= 2.05;
       const bedUpperW = canLongAlongY ? Math.min(1.38, round2(mezzW - 0.3)) : Math.min(1.88, round2(mezzW - 0.24));
@@ -1239,10 +1561,10 @@ export function generateParametricUnitLayout(
   }
 
   // 5. Electrical & Special Installations Points (X, Y, Z, circuits, power, CFTV, Antena/TV, Wi-Fi, Dados)
-  const tvPointX = hasSeparateBedroom ? 0.7 : 2.02;
+  const tvPointX = hasSeparateBedroom ? 0.7 : round2(bathW + 0.45);
   const tvRoom = mainRoomId;
   const deskPointX = hasSeparateBedroom ? 0.64 : round2(W - 0.65);
-  const deskPointY = hasSeparateBedroom ? round2(kitchenD + 1.3) : round2(usableD - 0.16);
+  const deskPointY = hasSeparateBedroom ? round2(wetD + 1.3) : round2(usableD - 0.16);
 
   electricalPoints.push(
     {
@@ -1631,11 +1953,11 @@ export function generateParametricUnitLayout(
       category: 'maquina_lavar',
       label: 'Tomada Máquina de Lavar',
       roomId: laundryRoomId,
-      x: round2(W - 0.25),
-      y: round2(kDepth * 0.65 + 0.12),
+      x: round2(W - 0.14),
+      y: 1.54,
       z: 0.9,
       referenceWall: 'P-EXT-L',
-      referenceDistance: round2(kDepth * 0.65 + 0.12),
+      referenceDistance: 1.54,
       powerVA: 1000,
       voltage: 127,
       powerFactor: 0.85,
@@ -1767,8 +2089,8 @@ export function generateParametricUnitLayout(
         category: 'maquina_lavar',
         equipment: 'Máquina de Lavar',
         roomId: laundryRoomId,
-        x: round2(W - 0.45),
-        y: round2(kDepth * 0.65 + 0.1),
+        x: round2(W - 0.14),
+        y: 1.54,
         z: 0.9,
         waterType: 'fria',
         diameterMm: 20,
@@ -1785,8 +2107,8 @@ export function generateParametricUnitLayout(
         category: 'tanque',
         equipment: 'Tanque Área de Serviço',
         roomId: laundryRoomId,
-        x: round2(bathW + 0.36),
-        y: round2(kDepth * 0.65 + 0.1),
+        x: round2(W - 0.14),
+        y: 0.98,
         z: 1.05,
         waterType: 'fria',
         diameterMm: 20,
@@ -1941,8 +2263,8 @@ export function generateParametricUnitLayout(
         code: 'ES-TQ',
         category: 'tanque',
         roomId: laundryRoomId,
-        x: round2(bathW + 0.36),
-        y: round2(kDepth * 0.65 + 0.18),
+        x: round2(W - 0.18),
+        y: 0.98,
         diameterMm: 40,
         material: 'PVC Esgoto SN',
         slopePercent: 2.0,
@@ -1955,8 +2277,8 @@ export function generateParametricUnitLayout(
         code: 'ES-MAQ',
         category: 'maquina_lavar',
         roomId: laundryRoomId,
-        x: round2(W - 0.42),
-        y: round2(kDepth * 0.65 + 0.18),
+        x: round2(W - 0.18),
+        y: 1.54,
         diameterMm: 50,
         material: 'PVC Esgoto SN',
         slopePercent: 2.0,
@@ -2359,6 +2681,32 @@ export function createDefaultDemoProject(): Project {
         left: 'Lote Confrontante Lateral Esquerdo',
         right: 'Lote Confrontante Lateral Direito',
       },
+      boundaries: {
+        front: {
+          condition: 'murada',
+          heightM: 2.0,
+          hasNeighborBuilding: false,
+          notes: 'Muro frontal com portão de acesso',
+        },
+        back: {
+          condition: 'murada',
+          heightM: 2.0,
+          hasNeighborBuilding: false,
+          notes: 'Divisa de fundos',
+        },
+        left: {
+          condition: 'murada',
+          heightM: 2.0,
+          hasNeighborBuilding: false,
+          notes: 'Divisa lateral esquerda',
+        },
+        right: {
+          condition: 'murada',
+          heightM: 2.0,
+          hasNeighborBuilding: false,
+          notes: 'Divisa lateral direita',
+        },
+      },
       setbacks: {
         front: 4.0,
         back: 1.5,
@@ -2547,13 +2895,17 @@ export function createDefaultDemoProject(): Project {
     renderSettings: {
       facadeColor: '#D6D9DF',
       interiorWallColor: '#F3F4F6',
+      wallExteriorFinish: 'textura_acrilica',
+      wallInteriorFinish: 'pintura_fosca',
       floorMaterial: 'porcelanato_cinza',
       roofMaterial: 'termoacustica_zinco',
+      roofShape: 'platibanda',
       windowFrameColor: 'aluminio_preto',
       timeOfDay: 'dia',
       sunAzimuthDeg: 42,
       sunElevationDeg: 52,
       artificialLightsOn: false,
+      renderQuality: 'arquitetonico',
     },
     memorialOverrides: {},
     revisions: [
@@ -2681,10 +3033,10 @@ export function createBlankProject(params: {
       },
       boundaries: {
         front: {
-          condition: 'aberta',
-          heightM: 0,
+          condition: 'murada',
+          heightM: 2.0,
           hasNeighborBuilding: false,
-          notes: 'Testada voltada para a rua',
+          notes: 'Muro frontal com portão de acesso',
         },
         back: {
           condition: 'murada',
@@ -2802,8 +3154,11 @@ export function createBlankProject(params: {
     renderSettings: {
       facadeColor: '#EAECEE',
       interiorWallColor: '#F5F6F8',
+      wallExteriorFinish: 'textura_acrilica',
+      wallInteriorFinish: 'pintura_fosca',
       floorMaterial: 'porcelanato_cinza',
       roofMaterial: 'termoacustica_zinco',
+      roofShape: 'platibanda',
       windowFrameColor: 'aluminio_preto',
       timeOfDay: 'dia',
       sunAzimuthDeg: 42,

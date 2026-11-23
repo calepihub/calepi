@@ -26,6 +26,7 @@ import {
   getLotBoundarySegments,
   normalizeSiteData,
 } from '../engine/implantation';
+import { getBotanicalMeta, getExteriorSurfaceMeta } from '../engine/landscaping';
 import { ElectricalSymbolSvg, FurnitureCadBlock } from './CadArchitecturalSymbols';
 import type { Project, UnitType } from '../types/project';
 
@@ -461,6 +462,9 @@ export const CadSheetPreview: React.FC<CadSheetPreviewProps> = ({
       const sc = Math.min(maxW / Math.max(4, data.totalWidth), maxH / Math.max(4, data.totalHeight));
       const bw = data.totalWidth * sc;
       const bh = data.totalHeight * sc;
+      const roofShape = project.renderSettings.roofShape ?? 'platibanda';
+      const wallTopY = baseY - bh + data.parapetHeight * sc;
+      const ridgeH = Math.max(18, bw * 0.12);
       return (
         <g>
           <text x={ox} y={baseY - bh - 16} fill={pal.unitTag} fontSize="11" fontWeight="bold" fontFamily="monospace">
@@ -469,23 +473,41 @@ export const CadSheetPreview: React.FC<CadSheetPreviewProps> = ({
           <line x1={ox - 24} y1={baseY} x2={ox + bw + 24} y2={baseY} stroke={pal.wallExtStroke} strokeWidth="2.2" />
           <rect
             x={ox}
-            y={baseY - bh}
+            y={roofShape === 'platibanda' || roofShape === 'laje_plana' ? baseY - bh : wallTopY}
             width={bw}
-            height={bh}
+            height={roofShape === 'platibanda' || roofShape === 'laje_plana' ? bh : baseY - wallTopY}
             fill={pal.wallIntFill}
             fillOpacity={0.28}
             stroke={pal.wallExtStroke}
             strokeWidth="1.6"
           />
-          <line
-            x1={ox - 3}
-            y1={baseY - bh + data.parapetHeight * sc}
-            x2={ox + bw + 3}
-            y2={baseY - bh + data.parapetHeight * sc}
-            stroke={pal.axisLine}
-            strokeDasharray="5 2.5"
-            strokeWidth="1"
-          />
+          {roofShape === 'duas_aguas' ? (
+            <polygon
+              points={`${ox - 8},${wallTopY} ${ox + bw / 2},${wallTopY - ridgeH} ${ox + bw + 8},${wallTopY}`}
+              fill={pal.slabFill}
+              fillOpacity={0.65}
+              stroke={pal.wallExtStroke}
+              strokeWidth="1.6"
+            />
+          ) : roofShape === 'uma_agua' ? (
+            <polygon
+              points={`${ox - 8},${wallTopY} ${ox + bw + 8},${wallTopY - ridgeH * 0.72} ${ox + bw + 8},${wallTopY}`}
+              fill={pal.slabFill}
+              fillOpacity={0.65}
+              stroke={pal.wallExtStroke}
+              strokeWidth="1.6"
+            />
+          ) : (
+            <line
+              x1={ox - 3}
+              y1={wallTopY}
+              x2={ox + bw + 3}
+              y2={wallTopY}
+              stroke={pal.axisLine}
+              strokeDasharray="5 2.5"
+              strokeWidth="1"
+            />
+          )}
           {data.floors.map((fl, fIdx) => (
             <g key={fIdx}>
               <line
@@ -608,20 +630,63 @@ export const CadSheetPreview: React.FC<CadSheetPreviewProps> = ({
           });
         })()}
 
-        <rect
-          x={ox - 8}
-          y={baseY - bh + front.parapetHeight * sc - 7}
-          width={bw + 16}
-          height={7}
-          fill="url(#cadConcHatch)"
-          stroke={pal.wallExtStroke}
-          strokeWidth="1.3"
-        />
-        <rect x={ox} y={baseY - bh} width={8} height={front.parapetHeight * sc} fill={pal.wallExtFill} stroke={pal.wallExtStroke} strokeWidth="1.2" />
-        <rect x={ox + bw - 8} y={baseY - bh} width={8} height={front.parapetHeight * sc} fill={pal.wallExtFill} stroke={pal.wallExtStroke} strokeWidth="1.2" />
-        <text x={ox + bw + 16} y={baseY - bh + 8} fill={pal.axisLine} fontSize="9.5" fontFamily="monospace">
-          ⊕ +{front.totalHeight.toFixed(2)}m (Platibanda)
-        </text>
+        {(() => {
+          const roofShape = project.renderSettings.roofShape ?? 'platibanda';
+          const wallTopY = baseY - bh + front.parapetHeight * sc;
+          const ridgePx = Math.max(22, bw * 0.11);
+          if (roofShape === 'duas_aguas') {
+            return (
+              <>
+                <rect x={ox - 8} y={wallTopY - 6} width={bw + 16} height={6} fill="url(#cadConcHatch)" stroke={pal.wallExtStroke} strokeWidth="1.2" />
+                <polygon
+                  points={`${ox - 10},${wallTopY - 6} ${ox + bw / 2},${wallTopY - 6 - ridgePx} ${ox + bw + 10},${wallTopY - 6}`}
+                  fill={pal.slabFill}
+                  fillOpacity={0.45}
+                  stroke={pal.wallExtStroke}
+                  strokeWidth="1.4"
+                />
+                <text x={ox + bw + 16} y={wallTopY - ridgePx + 4} fill={pal.axisLine} fontSize="9.5" fontFamily="monospace">
+                  ⊕ +{(front.totalHeight + ridgePx / Math.max(1, sc)).toFixed(2)}m (Cumeeira 2 Águas)
+                </text>
+              </>
+            );
+          }
+          if (roofShape === 'uma_agua') {
+            return (
+              <>
+                <rect x={ox - 8} y={wallTopY - 6} width={bw + 16} height={6} fill="url(#cadConcHatch)" stroke={pal.wallExtStroke} strokeWidth="1.2" />
+                <polygon
+                  points={`${ox - 10},${wallTopY - 6} ${ox + bw + 10},${wallTopY - 6 - ridgePx * 0.72} ${ox + bw + 10},${wallTopY - 6}`}
+                  fill={pal.slabFill}
+                  fillOpacity={0.45}
+                  stroke={pal.wallExtStroke}
+                  strokeWidth="1.4"
+                />
+                <text x={ox + bw + 16} y={wallTopY - ridgePx * 0.72} fill={pal.axisLine} fontSize="9.5" fontFamily="monospace">
+                  COBERTURA 1 ÁGUA (i={project.constructionMethod.roofSlopePercent}%)
+                </text>
+              </>
+            );
+          }
+          return (
+            <>
+              <rect
+                x={ox - 8}
+                y={baseY - bh + front.parapetHeight * sc - 7}
+                width={bw + 16}
+                height={7}
+                fill="url(#cadConcHatch)"
+                stroke={pal.wallExtStroke}
+                strokeWidth="1.3"
+              />
+              <rect x={ox} y={baseY - bh} width={8} height={front.parapetHeight * sc} fill={pal.wallExtFill} stroke={pal.wallExtStroke} strokeWidth="1.2" />
+              <rect x={ox + bw - 8} y={baseY - bh} width={8} height={front.parapetHeight * sc} fill={pal.wallExtFill} stroke={pal.wallExtStroke} strokeWidth="1.2" />
+              <text x={ox + bw + 16} y={baseY - bh + 8} fill={pal.axisLine} fontSize="9.5" fontFamily="monospace">
+                ⊕ +{front.totalHeight.toFixed(2)}m ({roofShape === 'laje_plana' ? 'Laje Impermeab.' : 'Platibanda'})
+              </text>
+            </>
+          );
+        })()}
       </SheetFrame>
     );
   }
@@ -1600,6 +1665,97 @@ export const CadSheetPreview: React.FC<CadSheetPreviewProps> = ({
             strokeDasharray="5 3"
             strokeWidth="0.95"
           />
+        )}
+
+        {/* Paisagismo, Pisos Externos, Piscina & Área Gourmet (A01 / A02) */}
+        {(sheetId === 'A01' || sheetId === 'A02') && project.landscaping && (
+          <g>
+            {project.landscaping.surfaceZones.map((z) => {
+              const meta = getExteriorSurfaceMeta(z.surfaceType);
+              return (
+                <rect
+                  key={z.id}
+                  x={mx(z.x)}
+                  y={my(z.y)}
+                  width={z.width * scale}
+                  height={z.depth * scale}
+                  fill={meta.colorHex}
+                  fillOpacity={0.22}
+                  stroke={meta.colorHex}
+                  strokeWidth="0.7"
+                  strokeDasharray="3 2"
+                />
+              );
+            })}
+            {project.landscaping.pools.map((p) => (
+              <g key={p.id}>
+                <rect
+                  x={mx(p.x)}
+                  y={my(p.y)}
+                  width={p.width * scale}
+                  height={p.depth * scale}
+                  fill="#0ea5e9"
+                  fillOpacity={0.3}
+                  stroke="#0284c7"
+                  strokeWidth="1.2"
+                />
+                <text
+                  x={mx(p.x + p.width / 2)}
+                  y={my(p.y + p.depth / 2) + 2}
+                  textAnchor="middle"
+                  fill="#0284c7"
+                  fontSize="6"
+                  fontWeight="bold"
+                  fontFamily="monospace"
+                >
+                  PISCINA
+                </text>
+              </g>
+            ))}
+            {project.landscaping.gourmetAreas.map((g) => (
+              <g key={g.id}>
+                <rect
+                  x={mx(g.x)}
+                  y={my(g.y)}
+                  width={g.width * scale}
+                  height={g.depth * scale}
+                  fill="#b45309"
+                  fillOpacity={0.18}
+                  stroke="#b45309"
+                  strokeWidth="1.0"
+                />
+                <text
+                  x={mx(g.x + g.width / 2)}
+                  y={my(g.y + g.depth / 2) + 2}
+                  textAnchor="middle"
+                  fill="#d97706"
+                  fontSize="5.5"
+                  fontWeight="bold"
+                  fontFamily="monospace"
+                >
+                  GOURMET
+                </text>
+              </g>
+            ))}
+            {project.landscaping.plants.map((pl) => {
+              const meta = getBotanicalMeta(pl.speciesId);
+              const r = Math.max(2.5, (meta.canopyDiameterM / 2) * pl.scale * scale);
+              return (
+                <g key={pl.id}>
+                  <circle
+                    cx={mx(pl.x)}
+                    cy={my(pl.y)}
+                    r={r}
+                    fill={meta.foliageHex}
+                    fillOpacity={0.28}
+                    stroke={meta.foliageHex}
+                    strokeWidth="0.7"
+                  />
+                  <circle cx={mx(pl.x)} cy={my(pl.y)} r={1.2} fill={meta.foliageHex} />
+                </g>
+              );
+            })}
+          </g>
         )}
 
         {/* Structural Grid Axes with Bubbles */}

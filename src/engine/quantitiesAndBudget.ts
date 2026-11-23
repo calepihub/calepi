@@ -20,7 +20,7 @@ import type {
 export interface QuantityItem {
   id: string;
   code: string;
-  discipline: 'Arquitetura' | 'Estrutura' | 'Elétrica' | 'Hidráulica' | 'Sanitária' | 'Mobiliário';
+  discipline: 'Arquitetura' | 'Estrutura' | 'Elétrica' | 'Hidráulica' | 'Sanitária' | 'Mobiliário' | 'Paisagismo';
   description: string;
   unit: string;
   netQuantity: number;
@@ -242,7 +242,28 @@ export function calculateQuantities(project: Project): QuantitiesReport {
   const foundationConcreteM3 = totalUnits > 0 ? round2(groundFloorProjectionM2 * 0.085) : 0;
   const waterproofingAreaM2 =
     totalUnits > 0 ? round2(totalWetFloorAreaM2 + groundFloorProjectionM2 * 0.25) : 0;
-  const roofAreaM2 = totalUnits > 0 ? round2(groundFloorProjectionM2 * 1.08) : 0;
+  const roofShape = project.renderSettings.roofShape ?? 'platibanda';
+  const roofShapeFactor =
+    roofShape === 'duas_aguas'
+      ? 1.16
+      : roofShape === 'uma_agua'
+        ? 1.12
+        : roofShape === 'laje_plana'
+          ? 1.05
+          : 1.08;
+  const roofAreaM2 = totalUnits > 0 ? round2(groundFloorProjectionM2 * roofShapeFactor) : 0;
+
+  // Exterior landscaping & leisure areas
+  const extSurfaceAreaM2 = round2(
+    (project.landscaping?.surfaceZones ?? []).reduce((s, z) => s + z.width * z.depth, 0),
+  );
+  const poolsAreaM2 = round2(
+    (project.landscaping?.pools ?? []).reduce((s, p) => s + p.width * p.depth, 0),
+  );
+  const gourmetAreaM2 = round2(
+    (project.landscaping?.gourmetAreas ?? []).reduce((s, g) => s + g.width * g.depth, 0),
+  );
+  const plantedUnitsCount = project.landscaping?.plants?.length ?? 0;
 
   const items: QuantityItem[] = [
     ...(totalUnits > 0
@@ -427,14 +448,14 @@ export function calculateQuantities(project: Project): QuantitiesReport {
             id: 'q-cob-roof',
             code: 'COB-01',
             discipline: 'Arquitetura' as const,
-            description: `Cobertura com Telha Termoacústica (${project.constructionMethod.roofType.replace(/_/g, ' ')})`,
+            description: `Cobertura ${roofShape.replace(/_/g, ' ')} (${project.constructionMethod.roofType.replace(/_/g, ' ')})`,
             unit: 'm²',
             netQuantity: roofAreaM2,
             lossFactorPercent: 5,
             grossQuantity: round2(roofAreaM2 * 1.05),
-            measurementCriterion: 'Projeção da edificação no térreo × 1,08 (inclinação e beirais)',
-            sourceOrigin: 'Projeção da edificação e método de cobertura cadastrado',
-            calculationMemory: `${groundFloorProjectionM2} m² × 1,08 = ${roofAreaM2} m²`,
+            measurementCriterion: `Projeção da edificação no térreo × ${roofShapeFactor} (formato ${roofShape.replace(/_/g, ' ')})`,
+            sourceOrigin: 'Projeção da edificação, formato e método de cobertura cadastrado',
+            calculationMemory: `${groundFloorProjectionM2} m² × ${roofShapeFactor} = ${roofAreaM2} m²`,
             unitTypeBreakdown: {},
           },
         ]
@@ -757,6 +778,78 @@ export function calculateQuantities(project: Project): QuantitiesReport {
       calculationMemory: `${totalFurniture} itens cadastrados`,
       unitTypeBreakdown: {},
     },
+    ...(extSurfaceAreaM2 > 0
+      ? [
+          {
+            id: 'q-ext-paving',
+            code: 'EXT-01',
+            discipline: 'Paisagismo' as const,
+            description: 'Pisos Externos (Antiderrapante / Paver / Brita / Areia / Deck / Cimento Queimado)',
+            unit: 'm²',
+            netQuantity: extSurfaceAreaM2,
+            lossFactorPercent: 8,
+            grossQuantity: round2(extSurfaceAreaM2 * 1.08),
+            measurementCriterion: 'Soma das zonas de piso externo no módulo Terreno & Paisagismo',
+            sourceOrigin: 'Zonas de piso externo modeladas no terreno',
+            calculationMemory: `Σ(A_zona_externa) = ${extSurfaceAreaM2} m² (+8% = ${round2(extSurfaceAreaM2 * 1.08)} m²)`,
+            unitTypeBreakdown: {},
+          },
+        ]
+      : []),
+    ...(poolsAreaM2 > 0
+      ? [
+          {
+            id: 'q-pai-pool',
+            code: 'PAI-01',
+            discipline: 'Paisagismo' as const,
+            description: 'Piscina c/ Filtragem, Revestimento e Borda Térmica',
+            unit: 'm²',
+            netQuantity: poolsAreaM2,
+            lossFactorPercent: 0,
+            grossQuantity: poolsAreaM2,
+            measurementCriterion: 'Área em projeção horizontal de espelho d’água da(s) piscina(s)',
+            sourceOrigin: 'Piscinas implantadas no módulo Terreno & Paisagismo',
+            calculationMemory: `${project.landscaping?.pools.length ?? 0} piscina(s) = ${poolsAreaM2} m²`,
+            unitTypeBreakdown: {},
+          },
+        ]
+      : []),
+    ...(gourmetAreaM2 > 0
+      ? [
+          {
+            id: 'q-pai-gourmet',
+            code: 'PAI-02',
+            discipline: 'Paisagismo' as const,
+            description: 'Área Gourmet c/ Pergolado, Churrasqueira e Bancada',
+            unit: 'm²',
+            netQuantity: gourmetAreaM2,
+            lossFactorPercent: 0,
+            grossQuantity: gourmetAreaM2,
+            measurementCriterion: 'Área de projeção das áreas gourmet equipadas',
+            sourceOrigin: 'Áreas gourmet cadastradas no módulo Paisagismo',
+            calculationMemory: `${project.landscaping?.gourmetAreas.length ?? 0} área(s) gourmet = ${gourmetAreaM2} m²`,
+            unitTypeBreakdown: {},
+          },
+        ]
+      : []),
+    ...(plantedUnitsCount > 0
+      ? [
+          {
+            id: 'q-pai-plants',
+            code: 'PAI-03',
+            discipline: 'Paisagismo' as const,
+            description: 'Mudas Botânicas, Árvores Frutíferas, Palmeiras e Arbustos',
+            unit: 'un',
+            netQuantity: plantedUnitsCount,
+            lossFactorPercent: 5,
+            grossQuantity: Math.ceil(plantedUnitsCount * 1.05),
+            measurementCriterion: 'Contagem direta de espécies vegetais locadas no jardim (+5% reposição)',
+            sourceOrigin: 'Catálogo botânico no módulo Terreno & Paisagismo',
+            calculationMemory: `${plantedUnitsCount} espécies locadas`,
+            unitTypeBreakdown: {},
+          },
+        ]
+      : []),
   ];
 
   return {

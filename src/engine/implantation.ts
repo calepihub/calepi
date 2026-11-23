@@ -124,10 +124,10 @@ export function normalizeSiteData(site: Site): NormalizedSite {
   const streetSide: LotFrontSide = site.streetSide ?? 'baixo';
   const measurementUnit = site.measurementUnit ?? 'm';
   const defaultFront: SiteEdgeBoundary = {
-    condition: 'aberta',
-    heightM: 0,
+    condition: 'murada',
+    heightM: 2.0,
     hasNeighborBuilding: false,
-    notes: 'Testada frontal voltada para a via pública',
+    notes: 'Muro frontal com portão de acesso',
   };
   const defaultWall = (note: string): SiteEdgeBoundary => ({
     condition: 'murada',

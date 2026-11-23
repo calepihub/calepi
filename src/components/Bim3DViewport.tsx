@@ -10,6 +10,7 @@ import {
   Eye,
   EyeOff,
   Layers,
+  Move,
   Palette,
   Scissors,
   Sparkles,
@@ -24,16 +25,26 @@ import {
   round2,
 } from '../engine/geometry';
 import {
+  createExteriorSurfaceTextures,
   createFacadeStuccoTextures,
   createFloorTextures,
   createRoofTextures,
   createSiteContextTextures,
+  createWallExteriorTextures,
+  createWallInteriorTextures,
 } from '../engine/proceduralTextures';
 import {
   getGateWorldPosition,
   getLotBoundarySegments,
   normalizeSiteData,
 } from '../engine/implantation';
+import { createDefaultLandscaping } from '../engine/landscaping';
+import {
+  buildBotanicalPlant3D,
+  buildGourmetArea3D,
+  buildPool3D,
+  buildRoofGeometryGroup,
+} from '../engine/botanical3D';
 import { nextId } from '../engine/parametricGenerator';
 import type {
   CapturedRender,
@@ -58,6 +69,7 @@ type LayerVisibility = {
   sanitaria: boolean;
   mobiliario: boolean;
   cobertura: boolean;
+  paisagismo: boolean;
 };
 
 function probeSoftwareWebGL(): boolean {
@@ -83,6 +95,10 @@ function mapFloorColor(mat: RenderMaterialSettings['floorMaterial']): number {
       return 0xa47549;
     case 'cimento_queimado':
       return 0x7b8088;
+    case 'porcelanato_marmorizado':
+      return 0xedeff2;
+    case 'piso_vinilico':
+      return 0xb88b5a;
     default:
       return 0xb4bac2;
   }
@@ -94,6 +110,8 @@ function mapRoofColor(mat: RenderMaterialSettings['roofMaterial']): number {
       return 0xb25438;
     case 'concreto_impermeabilizado':
       return 0x7c828b;
+    case 'fibrocimento_cinza':
+      return 0x6b7280;
     default:
       return 0x525b66;
   }
@@ -210,6 +228,7 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
     sanitaria: true,
     mobiliario: true,
     cobertura: true,
+    paisagismo: true,
   });
 
   const totalBuildingHeight = useMemo(
@@ -235,6 +254,12 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
     discipline: string;
     detail: string;
   } | null>(null);
+  const [selectedOpening3D, setSelectedOpening3D] = useState<{
+    unitTypeId: string;
+    openingId: string;
+    wallId: string;
+    unitInstanceId: string;
+  } | null>(null);
   const [renderNotice, setRenderNotice] = useState<string | null>(null);
 
   const siteBox = useMemo(() => getBoundingBox(project.site.vertices), [project.site.vertices]);
@@ -245,6 +270,21 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
     }),
     [siteBox],
   );
+
+  const latestProjectRef = useRef(project);
+  latestProjectRef.current = project;
+  const onUpdateProjectRef = useRef(onUpdateProject);
+  onUpdateProjectRef.current = onUpdateProject;
+  const centerOffsetRef = useRef(centerOffset);
+  centerOffsetRef.current = centerOffset;
+  const dragOpeningRef = useRef<{
+    unitTypeId: string;
+    openingId: string;
+    wallId: string;
+    unitInstanceId: string;
+    plane: THREE.Plane;
+  } | null>(null);
+  const lastDragOffsetRef = useRef<number | null>(null);
 
   // Initialize Three.js WebGLRenderer once
   useEffect(() => {
@@ -384,21 +424,120 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
     const ro = new ResizeObserver(handleResize);
     ro.observe(container);
 
-    // Raycaster click selection
+    // Raycaster click selection + direct 3D drag along wall for doors/windows/vitrôs
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
+    const dragIntersect = new THREE.Vector3();
     let pointerDownPos = { x: 0, y: 0 };
 
-    const onPointerDown = (ev: PointerEvent) => {
-      pointerDownPos = { x: ev.clientX, y: ev.clientY };
-    };
-
-    const onPointerUp = (ev: PointerEvent) => {
-      const dist = Math.hypot(ev.clientX - pointerDownPos.x, ev.clientY - pointerDownPos.y);
-      if (dist > 5) return;
+    const updatePointerFromEvent = (ev: PointerEvent) => {
       const rect = renderer.domElement.getBoundingClientRect();
       pointer.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
       pointer.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
+    };
+
+    const onPointerDown = (ev: PointerEvent) => {
+      pointerDownPos = { x: ev.clientX, y: ev.clientY };
+      if (ev.button !== 0) return;
+      updatePointerFromEvent(ev);
+      raycaster.setFromCamera(pointer, camera);
+      const hits = raycaster.intersectObjects(modelGroup.children, true);
+      const opHit = hits.find((h) => h.object.userData?.openingDrag);
+      if (opHit) {
+        const meta = opHit.object.userData.openingDrag as {
+          unitTypeId: string;
+          openingId: string;
+          wallId: string;
+          unitInstanceId: string;
+        };
+        setSelectedOpening3D(meta);
+        setSelectedInfo({
+          label: String(opHit.object.userData.bimLabel ?? 'Esquadria 3D'),
+          discipline: 'Esquadrias',
+          detail: String(opHit.object.userData.bimDetail ?? 'Arraste ao longo da parede para reposicionar'),
+        });
+        dragOpeningRef.current = {
+          ...meta,
+          plane: new THREE.Plane(new THREE.Vector3(0, 1, 0), -opHit.point.y),
+        };
+        lastDragOffsetRef.current = null;
+        controls.enabled = false;
+        renderer.domElement.style.cursor = 'grabbing';
+      }
+    };
+
+    const onPointerMove = (ev: PointerEvent) => {
+      const activeDrag = dragOpeningRef.current;
+      if (!activeDrag) return;
+      updatePointerFromEvent(ev);
+      raycaster.setFromCamera(pointer, camera);
+      if (!raycaster.ray.intersectPlane(activeDrag.plane, dragIntersect)) return;
+
+      const curProj = latestProjectRef.current;
+      const ut = curProj.unitTypes.find((u) => u.id === activeDrag.unitTypeId);
+      const wall = ut?.walls.find((w) => w.id === activeDrag.wallId);
+      const op = ut?.openings.find((o) => o.id === activeDrag.openingId);
+      let inst: { x: number; y: number; rotationDeg: number; mirrored: boolean } | undefined;
+      for (const fl of curProj.floors) {
+        const found = fl.units.find((u) => u.id === activeDrag.unitInstanceId);
+        if (found) {
+          inst = found;
+          break;
+        }
+      }
+      if (!ut || !wall || !op || !inst) return;
+
+      const co = centerOffsetRef.current;
+      const dxW = dragIntersect.x + co.x - inst.x;
+      const dyW = dragIntersect.z + co.z - inst.y;
+      const rad = (inst.rotationDeg * Math.PI) / 180;
+      const cos = Math.cos(rad);
+      const sin = Math.sin(rad);
+      const mx = dxW * cos + dyW * sin;
+      const ly = -dxW * sin + dyW * cos;
+      const lx = inst.mirrored ? ut.width - mx : mx;
+
+      const wxVec = wall.end.x - wall.start.x;
+      const wyVec = wall.end.y - wall.start.y;
+      const wallLen = Math.hypot(wxVec, wyVec);
+      if (wallLen < 0.2) return;
+
+      const t = ((lx - wall.start.x) * wxVec + (ly - wall.start.y) * wyVec) / (wallLen * wallLen);
+      const centerAlong = t * wallLen;
+      const maxOff = Math.max(0.04, wallLen - op.width - 0.04);
+      const rawOff = Math.max(0.04, Math.min(maxOff, centerAlong - op.width / 2));
+      const nextOff = round2(Math.round(rawOff / 0.05) * 0.05);
+
+      if (lastDragOffsetRef.current === nextOff || Math.abs(nextOff - op.offsetAlongWall) < 0.01) {
+        return;
+      }
+      lastDragOffsetRef.current = nextOff;
+      onUpdateProjectRef.current((prev) => ({
+        ...prev,
+        unitTypes: prev.unitTypes.map((u) =>
+          u.id !== ut.id
+            ? u
+            : {
+                ...u,
+                openings: u.openings.map((o) =>
+                  o.id === op.id ? { ...o, offsetAlongWall: nextOff } : o,
+                ),
+              },
+        ),
+      }));
+    };
+
+    const onPointerUp = (ev: PointerEvent) => {
+      if (dragOpeningRef.current) {
+        dragOpeningRef.current = null;
+        controls.enabled = true;
+        renderer.domElement.style.cursor = '';
+        scheduleRender();
+        return;
+      }
+      const dist = Math.hypot(ev.clientX - pointerDownPos.x, ev.clientY - pointerDownPos.y);
+      if (dist > 5) return;
+      updatePointerFromEvent(ev);
       raycaster.setFromCamera(pointer, camera);
       const hits = raycaster.intersectObjects(modelGroup.children, true);
       const hit = hits.find((h) => h.object.userData?.bimLabel);
@@ -413,17 +552,22 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
           discipline: String(hit.object.userData.bimDiscipline ?? 'BIM'),
           detail: String(hit.object.userData.bimDetail ?? ''),
         });
+        if (!hit.object.userData?.openingDrag) {
+          setSelectedOpening3D(null);
+        }
         const box = new THREE.BoxHelper(hit.object, 0x3b82f6);
         scene.add(box);
         selectionBoxRef.current = box;
       } else {
         setSelectedInfo(null);
+        setSelectedOpening3D(null);
       }
       scheduleRender();
     };
 
     renderer.domElement.addEventListener('pointerdown', onPointerDown);
-    renderer.domElement.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
 
     scheduleRender();
 
@@ -433,7 +577,8 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
       ro.disconnect();
       controls.removeEventListener('change', handleControlChange);
       renderer.domElement.removeEventListener('pointerdown', onPointerDown);
-      renderer.domElement.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
       controls.dispose();
       if (selectionBoxRef.current) {
         selectionBoxRef.current.dispose();
@@ -529,7 +674,18 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
     );
 
     // Procedural PBR Textures in Architectural Render Mode
-    const stuccoTex = isArchRender ? createFacadeStuccoTextures(rs.facadeColor || '#EAECEE', maxAniso) : null;
+    const stuccoTex = isArchRender
+      ? rs.wallExteriorFinish
+        ? createWallExteriorTextures(rs.wallExteriorFinish, rs.facadeColor || '#EAECEE', maxAniso)
+        : createFacadeStuccoTextures(rs.facadeColor || '#EAECEE', maxAniso)
+      : null;
+    const intWallTex = isArchRender
+      ? createWallInteriorTextures(
+          rs.wallInteriorFinish ?? 'pintura_fosca',
+          rs.interiorWallColor || '#F5F6F8',
+          maxAniso,
+        )
+      : null;
     const floorTex = isArchRender ? createFloorTextures(rs.floorMaterial, maxAniso) : null;
     const roofTex = isArchRender ? createRoofTextures(rs.roofMaterial, maxAniso) : null;
     const ctxTex = isArchRender ? createSiteContextTextures(maxAniso) : null;
@@ -537,6 +693,10 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
     if (stuccoTex) {
       disposableTextures.push(stuccoTex.map);
       if (stuccoTex.bumpMap) disposableTextures.push(stuccoTex.bumpMap);
+    }
+    if (intWallTex) {
+      disposableTextures.push(intWallTex.map);
+      if (intWallTex.bumpMap) disposableTextures.push(intWallTex.bumpMap);
     }
     if (floorTex) {
       disposableTextures.push(floorTex.map);
@@ -830,23 +990,29 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
     const matExtWall = new THREE.MeshStandardMaterial({
       map: stuccoTex?.map ?? null,
       bumpMap: stuccoTex?.bumpMap ?? null,
-      bumpScale: 0.015,
+      bumpScale: rs.wallExteriorFinish === 'tijolinho_aparente' || rs.wallExteriorFinish === 'pedra_madeira' ? 0.032 : 0.016,
       color: stuccoTex ? 0xffffff : extWallColor,
-      roughness: 0.82,
+      roughness: rs.wallExteriorFinish === 'cimento_queimado' ? 0.62 : 0.82,
       metalness: 0.04,
       clippingPlanes,
       side: THREE.DoubleSide,
     });
     const matIntWall = new THREE.MeshStandardMaterial({
-      color: intWallColor,
-      roughness: 0.84,
+      map: intWallTex?.map ?? null,
+      bumpMap: intWallTex?.bumpMap ?? null,
+      bumpScale: 0.014,
+      color: intWallTex ? 0xffffff : intWallColor,
+      roughness: rs.wallInteriorFinish === 'ceramica_metro' ? 0.34 : 0.82,
       metalness: 0.03,
       clippingPlanes,
       side: THREE.DoubleSide,
     });
     const matDrywall = new THREE.MeshStandardMaterial({
-      color: 0xeaf0f6,
-      roughness: 0.9,
+      map: intWallTex?.map ?? null,
+      bumpMap: intWallTex?.bumpMap ?? null,
+      bumpScale: 0.012,
+      color: intWallTex ? 0xf8fafc : 0xeaf0f6,
+      roughness: 0.86,
       metalness: 0.02,
       clippingPlanes,
       side: THREE.DoubleSide,
@@ -1172,7 +1338,12 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
             }
           }
 
-          // Detailed Doors, Windows & Basculante Vitrôs Assemblies
+          // Detailed Doors, Windows & Basculante Vitrôs Assemblies (Interactive 3D selection & drag-along-wall)
+          const proxyMat = new THREE.MeshBasicMaterial({
+            transparent: true,
+            opacity: 0,
+            depthWrite: false,
+          });
           for (const op of ut.openings) {
             const wall = ut.walls.find((w) => w.id === op.wallId);
             if (!wall) continue;
@@ -1182,6 +1353,15 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
             const totalAngle = wallAngle + (inst.rotationDeg * Math.PI) / 180;
             const rotY = inst.mirrored ? totalAngle : -totalAngle;
             const baseOpY = baseY + floor.slabThickness + op.sillHeight;
+            const opDragData = {
+              unitTypeId: ut.id,
+              openingId: op.id,
+              wallId: wall.id,
+              unitInstanceId: inst.id,
+            };
+            const isSel3D =
+              selectedOpening3D?.openingId === op.id &&
+              selectedOpening3D?.unitInstanceId === inst.id;
 
             if (op.type === 'janela') {
               const isVitro =
@@ -1202,11 +1382,18 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
               glassPane.userData = {
                 bimLabel: `${op.code} (${op.subtype}) — Unid. ${inst.unitNumber}`,
                 bimDiscipline: 'Esquadrias',
-                bimDetail: `${op.width.toFixed(2)}×${op.height.toFixed(2)}m · Peitoril ${op.sillHeight.toFixed(2)}m · ${op.material}`,
+                bimDetail: `${op.width.toFixed(2)}×${op.height.toFixed(2)}m · Peitoril ${op.sillHeight.toFixed(2)}m · ${op.material} · Arraste no 3D`,
+                openingDrag: opDragData,
               };
               jGroup.add(glassPane);
 
-              // Sill, header, left/right jambs, central mullion or horizontal basculante transom
+              const hitProxy = new THREE.Mesh(
+                new THREE.BoxGeometry(op.width + 0.08, op.height + 0.08, wall.thickness + 0.14),
+                proxyMat,
+              );
+              hitProxy.userData = glassPane.userData;
+              jGroup.add(hitProxy);
+
               const frameD = wall.thickness + 0.03;
               const sill = new THREE.Mesh(new THREE.BoxGeometry(op.width + 0.06, 0.045, frameD + 0.04), matFrame);
               sill.position.y = -op.height / 2;
@@ -1220,6 +1407,9 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
                 ? new THREE.Mesh(new THREE.BoxGeometry(op.width - 0.04, 0.03, 0.045), matFrame)
                 : new THREE.Mesh(new THREE.BoxGeometry(0.035, op.height - 0.04, 0.045), matFrame);
               jGroup.add(sill, head, jambL, jambR, bar);
+              if (isSel3D) {
+                jGroup.add(new THREE.BoxHelper(hitProxy, 0x3b82f6));
+              }
               group.add(jGroup);
             } else {
               const dGroup = new THREE.Group();
@@ -1234,9 +1424,17 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
               leaf.userData = {
                 bimLabel: `${op.code} (${op.subtype}) — Unid. ${inst.unitNumber}`,
                 bimDiscipline: 'Esquadrias',
-                bimDetail: `${op.width.toFixed(2)}×${op.height.toFixed(2)}m · ${op.material}`,
+                bimDetail: `${op.width.toFixed(2)}×${op.height.toFixed(2)}m · ${op.material} · Arraste no 3D`,
+                openingDrag: opDragData,
               };
               dGroup.add(leaf);
+
+              const hitProxy = new THREE.Mesh(
+                new THREE.BoxGeometry(op.width + 0.08, op.height + 0.06, wall.thickness + 0.14),
+                proxyMat,
+              );
+              hitProxy.userData = leaf.userData;
+              dGroup.add(hitProxy);
 
               const frameD = wall.thickness + 0.03;
               const topJamb = new THREE.Mesh(new THREE.BoxGeometry(op.width + 0.04, 0.045, frameD), matFrame);
@@ -1248,6 +1446,9 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
               const handle = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.025, 0.09), matHandle);
               handle.position.set(op.width / 2 - 0.14, -0.05, 0);
               dGroup.add(topJamb, jambL, jambR, handle);
+              if (isSel3D) {
+                dGroup.add(new THREE.BoxHelper(hitProxy, 0x3b82f6));
+              }
               group.add(dGroup);
             }
           }
@@ -1676,7 +1877,7 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
       }
     }
 
-    // 4. Architectural Roof + Parapet (Platibanda) + Aluminum Flashing (Rufo)
+    // 4. Parametric Roof Geometry (Platibanda / Duas Águas / Uma Água / Laje Plana)
     if (layers.cobertura && !isInternalView && Number.isFinite(minBuildingX)) {
       const topFlIdx = Math.max(0, project.floors.length - 1);
       const topFl = project.floors[topFlIdx];
@@ -1699,40 +1900,93 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
         clippingPlanes,
       });
 
-      const roofPlate = new THREE.Mesh(new THREE.BoxGeometry(rW, 0.16, rD), matRoof);
-      roofPlate.position.set(rX, roofY + 0.08, rZ);
-      roofPlate.castShadow = !isSoftwareGl;
-      roofPlate.receiveShadow = !isSoftwareGl;
-      roofPlate.userData = {
-        bimLabel: 'Cobertura do Empreendimento',
-        bimDiscipline: 'Cobertura',
-        bimDetail: `${project.constructionMethod.roofType.replace(/_/g, ' ')} · Inclinação ${project.constructionMethod.roofSlopePercent}%`,
-      };
-      group.add(roofPlate);
+      const roofGroup = buildRoofGeometryGroup({
+        x: rX - rW / 2,
+        y: rZ - rD / 2,
+        width: rW,
+        depth: rD,
+        baseElevationY: roofY,
+        roofShape: rs.roofShape ?? 'platibanda',
+        roofFinish: rs.roofMaterial,
+        slopePercent: project.constructionMethod.roofSlopePercent,
+        facadeMat: matExtWall,
+        roofMat: matRoof,
+        isSoftwareGl,
+      });
+      roofGroup.traverse((obj) => {
+        if ((obj as THREE.Mesh).isMesh) {
+          obj.userData = {
+            bimLabel: 'Cobertura do Empreendimento',
+            bimDiscipline: 'Cobertura',
+            bimDetail: `${(rs.roofShape ?? 'platibanda').replace(/_/g, ' ')} · ${rs.roofMaterial.replace(/_/g, ' ')} · i=${project.constructionMethod.roofSlopePercent}%`,
+          };
+        }
+      });
+      group.add(roofGroup);
+    }
 
-      // Platibanda & anodized flashing around building perimeter
-      if (isArchRender) {
-        const pH = 0.65;
-        const pT = 0.16;
-        const parapetMat = matExtWall;
-        const flashingMat = matFrame;
-
-        const addParapet = (w: number, d: number, px: number, pz: number) => {
-          const wall = new THREE.Mesh(new THREE.BoxGeometry(w, pH, d), parapetMat);
-          wall.position.set(px, roofY + 0.16 + pH / 2, pz);
-          wall.castShadow = !isSoftwareGl;
-          wall.receiveShadow = !isSoftwareGl;
-          group.add(wall);
-
-          const cap = new THREE.Mesh(new THREE.BoxGeometry(w + 0.04, 0.045, d + 0.04), flashingMat);
-          cap.position.set(px, roofY + 0.16 + pH + 0.02, pz);
-          group.add(cap);
+    // 5. Paisagismo, Pisos Externos, Piscina, Área Gourmet & Espécies Botânicas 3D
+    if (layers.paisagismo && !isInternalView) {
+      const land = project.landscaping ?? createDefaultLandscaping();
+      const nightOn = rs.timeOfDay === 'noite' || rs.artificialLightsOn;
+      // Lot base exterior surface zones
+      for (const zone of land.surfaceZones) {
+        const surfTex = isArchRender ? createExteriorSurfaceTextures(zone.surfaceType, maxAniso) : null;
+        if (surfTex) {
+          disposableTextures.push(surfTex.map);
+          if (surfTex.bumpMap) disposableTextures.push(surfTex.bumpMap);
+        }
+        const zMat = new THREE.MeshStandardMaterial({
+          map: surfTex?.map ?? null,
+          bumpMap: surfTex?.bumpMap ?? null,
+          bumpScale: 0.018,
+          color: surfTex ? 0xffffff : 0x94a3b8,
+          roughness: zone.surfaceType === 'deck_madeira' ? 0.62 : 0.88,
+          metalness: 0.02,
+          clippingPlanes,
+        });
+        const zMesh = new THREE.Mesh(
+          new THREE.BoxGeometry(Math.max(0.2, zone.width), 0.04, Math.max(0.2, zone.depth)),
+          zMat,
+        );
+        zMesh.position.set(
+          zone.x + zone.width / 2 - centerOffset.x,
+          0.022,
+          zone.y + zone.depth / 2 - centerOffset.z,
+        );
+        zMesh.receiveShadow = !isSoftwareGl;
+        zMesh.userData = {
+          bimLabel: zone.label,
+          bimDiscipline: 'Paisagismo & Piso',
+          bimDetail: `${zone.width.toFixed(1)}×${zone.depth.toFixed(1)}m (${zone.surfaceType.replace(/_/g, ' ')})`,
         };
+        group.add(zMesh);
+      }
 
-        addParapet(rW, pT, rX, rZ - rD / 2 + pT / 2);
-        addParapet(rW, pT, rX, rZ + rD / 2 - pT / 2);
-        addParapet(pT, rD - pT * 2, rX - rW / 2 + pT / 2, rZ);
-        addParapet(pT, rD - pT * 2, rX + rW / 2 - pT / 2, rZ);
+      // Swimming pools
+      for (const pool of land.pools) {
+        const { group: poolGrp } = buildPool3D(pool, 0.01, nightOn, isSoftwareGl, maxAniso);
+        poolGrp.position.x -= centerOffset.x;
+        poolGrp.position.z -= centerOffset.z;
+        group.add(poolGrp);
+      }
+
+      // Gourmet Areas
+      for (const gArea of land.gourmetAreas) {
+        const gGrp = buildGourmetArea3D(gArea, 0.01, nightOn, isSoftwareGl);
+        gGrp.position.x -= centerOffset.x;
+        gGrp.position.z -= centerOffset.z;
+        group.add(gGrp);
+      }
+
+      // Trees, Palms, Fruit Trees & Shrubs
+      for (const plant of land.plants) {
+        const pGrp = buildBotanicalPlant3D(plant.speciesId, plant.scale, isSoftwareGl);
+        pGrp.position.set(plant.x - centerOffset.x, 0, plant.y - centerOffset.z);
+        if (plant.rotationDeg) {
+          pGrp.rotation.y = (plant.rotationDeg * Math.PI) / 180;
+        }
+        group.add(pGrp);
       }
     }
 
@@ -1789,6 +2043,7 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
     totalUnitsPlaced,
     activeCameraPreset,
     selectedInternalUnitIdx,
+    selectedOpening3D,
   ]);
 
   const setCameraPreset = (
@@ -2137,36 +2392,127 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
           {dockOpen && (
             <div className="p-3.5">
               {dockTab === 'disciplinas' && (
-                <div className="flex flex-wrap items-center gap-2">
-                  {(
-                    [
-                      ['arquitetura', 'Arquitetura'],
-                      ['cobertura', 'Cobertura & Platibanda'],
-                      ['estrutura', 'Estrutura Conceitual'],
-                      ['mobiliario', 'Mobiliário'],
-                      ['eletrica', 'Elétrica (X/Y/Z)'],
-                      ['especiais', 'Especiais (CFTV/Dados/TV)'],
-                      ['hidraulica', 'Hidráulica (AF/AQ)'],
-                      ['sanitaria', 'Sanitária'],
-                    ] as const
-                  ).map(([key, label]) => {
-                    const active = layers[key];
-                    return (
-                      <button
-                        key={key}
-                        type="button"
-                        onClick={() => setLayers((prev) => ({ ...prev, [key]: !prev[key] }))}
-                        className={`inline-flex items-center gap-1.5 rounded border px-3 py-1.5 text-xs font-medium transition ${
-                          active
-                            ? 'border-[#2F7CF6] bg-[#2F7CF6]/15 text-white'
-                            : 'border-slate-700 bg-[#14161A] text-slate-400'
-                        }`}
-                      >
-                        {active ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
-                        {label}
-                      </button>
-                    );
-                  })}
+                <div className="space-y-2.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {(
+                      [
+                        ['arquitetura', 'Arquitetura'],
+                        ['cobertura', 'Cobertura & Telhado'],
+                        ['paisagismo', 'Paisagismo & Lazer'],
+                        ['estrutura', 'Estrutura Conceitual'],
+                        ['mobiliario', 'Mobiliário'],
+                        ['eletrica', 'Elétrica (X/Y/Z)'],
+                        ['especiais', 'Especiais (CFTV/Dados/TV)'],
+                        ['hidraulica', 'Hidráulica (AF/AQ)'],
+                        ['sanitaria', 'Sanitária'],
+                      ] as const
+                    ).map(([key, label]) => {
+                      const active = layers[key];
+                      return (
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() => setLayers((prev) => ({ ...prev, [key]: !prev[key] }))}
+                          className={`inline-flex items-center gap-1.5 rounded border px-3 py-1.5 text-xs font-medium transition ${
+                            active
+                              ? 'border-[#2F7CF6] bg-[#2F7CF6]/15 text-white'
+                              : 'border-slate-700 bg-[#14161A] text-slate-400'
+                          }`}
+                        >
+                          {active ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {selectedOpening3D &&
+                    (() => {
+                      const ut = project.unitTypes.find((u) => u.id === selectedOpening3D.unitTypeId);
+                      const op = ut?.openings.find((o) => o.id === selectedOpening3D.openingId);
+                      const wall = ut?.walls.find((w) => w.id === op?.wallId);
+                      if (!ut || !op || !wall) return null;
+                      const wallLen = getWallLength(wall);
+                      const maxOff = Math.max(0.05, round2(wallLen - op.width - 0.04));
+                      const patchOp = (patch: Partial<Opening>) => {
+                        onUpdateProject((prev) => ({
+                          ...prev,
+                          unitTypes: prev.unitTypes.map((u) =>
+                            u.id !== ut.id
+                              ? u
+                              : {
+                                  ...u,
+                                  openings: u.openings.map((o) =>
+                                    o.id === op.id ? { ...o, ...patch } : o,
+                                  ),
+                                },
+                          ),
+                        }));
+                      };
+                      return (
+                        <div className="flex flex-wrap items-center gap-3 rounded border border-[#2F7CF6]/50 bg-[#14161A] px-3 py-2 text-xs">
+                          <span className="inline-flex items-center gap-1 font-semibold text-sky-300">
+                            <Move className="h-3.5 w-3.5" />
+                            Esquadria 3D: {op.code} ({op.width.toFixed(2)}m)
+                          </span>
+                          <label className="flex items-center gap-1.5">
+                            <span className="text-[11px] text-slate-400">Parede:</span>
+                            <select
+                              value={op.wallId}
+                              onChange={(e) => {
+                                const nw = ut.walls.find((w) => w.id === e.target.value);
+                                const nLen = nw ? getWallLength(nw) : 3;
+                                patchOp({
+                                  wallId: e.target.value,
+                                  offsetAlongWall: round2(
+                                    Math.max(0.04, Math.min(Math.max(0.04, nLen - op.width - 0.04), op.offsetAlongWall)),
+                                  ),
+                                });
+                                setSelectedOpening3D({ ...selectedOpening3D, wallId: e.target.value });
+                              }}
+                              className="rounded border border-slate-700 bg-[#1B1E24] px-2 py-0.5 text-[11px] text-white"
+                            >
+                              {ut.walls.map((w) => (
+                                <option key={w.id} value={w.id}>
+                                  {w.code} ({getWallLength(w).toFixed(2)}m)
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className="flex items-center gap-2">
+                            <span className="text-[11px] text-slate-400">
+                              Posição ({op.offsetAlongWall.toFixed(2)}m):
+                            </span>
+                            <input
+                              type="range"
+                              min={0.04}
+                              max={maxOff}
+                              step={0.05}
+                              value={Math.min(maxOff, op.offsetAlongWall)}
+                              onChange={(e) => patchOp({ offsetAlongWall: Number(e.target.value) })}
+                              className="w-28 accent-[#2F7CF6]"
+                            />
+                          </label>
+                          {op.type === 'janela' && (
+                            <label className="flex items-center gap-1.5">
+                              <span className="text-[11px] text-slate-400">Peitoril:</span>
+                              <input
+                                type="number"
+                                step={0.05}
+                                min={0}
+                                max={2.2}
+                                value={op.sillHeight}
+                                onChange={(e) => patchOp({ sillHeight: Math.max(0, Number(e.target.value)) })}
+                                className="w-16 rounded border border-slate-700 bg-[#1B1E24] px-1.5 py-0.5 font-mono text-[11px] text-white"
+                              />
+                            </label>
+                          )}
+                          <span className="ml-auto text-[10.5px] text-slate-400">
+                            Dica: arraste a esquadria diretamente no modelo 3D
+                          </span>
+                        </div>
+                      );
+                    })()}
                 </div>
               )}
 
@@ -2211,7 +2557,7 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
               )}
 
               {dockTab === 'iluminacao' && (
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
                   <div className="space-y-1">
                     <span className="text-[11px] text-slate-400">Cenário Solar</span>
                     <div className="flex gap-1">
@@ -2220,7 +2566,7 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
                           key={t}
                           type="button"
                           onClick={() => updateRS({ timeOfDay: t })}
-                          className={`flex-1 rounded border px-2 py-1 text-xs capitalize ${
+                          className={`flex-1 rounded border px-1.5 py-1 text-[11px] capitalize ${
                             project.renderSettings.timeOfDay === t
                               ? 'border-[#2F7CF6] bg-[#2F7CF6]/20 text-white'
                               : 'border-slate-700 bg-[#14161A] text-slate-300'
@@ -2248,14 +2594,50 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
 
                   <label className="space-y-1">
                     <span className="flex items-center gap-1 text-[11px] text-slate-400">
-                      <Palette className="h-3 w-3" /> Fachada (Textura)
+                      <Palette className="h-3 w-3" /> Fachada (PBR)
                     </span>
-                    <input
-                      type="color"
-                      value={project.renderSettings.facadeColor}
-                      onChange={(e) => updateRS({ facadeColor: e.target.value })}
-                      className="h-7 w-full cursor-pointer rounded border border-slate-700 bg-[#14161A]"
-                    />
+                    <div className="flex gap-1">
+                      <input
+                        type="color"
+                        value={project.renderSettings.facadeColor}
+                        onChange={(e) => updateRS({ facadeColor: e.target.value })}
+                        className="h-7 w-9 shrink-0 cursor-pointer rounded border border-slate-700 bg-[#14161A]"
+                      />
+                      <select
+                        value={project.renderSettings.wallExteriorFinish ?? 'textura_acrilica'}
+                        onChange={(e) =>
+                          updateRS({
+                            wallExteriorFinish: e.target.value as RenderMaterialSettings['wallExteriorFinish'],
+                          })
+                        }
+                        className="w-full rounded border border-slate-700 bg-[#14161A] px-1.5 py-1 text-[11px] text-white"
+                      >
+                        <option value="textura_acrilica">Textura Acrílica</option>
+                        <option value="reboco_liso">Reboco Liso</option>
+                        <option value="tijolinho_aparente">Tijolinho Aparente</option>
+                        <option value="pedra_madeira">Pedra / Canjiquinha</option>
+                        <option value="ripado_madeira">Ripado Madeira</option>
+                        <option value="cimento_queimado">Cimento Queimado</option>
+                      </select>
+                    </div>
+                  </label>
+
+                  <label className="space-y-1">
+                    <span className="text-[11px] text-slate-400">Parede Interna</span>
+                    <select
+                      value={project.renderSettings.wallInteriorFinish ?? 'pintura_fosca'}
+                      onChange={(e) =>
+                        updateRS({
+                          wallInteriorFinish: e.target.value as RenderMaterialSettings['wallInteriorFinish'],
+                        })
+                      }
+                      className="w-full rounded border border-slate-700 bg-[#14161A] px-2 py-1 text-xs text-white"
+                    >
+                      <option value="pintura_fosca">Pintura Fosca</option>
+                      <option value="cimento_queimado">Cimento Queimado</option>
+                      <option value="ceramica_metro">Cerâmica Metrô</option>
+                      <option value="madeira_acoplada">Painel Madeira</option>
+                    </select>
                   </label>
 
                   <label className="space-y-1">
@@ -2270,14 +2652,34 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
                       className="w-full rounded border border-slate-700 bg-[#14161A] px-2 py-1 text-xs text-white"
                     >
                       <option value="porcelanato_cinza">Porcelanato Cinza</option>
+                      <option value="porcelanato_marmorizado">Porcelanato Mármore</option>
                       <option value="ceramica_bege">Cerâmica Bege</option>
                       <option value="madeira_carvalho">Madeira Carvalho</option>
+                      <option value="piso_vinilico">Piso Vinílico</option>
                       <option value="cimento_queimado">Cimento Queimado</option>
                     </select>
                   </label>
 
                   <label className="space-y-1">
-                    <span className="text-[11px] text-slate-400">Cobertura PBR</span>
+                    <span className="text-[11px] text-slate-400">Formato Telhado</span>
+                    <select
+                      value={project.renderSettings.roofShape ?? 'platibanda'}
+                      onChange={(e) =>
+                        updateRS({
+                          roofShape: e.target.value as RenderMaterialSettings['roofShape'],
+                        })
+                      }
+                      className="w-full rounded border border-slate-700 bg-[#14161A] px-2 py-1 text-xs text-white"
+                    >
+                      <option value="platibanda">Platibanda Embutida</option>
+                      <option value="duas_aguas">Duas Águas</option>
+                      <option value="uma_agua">Uma Água</option>
+                      <option value="laje_plana">Laje Plana</option>
+                    </select>
+                  </label>
+
+                  <label className="space-y-1">
+                    <span className="text-[11px] text-slate-400">Telha PBR</span>
                     <select
                       value={project.renderSettings.roofMaterial}
                       onChange={(e) =>
@@ -2289,6 +2691,7 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
                     >
                       <option value="termoacustica_zinco">Termoacústica Zinco</option>
                       <option value="ceramica_terracota">Cerâmica Terracota</option>
+                      <option value="fibrocimento_cinza">Fibrocimento</option>
                       <option value="concreto_impermeabilizado">Concreto Impermeab.</option>
                     </select>
                   </label>

@@ -32,6 +32,7 @@ test('firebase-blueprint.json required ProjectRecord fields match isValidProject
   }
   assert.ok(!required.includes('capturedRenders'), 'capturedRenders must live in subcollection');
   assert.ok('implantation' in blueprint.entities.ProjectRecord.properties);
+  assert.ok('landscaping' in blueprint.entities.ProjectRecord.properties);
 });
 
 test('firestore.rules allows safe null-resource get and proj-mwryrxhd-2 owner creation', () => {
@@ -45,9 +46,11 @@ test('firestore.rules allows safe null-resource get and proj-mwryrxhd-2 owner cr
   assert.ok(rulesText.includes("id.matches('^[a-zA-Z0-9_\\\\-]+$')"));
   assert.match('proj-mwryrxhd-2', /^[a-zA-Z0-9_\-]{1,128}$/);
 
-  // Optional implantation map supported on create and update allowlists
+  // Optional implantation and landscaping maps supported on create and update allowlists
   assert.match(rulesText, /\(!\('implantation' in data\) \|\| data\.implantation is map\)/);
   assert.match(rulesText, /'implantation',/);
+  assert.match(rulesText, /\(!\('landscaping' in data\) \|\| data\.landscaping is map\)/);
+  assert.match(rulesText, /'landscaping',/);
 
   // Increased safe bounds for structuralElements (600) and budgetEntries (250)
   assert.match(rulesText, /structuralElements\.size\(\) <= 600/);

@@ -429,7 +429,35 @@ export const ConstructionAndStructureModule: React.FC<ConstructionAndStructureMo
                     </select>
                   </label>
 
-                  <label className="block space-y-1 sm:col-span-2">
+                  <label className="block space-y-1">
+                    <span className="text-xs text-slate-400">Formato da Cobertura</span>
+                    <select
+                      value={project.renderSettings.roofShape ?? 'platibanda'}
+                      onChange={(e) => {
+                        const shape = e.target.value as NonNullable<
+                          Project['renderSettings']['roofShape']
+                        >;
+                        onUpdateProject(
+                          (prev) => ({
+                            ...prev,
+                            renderSettings: {
+                              ...prev.renderSettings,
+                              roofShape: shape,
+                            },
+                          }),
+                          `Formato da cobertura alterado para ${shape.replace(/_/g, ' ')}`,
+                        );
+                      }}
+                      className="w-full rounded border border-slate-700 bg-[#14161A] px-3 py-1.5 text-sm text-white"
+                    >
+                      <option value="platibanda">Telhado Embutido com Platibanda</option>
+                      <option value="duas_aguas">Telhado Colonial / Duas Águas</option>
+                      <option value="uma_agua">Telhado Uma Água (Caimento Único)</option>
+                      <option value="laje_plana">Laje Impermeabilizada Aparente</option>
+                    </select>
+                  </label>
+
+                  <label className="block space-y-1">
                     <span className="text-xs text-slate-400">Inclinação da Cobertura (%)</span>
                     <input
                       type="number"

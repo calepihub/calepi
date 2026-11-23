@@ -115,6 +115,9 @@ function migrateProject(raw: Partial<Project>, renders: CapturedRender[] = []): 
     revisions: raw.revisions ?? [],
     renderSettings: {
       ...raw.renderSettings!,
+      wallExteriorFinish: raw.renderSettings?.wallExteriorFinish ?? 'textura_acrilica',
+      wallInteriorFinish: raw.renderSettings?.wallInteriorFinish ?? 'pintura_fosca',
+      roofShape: raw.renderSettings?.roofShape ?? 'platibanda',
       renderQuality: raw.renderSettings?.renderQuality ?? 'arquitetonico',
     },
     budgetSettings: {
@@ -194,6 +197,9 @@ function buildFirestoreProjectPayload(project: Project, ownerId: string) {
   };
   if (project.implantation !== undefined) {
     base.implantation = stripUndefined(project.implantation);
+  }
+  if (project.landscaping !== undefined) {
+    base.landscaping = stripUndefined(project.landscaping);
   }
   return base;
 }

@@ -302,7 +302,7 @@ export const QuantitiesAndBudgetModule: React.FC<QuantitiesAndBudgetModuleProps>
           <div className="space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-800 bg-[#1B1E24] p-3.5">
               <div className="flex flex-wrap items-center gap-1.5">
-                {['TODAS', 'Arquitetura', 'Estrutura', 'Elétrica', 'Hidráulica', 'Sanitária', 'Mobiliário'].map(
+                {['TODAS', 'Arquitetura', 'Estrutura', 'Elétrica', 'Hidráulica', 'Sanitária', 'Mobiliário', 'Paisagismo'].map(
                   (d) => (
                     <button
                       key={d}

@@ -890,24 +890,32 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
                     />
                   </>
                 ) : (
-                  <>
-                    {/* Door leaf & swing arc */}
-                    <line
-                      x1={-op.width / 2}
-                      y1={0}
-                      x2={-op.width / 2}
-                      y2={op.width}
-                      stroke={isSel ? '#60A5FA' : '#F59E0B'}
-                      strokeWidth="0.035"
-                    />
-                    <path
-                      d={`M ${-op.width / 2} ${op.width} A ${op.width} ${op.width} 0 0 0 ${op.width / 2} 0`}
-                      fill="none"
-                      stroke={isSel ? '#60A5FA' : '#F59E0B'}
-                      strokeDasharray="0.08 0.06"
-                      strokeWidth="0.02"
-                    />
-                  </>
+                  (() => {
+                    const isOut = op.swingDirection === 'left_out' || op.swingDirection === 'right_out';
+                    const hingeRight = op.swingDirection === 'right_in' || op.swingDirection === 'right_out';
+                    const sx = (hingeRight ? -1 : 1) * (isMirrored ? -1 : 1);
+                    const sy = isOut ? -1 : 1;
+                    return (
+                      <g transform={`scale(${sx}, ${sy})`}>
+                        {/* Door leaf & swing arc */}
+                        <line
+                          x1={-op.width / 2}
+                          y1={0}
+                          x2={-op.width / 2}
+                          y2={op.width}
+                          stroke={isSel ? '#60A5FA' : '#F59E0B'}
+                          strokeWidth="0.035"
+                        />
+                        <path
+                          d={`M ${-op.width / 2} ${op.width} A ${op.width} ${op.width} 0 0 0 ${op.width / 2} 0`}
+                          fill="none"
+                          stroke={isSel ? '#60A5FA' : '#F59E0B'}
+                          strokeDasharray="0.08 0.06"
+                          strokeWidth="0.02"
+                        />
+                      </g>
+                    );
+                  })()
                 )}
                 <text
                   x={0}
@@ -1692,6 +1700,50 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
                 {selectedOpening.type.toUpperCase()} {selectedOpening.code}
               </div>
 
+              {selectedOpening && activeUt && (
+                <div>
+                  <label className="block text-[11px] text-[#949BA8] mb-1">Parede Hospedeira</label>
+                  <select
+                    value={selectedOpening.wallId}
+                    onChange={(e) => {
+                      const nextWallId = e.target.value;
+                      const nextWall = activeUt.walls.find((w) => w.id === nextWallId);
+                      const maxLen = nextWall ? getWallLength(nextWall) : 3;
+                      updateActiveUt(
+                        (ut) => ({
+                          ...ut,
+                          openings: ut.openings.map((o) =>
+                            o.id === selectedOpening.id
+                              ? {
+                                  ...o,
+                                  wallId: nextWallId,
+                                  offsetAlongWall: round2(
+                                    Math.max(
+                                      0.04,
+                                      Math.min(
+                                        Math.max(0.04, maxLen - o.width - 0.04),
+                                        o.offsetAlongWall,
+                                      ),
+                                    ),
+                                  ),
+                                }
+                              : o,
+                          ),
+                        }),
+                        `Movimentação de ${selectedOpening.code} para parede ${nextWall?.code ?? nextWallId}`,
+                      );
+                    }}
+                    className="w-full px-2 py-1 rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                  >
+                    {activeUt.walls.map((w) => (
+                      <option key={w.id} value={w.id}>
+                        {w.code} — {getWallLength(w).toFixed(2)} m ({w.isExternal ? 'Externa' : 'Interna'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               {selectedOpening.type === 'porta' && (
                 <div>
                   <label className="block text-[11px] text-[#949BA8] mb-1">
@@ -1717,6 +1769,32 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
                     <option value="banheiro">Banheiro (0,60m fixo)</option>
                     <option value="quarto">Quarto (0,70m fixo)</option>
                     <option value="outro">Outra porta (largura livre)</option>
+                  </select>
+                </div>
+              )}
+
+              {selectedOpening.type === 'porta' && selectedOpening.swingDirection !== 'sliding' && (
+                <div>
+                  <label className="block text-[11px] text-[#949BA8] mb-1">
+                    Sentido da Folha (Giro)
+                  </label>
+                  <select
+                    value={selectedOpening.swingDirection}
+                    onChange={(e) => {
+                      const val = e.target.value as Opening['swingDirection'];
+                      updateActiveUt((ut) => ({
+                        ...ut,
+                        openings: ut.openings.map((o) =>
+                          o.id === selectedOpening.id ? { ...o, swingDirection: val } : o,
+                        ),
+                      }));
+                    }}
+                    className="w-full px-2 py-1 rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                  >
+                    <option value="left_in">Esquerda — Para Dentro</option>
+                    <option value="right_in">Direita — Para Dentro</option>
+                    <option value="left_out">Esquerda — Para Fora</option>
+                    <option value="right_out">Direita — Para Fora</option>
                   </select>
                 </div>
               )}

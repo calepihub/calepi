@@ -8,6 +8,8 @@ import {
   calculatePolygonArea,
   calculatePolygonPerimeter,
   checkImplantationFeasibility,
+  getFurnitureWorldRect,
+  rectsOverlap,
   round2,
 } from './geometry';
 import {
@@ -45,6 +47,7 @@ import {
   TECHNICAL_SHEETS,
 } from './exporters';
 import { generateAllMemorials } from './memorialGenerator';
+import { autoPopulateLandscaping } from './landscaping';
 
 test('Geometry: Shoelace polygon area & perimeter for 12x25m site', () => {
   const verts = buildSiteVerticesFromDimensions(12, 12, 25, 25);
@@ -885,6 +888,186 @@ test('Implantation Scenarios 6-10: Mixed Typologies, Street-Side Rotation, Live 
   // Honest municipal notice (never approves municipal zoning without rules)
   assert.ok(repConflict.municipalValidationNote.includes('não implica aprovação'));
 });
+
+test('Front Boundary Wall (Muro Frontal): defaults strictly to murada with 2.0m height', () => {
+  const demo = createDefaultDemoProject();
+  assert.equal(demo.site.boundaries?.front.condition, 'murada');
+  assert.equal(demo.site.boundaries?.front.heightM, 2.0);
+
+  const blank = createBlankProject({
+    name: 'Muro Frontal Teste',
+    client: '',
+    municipality: 'Niterói',
+    state: 'RJ',
+    front: 12,
+    depth: 25,
+    floorsCount: 1,
+    methodId: 'alvenaria_convencional',
+  });
+  assert.equal(blank.site.boundaries?.front.condition, 'murada');
+  assert.equal(blank.site.boundaries?.front.heightM, 2.0);
+
+  // Legacy site without explicit boundaries also normalizes front to murada
+  const norm = normalizeSiteData({
+    ...blank.site,
+    boundaries: undefined,
+  });
+  assert.equal(norm.boundaries.front.condition, 'murada');
+  assert.equal(norm.boundaries.front.heightM, 2.0);
+});
+
+test('Ergonomic Interior Layout Matrix: zero overlapping furniture, zero blocked doors, 100% BFS room reachability, fixed door widths', () => {
+  const matrix: Array<{
+    w: number;
+    d: number;
+    bedrooms: 0 | 1;
+    hasLaundry: boolean;
+    hasMezzanine: boolean;
+    ceilingH: number;
+    entrySide: 'frente' | 'lateral_direita' | 'lateral_esquerda';
+  }> = [
+    { w: 3.0, d: 4.8, bedrooms: 0, hasLaundry: true, hasMezzanine: false, ceilingH: 2.8, entrySide: 'frente' },
+    { w: 3.4, d: 5.2, bedrooms: 0, hasLaundry: true, hasMezzanine: false, ceilingH: 2.8, entrySide: 'lateral_direita' },
+    { w: 3.8, d: 5.5, bedrooms: 1, hasLaundry: true, hasMezzanine: false, ceilingH: 2.8, entrySide: 'lateral_esquerda' },
+    { w: 4.5, d: 6.2, bedrooms: 1, hasLaundry: true, hasMezzanine: true, ceilingH: 3.4, entrySide: 'frente' },
+    { w: 4.2, d: 5.8, bedrooms: 0, hasLaundry: false, hasMezzanine: true, ceilingH: 3.5, entrySide: 'lateral_direita' },
+  ];
+
+  const baseProj = createBlankProject({
+    name: 'Matriz Ergonômica',
+    client: '',
+    municipality: 'Rio de Janeiro',
+    state: 'RJ',
+    front: 12,
+    depth: 25,
+    floorsCount: 1,
+    methodId: 'alvenaria_convencional',
+  });
+
+  matrix.forEach((cfg, idx) => {
+    const ut = generateParametricUnitLayout({
+      code: `MTX-${idx + 1}`,
+      name: `Matriz ${idx + 1}`,
+      width: cfg.w,
+      depth: cfg.d,
+      ceilingHeight: cfg.ceilingH,
+      bedrooms: cfg.bedrooms,
+      hasLaundry: cfg.hasLaundry,
+      hasBalcony: false,
+      hasMezzanine: cfg.hasMezzanine,
+      accessible: false,
+      extWallThickness: 0.15,
+      intWallThickness: 0.1,
+      constructionSystem: 'alvenaria_convencional',
+      entrySide: cfg.entrySide,
+      internalPartitionType: 'alvenaria',
+    });
+
+    // Fixed mandatory door widths: entrada=0.80, banheiro=0.60, quarto=0.70
+    const entryDoor = ut.openings.find((o) => o.type === 'porta' && o.role === 'entrada');
+    const bathDoor = ut.openings.find((o) => o.type === 'porta' && o.role === 'banheiro');
+    assert.ok(entryDoor && entryDoor.width === 0.8, `Entrada width mismatch on MTX-${idx + 1}`);
+    assert.ok(bathDoor && bathDoor.width === 0.6, `Banheiro width mismatch on MTX-${idx + 1}`);
+    if (cfg.bedrooms > 0) {
+      const bedDoor = ut.openings.find((o) => o.type === 'porta' && o.role === 'quarto');
+      assert.ok(bedDoor && bedDoor.width === 0.7, `Quarto width mismatch on MTX-${idx + 1}`);
+    }
+
+    // Zero ground-level furniture-to-furniture overlaps (respecting nested fixtures like box+chuveiro, bancada+cooktop, rack_tv+tv, espelho+lavatorio)
+    const groundItems = ut.furniture.filter((f) => (f.elevationM ?? 0) < 0.5 && f.category !== 'luminaria');
+    for (let i = 0; i < groundItems.length; i++) {
+      for (let j = i + 1; j < groundItems.length; j++) {
+        const pair = [groundItems[i].category, groundItems[j].category].sort().join('+');
+        if (
+          pair === 'bancada+cooktop' ||
+          pair === 'box+chuveiro' ||
+          pair === 'espelho+lavatorio' ||
+          pair === 'rack_tv+tv' ||
+          pair === 'armario+tv'
+        ) {
+          continue;
+        }
+        const ra = getFurnitureWorldRect(groundItems[i]);
+        const rb = getFurnitureWorldRect(groundItems[j]);
+        assert.equal(
+          rectsOverlap(ra, rb, 0.03),
+          false,
+          `MTX-${idx + 1}: "${groundItems[i].name}" overlaps "${groundItems[j].name}"`,
+        );
+      }
+    }
+
+    // Run engineering clash check (door swings + furniture + grid BFS reachability)
+    const testProj: Project = {
+      ...baseProj,
+      unitTypes: [ut],
+      floors: [
+        {
+          ...baseProj.floors[0],
+          units: [
+            {
+              id: `u-${idx}`,
+              unitNumber: '101',
+              unitTypeId: ut.id,
+              floorId: baseProj.floors[0].id,
+              x: 2.0,
+              y: 3.0,
+              rotationDeg: 0,
+              mirrored: false,
+            },
+          ],
+        },
+      ],
+    };
+    const clashes = runCompatibilityAnalysis(testProj);
+    const furClashes = clashes.filter((c) => c.id.startsWith('clash-fur-'));
+    const doorClashes = clashes.filter((c) => c.id.startsWith('clash-door-'));
+    const accessClashes = clashes.filter((c) => c.id.startsWith('clash-access-'));
+    assert.equal(furClashes.length, 0, `MTX-${idx + 1} furniture clashes: ${JSON.stringify(furClashes)}`);
+    assert.equal(doorClashes.length, 0, `MTX-${idx + 1} door clashes: ${JSON.stringify(doorClashes)}`);
+    assert.equal(accessClashes.length, 0, `MTX-${idx + 1} unreachable rooms: ${JSON.stringify(accessClashes)}`);
+  });
+});
+
+test('Landscaping & Leisure: autoPopulateLandscaping avoids building footprints and syncs with SINAPI-RJ quantities', () => {
+  const proj = createDefaultDemoProject();
+  const populated = autoPopulateLandscaping(proj);
+
+  assert.ok(populated.surfaceZones.length >= 1);
+  assert.ok(populated.plants.length >= 2);
+
+  // Verify plants stay inside lot and outside ground-floor unit footprints
+  const utMap = new Map(proj.unitTypes.map((u) => [u.id, u]));
+  const groundUnits = proj.floors[0].units.map((inst) => {
+    const ut = utMap.get(inst.unitTypeId)!;
+    return { x: inst.x, y: inst.y, width: ut.width, depth: ut.depth };
+  });
+  for (const pl of populated.plants) {
+    const insideUnit = groundUnits.some(
+      (r) => pl.x > r.x + 0.05 && pl.x < r.x + r.width - 0.05 && pl.y > r.y + 0.05 && pl.y < r.y + r.depth - 0.05,
+    );
+    assert.equal(insideUnit, false, `Plant ${pl.id} overlaps building footprint`);
+  }
+
+  const withLandscaping: Project = {
+    ...proj,
+    landscaping: populated,
+    renderSettings: {
+      ...proj.renderSettings,
+      roofShape: 'duas_aguas',
+    },
+  };
+  const qty = calculateQuantities(withLandscaping);
+  assert.ok(qty.items.some((q) => q.code === 'EXT-01' && q.discipline === 'Paisagismo'));
+  assert.ok(qty.items.some((q) => q.code === 'PAI-03' && q.discipline === 'Paisagismo'));
+  const cobItem = qty.items.find((q) => q.code === 'COB-01');
+  assert.ok(cobItem && cobItem.calculationMemory.includes('1.16'));
+
+  const applied = applySinapiRJToBudget(withLandscaping, qty, 'desonerado');
+  const paisagismoBudget = applied.budgetEntries.filter((e) => e.code === 'EXT-01' || e.code.startsWith('PAI-'));
+  assert.ok(paisagismoBudget.every((e) => e.unitPrice !== null && e.unitPrice > 0));
+});
+
 
 
 

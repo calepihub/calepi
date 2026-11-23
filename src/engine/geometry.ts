@@ -244,6 +244,40 @@ export function getOpeningWorldPosition(
 }
 
 /**
+ * Computes the exact axis-aligned sweep bounding rectangle for a swinging door opening
+ * along `wall` using the wall vector (ux, uy) and interior/exterior side (`_in` vs `_out`).
+ */
+export function getDoorSwingRect(wall: Wall, opening: Opening): Rect2D {
+  const len = Math.max(0.001, distance2D(wall.start, wall.end));
+  const ux = (wall.end.x - wall.start.x) / len;
+  const uy = (wall.end.y - wall.start.y) / len;
+  // Clockwise 90-degree normal in SVG/plan coordinates (+Y down) points INWARD for clockwise perimeter
+  const isOut = opening.swingDirection === 'left_out' || opening.swingDirection === 'right_out';
+  const nx = isOut ? uy : -uy;
+  const ny = isOut ? -ux : ux;
+
+  const d0 = opening.offsetAlongWall;
+  const d1 = opening.offsetAlongWall + opening.width;
+  const sweep = opening.width * 0.92;
+  const pts = [
+    { x: wall.start.x + ux * d0, y: wall.start.y + uy * d0 },
+    { x: wall.start.x + ux * d1, y: wall.start.y + uy * d1 },
+    { x: wall.start.x + ux * d0 + nx * sweep, y: wall.start.y + uy * d0 + ny * sweep },
+    { x: wall.start.x + ux * d1 + nx * sweep, y: wall.start.y + uy * d1 + ny * sweep },
+  ];
+  const minX = Math.min(...pts.map((p) => p.x));
+  const maxX = Math.max(...pts.map((p) => p.x));
+  const minY = Math.min(...pts.map((p) => p.y));
+  const maxY = Math.max(...pts.map((p) => p.y));
+  return {
+    x: round3(minX),
+    y: round3(minY),
+    width: round3(maxX - minX),
+    depth: round3(maxY - minY),
+  };
+}
+
+/**
  * Returns the exact axis-aligned world bounding box of a UnitInstance,
  * matching unitLocalToWorld (rotation around local origin (0,0)).
  */

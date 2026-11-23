@@ -54,7 +54,7 @@ service cloud.firestore {
           'electricalHeights', 'hydraulicConfig', 'professionals',
           'budgetEntries', 'budgetSettings', 'normativeRefs',
           'renderSettings', 'memorialOverrides', 'revisions',
-          'fireSafetyNotes', 'accessibilityConfig', 'implantation',
+          'fireSafetyNotes', 'accessibilityConfig', 'implantation', 'landscaping',
           'createdAt', 'updatedAt'
         ])
         && isValidId(data.id)
@@ -94,6 +94,7 @@ service cloud.firestore {
         && data.fireSafetyNotes is map
         && data.accessibilityConfig is map
         && (!('implantation' in data) || data.implantation is map)
+        && (!('landscaping' in data) || data.landscaping is map)
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -173,7 +174,7 @@ service cloud.firestore {
           'electricalHeights', 'hydraulicConfig', 'professionals',
           'budgetEntries', 'budgetSettings', 'normativeRefs',
           'renderSettings', 'memorialOverrides', 'revisions',
-          'fireSafetyNotes', 'accessibilityConfig', 'implantation', 'updatedAt'
+          'fireSafetyNotes', 'accessibilityConfig', 'implantation', 'landscaping', 'updatedAt'
         ]);
 
       allow delete: if isSignedIn()

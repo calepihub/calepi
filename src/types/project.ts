@@ -730,11 +730,136 @@ export interface CapturedRender {
   createdAt: string;
 }
 
+export type WallExteriorFinish =
+  | 'textura_acrilica'
+  | 'reboco_liso'
+  | 'tijolinho_aparente'
+  | 'pedra_madeira'
+  | 'ripado_madeira'
+  | 'cimento_queimado';
+
+export type WallInteriorFinish =
+  | 'pintura_fosca'
+  | 'cimento_queimado'
+  | 'ceramica_metro'
+  | 'madeira_acoplada';
+
+export type FloorFinishMaterial =
+  | 'porcelanato_cinza'
+  | 'porcelanato_marmorizado'
+  | 'ceramica_bege'
+  | 'madeira_carvalho'
+  | 'cimento_queimado'
+  | 'piso_vinilico';
+
+export type RoofFinishMaterial =
+  | 'termoacustica_zinco'
+  | 'ceramica_terracota'
+  | 'fibrocimento_cinza'
+  | 'concreto_impermeabilizado';
+
+export type RoofShapeType =
+  | 'platibanda'
+  | 'duas_aguas'
+  | 'uma_agua'
+  | 'laje_plana';
+
+export type ExteriorSurfaceType =
+  | 'grama_esmeralda'
+  | 'grama_sao_carlos'
+  | 'grama_amendoim'
+  | 'piso_antiderrapante'
+  | 'cimento_queimado'
+  | 'areia'
+  | 'brita'
+  | 'deck_madeira'
+  | 'paver_intertravado';
+
+export type BotanicalSpeciesId =
+  | 'jabuticabeira'
+  | 'mangueira'
+  | 'limoeiro'
+  | 'pitangueira'
+  | 'aceroleira'
+  | 'bananeira'
+  | 'coqueiro_anao'
+  | 'palmeira_imperial'
+  | 'palmeira_areca'
+  | 'ipe_amarelo'
+  | 'pata_de_vaca'
+  | 'costela_de_adao'
+  | 'heliconia'
+  | 'bougainvillea'
+  | 'moreia'
+  | 'buxinho'
+  | 'podocarpus';
+
+export interface ExteriorSurfaceZone {
+  id: string;
+  label: string;
+  surfaceType: ExteriorSurfaceType;
+  x: number;
+  y: number;
+  width: number;
+  depth: number;
+  notes?: string;
+}
+
+export interface PoolSpec {
+  id: string;
+  label: string;
+  x: number;
+  y: number;
+  width: number;
+  depth: number;
+  waterDepthM: number;
+  style: 'retangular' | 'com_prainha';
+  copingMaterial: 'pedra_sao_tome' | 'porcelanato_antiderrapante' | 'deck_madeira';
+  linerColor: 'azul_piscina' | 'turquesa_hijau' | 'ardosia';
+  hasLedLights: boolean;
+  hasWaterfall: boolean;
+}
+
+export interface GourmetAreaSpec {
+  id: string;
+  label: string;
+  x: number;
+  y: number;
+  width: number;
+  depth: number;
+  hasPergola: boolean;
+  pergolaMaterial: 'madeira_cumaru' | 'aco_preto';
+  hasChurrasqueira: boolean;
+  hasCounterSink: boolean;
+  hasDiningSet: boolean;
+}
+
+export interface LandscapePlantItem {
+  id: string;
+  speciesId: BotanicalSpeciesId;
+  x: number;
+  y: number;
+  scale: number;
+  rotationDeg?: number;
+}
+
+export interface SiteLandscaping {
+  defaultGroundSurface: ExteriorSurfaceType;
+  surfaceZones: ExteriorSurfaceZone[];
+  pools: PoolSpec[];
+  gourmetAreas: GourmetAreaSpec[];
+  plants: LandscapePlantItem[];
+  gardenLightsOn?: boolean;
+}
+
 export interface RenderMaterialSettings {
   facadeColor: string;
   interiorWallColor: string;
-  floorMaterial: 'porcelanato_cinza' | 'ceramica_bege' | 'madeira_carvalho' | 'cimento_queimado';
-  roofMaterial: 'termoacustica_zinco' | 'ceramica_terracota' | 'concreto_impermeabilizado';
+  wallExteriorFinish?: WallExteriorFinish;
+  wallInteriorFinish?: WallInteriorFinish;
+  floorMaterial: FloorFinishMaterial;
+  roofMaterial: RoofFinishMaterial;
+  roofShape?: RoofShapeType;
   windowFrameColor: 'aluminio_preto' | 'aluminio_branco' | 'madeira';
   timeOfDay: 'dia' | 'entardecer' | 'noite';
   sunAzimuthDeg: number;
@@ -759,6 +884,7 @@ export interface Project {
   updatedAt: string;
   site: Site;
   implantation?: ImplantationConfig;
+  landscaping?: SiteLandscaping;
   urbanRules: UrbanRule[];
   constructionMethod: ConstructionMethodDetails;
   floors: Floor[];

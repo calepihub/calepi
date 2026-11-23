@@ -1,6 +1,7 @@
 import {
   analyzeSiteGeometry,
   checkImplantationFeasibility,
+  getDoorSwingRect,
   getFurnitureWorldRect,
   getOpeningWorldPosition,
   getRoomArea,
@@ -537,23 +538,17 @@ export function runCompatibilityAnalysis(project: Project): ClashIssue[] {
       }
     }
 
-    // Door swing vs furniture
+    // Door swing vs furniture (using exact directional sweep rect)
     for (const op of ut.openings) {
       if (op.type !== 'porta' || op.swingDirection === 'sliding' || op.swingDirection === 'none') continue;
       const wall = ut.walls.find((w) => w.id === op.wallId);
       if (!wall) continue;
-      const { center } = getOpeningWorldPosition(wall, op);
-      const swingZone = {
-        x: center.x - op.width * 0.45,
-        y: center.y - op.width * 0.45,
-        width: op.width * 0.9,
-        depth: op.width * 0.9,
-      };
+      const swingZone = getDoorSwingRect(wall, op);
       for (const fur of ut.furniture) {
         if (fur.category === 'luminaria' || fur.category === 'espelho') continue;
         if ((fur.elevationM ?? 0) >= 1.5) continue;
         const fr = getFurnitureWorldRect(fur);
-        if (rectsOverlap(swingZone, fr, 0.08)) {
+        if (rectsOverlap(swingZone, fr, 0.05)) {
           issues.push({
             id: `clash-door-${ut.id}-${op.id}-${fur.id}`,
             severity: 'ATENCAO',
@@ -568,6 +563,122 @@ export function runCompatibilityAnalysis(project: Project): ClashIssue[] {
             status: 'pendente',
             targetUnitTypeId: ut.id,
           });
+        }
+      }
+    }
+
+    // Walkability & Room Reachability BFS Check (0.10m resolution grid)
+    if (ut.walls.length > 0 && ut.openings.some((o) => o.type === 'porta' && o.role === 'entrada')) {
+      const cell = 0.1;
+      const cols = Math.max(8, Math.ceil(ut.width / cell));
+      const rows = Math.max(8, Math.ceil(ut.depth / cell));
+      const blocked = new Uint8Array(cols * rows);
+
+      const markRect = (rx: number, ry: number, rw: number, rd: number, val: number) => {
+        const c0 = Math.max(0, Math.floor(rx / cell));
+        const c1 = Math.min(cols - 1, Math.floor((rx + rw - 0.001) / cell));
+        const r0 = Math.max(0, Math.floor(ry / cell));
+        const r1 = Math.min(rows - 1, Math.floor((ry + rd - 0.001) / cell));
+        for (let r = r0; r <= r1; r++) {
+          for (let c = c0; c <= c1; c++) {
+            blocked[r * cols + c] = val;
+          }
+        }
+      };
+
+      // Mark walls as blocked
+      for (const w of ut.walls) {
+        const minX = Math.min(w.start.x, w.end.x) - w.thickness / 2;
+        const maxX = Math.max(w.start.x, w.end.x) + w.thickness / 2;
+        const minY = Math.min(w.start.y, w.end.y) - w.thickness / 2;
+        const maxY = Math.max(w.start.y, w.end.y) + w.thickness / 2;
+        markRect(minX, minY, maxX - minX, maxY - minY, 1);
+      }
+      // Carve door openings through walls
+      for (const op of ut.openings) {
+        if (op.type !== 'porta') continue;
+        const wall = ut.walls.find((w) => w.id === op.wallId);
+        if (!wall) continue;
+        const pos = getOpeningWorldPosition(wall, op);
+        const pad = op.width * 0.45 + 0.08;
+        markRect(pos.center.x - pad, pos.center.y - pad, pad * 2, pad * 2, 0);
+      }
+      // Mark ground-level solid furniture as blocked
+      const passThroughCats = new Set(['luminaria', 'espelho', 'chuveiro', 'tv', 'cooktop']);
+      for (const fur of ut.furniture) {
+        if ((fur.elevationM ?? 0) >= 1.5 || passThroughCats.has(fur.category)) continue;
+        const fr = getFurnitureWorldRect(fur);
+        markRect(fr.x + 0.02, fr.y + 0.02, Math.max(0.05, fr.width - 0.04), Math.max(0.05, fr.depth - 0.04), 1);
+      }
+
+      const entryOp = ut.openings.find((o) => o.type === 'porta' && o.role === 'entrada');
+      const entryWall = entryOp ? ut.walls.find((w) => w.id === entryOp.wallId) : undefined;
+      if (entryOp && entryWall) {
+        const { center } = getOpeningWorldPosition(entryWall, entryOp);
+        const seedC = Math.min(cols - 2, Math.max(1, Math.floor(center.x / cell)));
+        const seedR = Math.min(rows - 2, Math.max(1, Math.floor(center.y / cell)));
+        const visited = new Uint8Array(cols * rows);
+        const queue: number[] = [];
+        for (let dr = -2; dr <= 2; dr++) {
+          for (let dc = -2; dc <= 2; dc++) {
+            const nc = seedC + dc;
+            const nr = seedR + dr;
+            if (nc > 0 && nc < cols - 1 && nr > 0 && nr < rows - 1) {
+              const idx = nr * cols + nc;
+              if (!blocked[idx] && !visited[idx]) {
+                visited[idx] = 1;
+                queue.push(idx);
+              }
+            }
+          }
+        }
+        let head = 0;
+        while (head < queue.length) {
+          const cur = queue[head++];
+          const r = Math.floor(cur / cols);
+          const c = cur % cols;
+          const neighbors = [
+            r > 0 ? cur - cols : -1,
+            r < rows - 1 ? cur + cols : -1,
+            c > 0 ? cur - 1 : -1,
+            c < cols - 1 ? cur + 1 : -1,
+          ];
+          for (const nxt of neighbors) {
+            if (nxt >= 0 && !blocked[nxt] && !visited[nxt]) {
+              visited[nxt] = 1;
+              queue.push(nxt);
+            }
+          }
+        }
+
+        for (const rm of ut.rooms) {
+          if (rm.category === 'mezanino' || rm.category === 'varanda') continue;
+          const c0 = Math.max(0, Math.floor((rm.x + 0.15) / cell));
+          const c1 = Math.min(cols - 1, Math.floor((rm.x + rm.width - 0.15) / cell));
+          const r0 = Math.max(0, Math.floor((rm.y + 0.15) / cell));
+          const r1 = Math.min(rows - 1, Math.floor((rm.y + rm.depth - 0.15) / cell));
+          let reachableCells = 0;
+          for (let r = r0; r <= r1; r++) {
+            for (let c = c0; c <= c1; c++) {
+              if (visited[r * cols + c]) reachableCells++;
+            }
+          }
+          if (reachableCells < 4) {
+            issues.push({
+              id: `clash-access-${ut.id}-${rm.id}`,
+              severity: 'CRITICO',
+              disciplines: 'Arquitetura × Circulação',
+              elementsInvolved: [rm.name],
+              location: `Tipologia ${ut.code}`,
+              floorName: 'Tipologia Padrão',
+              roomName: rm.name,
+              description: `Ambiente "${rm.name}" sem acesso livre contínuo a partir da porta de entrada P1.`,
+              reason: 'Mobiliário ou fechamento de parede bloqueia o trajeto até o cômodo.',
+              suggestion: 'Reposicionar móveis ou deslocar porta de acesso no Editor 2D/3D.',
+              status: 'pendente',
+              targetUnitTypeId: ut.id,
+            });
+          }
         }
       }
     }
