@@ -645,22 +645,25 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
       const bg = new THREE.Color(isArchRender ? 0x0b1220 : 0x0b101b);
       scene.background = bg;
       scene.fog = !isSoftwareGl && isArchRender && !isInternalView ? new THREE.FogExp2(0x0b1220, 0.0085) : null;
-      hemi.intensity = isInternalView ? 0.85 : 0.34;
-      sun.intensity = 0.45;
+      scene.environmentIntensity = isInternalView ? 0.35 : 0.14;
+      hemi.intensity = isInternalView ? 0.72 : 0.28;
+      sun.intensity = 0.4;
       sun.color.setHex(0x93c5fd);
     } else if (rs.timeOfDay === 'entardecer') {
       const bg = new THREE.Color(isArchRender ? 0x43303d : 0x241d26);
       scene.background = bg;
       scene.fog = !isSoftwareGl && isArchRender && !isInternalView ? new THREE.FogExp2(0x43303d, 0.007) : null;
-      hemi.intensity = isInternalView ? 1.05 : 0.62;
-      sun.intensity = 1.9;
+      scene.environmentIntensity = isInternalView ? 0.55 : 0.36;
+      hemi.intensity = isInternalView ? 0.95 : 0.55;
+      sun.intensity = 1.85;
       sun.color.setHex(0xfdba74);
     } else {
       const bg = new THREE.Color(isArchRender ? 0xbfd7ee : 0x161b22);
       scene.background = bg;
       scene.fog = !isSoftwareGl && isArchRender && !isInternalView ? new THREE.FogExp2(0xbfd7ee, 0.0055) : null;
-      hemi.intensity = isInternalView ? 1.25 : isArchRender ? 0.95 : 0.85;
-      sun.intensity = isArchRender ? 2.4 : 2.2;
+      scene.environmentIntensity = isInternalView ? 0.75 : 0.48;
+      hemi.intensity = isInternalView ? 1.1 : isArchRender ? 0.78 : 0.72;
+      sun.intensity = isArchRender ? 2.25 : 2.1;
       sun.color.setHex(0xfffbeb);
     }
 

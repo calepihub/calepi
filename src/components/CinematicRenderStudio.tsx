@@ -85,87 +85,102 @@ const LIGHTING_PRESETS: Array<{
   hemiSkyHex: number;
   hemiGroundHex: number;
   hemiIntensity: number;
+  envIntensity: number;
   exposure: number;
+  bloomStrength: number;
+  bloomThreshold: number;
   isNight: boolean;
   timeTag: 'dia' | 'entardecer' | 'noite';
 }> = [
   {
     id: 'manha',
     label: 'Manhã 08h',
-    elevation: 26,
+    elevation: 28,
     azimuth: 118,
-    turbidity: 4.5,
-    rayleigh: 1.7,
-    mieCoeff: 0.005,
-    mieG: 0.78,
-    sunIntensity: 2.35,
-    sunHex: 0xfff3d6,
-    hemiSkyHex: 0xd8f0ff,
+    turbidity: 3.6,
+    rayleigh: 1.45,
+    mieCoeff: 0.0035,
+    mieG: 0.74,
+    sunIntensity: 2.1,
+    sunHex: 0xfff1d6,
+    hemiSkyHex: 0xcbe8ff,
     hemiGroundHex: 0x3b4d38,
-    hemiIntensity: 0.92,
-    exposure: 1.05,
+    hemiIntensity: 0.56,
+    envIntensity: 0.28,
+    exposure: 0.74,
+    bloomStrength: 0.0,
+    bloomThreshold: 1.8,
     isNight: false,
     timeTag: 'dia',
   },
   {
     id: 'meiodia',
     label: 'Meio-Dia 12h',
-    elevation: 62,
+    elevation: 58,
     azimuth: 165,
-    turbidity: 2.8,
-    rayleigh: 1.2,
-    mieCoeff: 0.003,
-    mieG: 0.72,
-    sunIntensity: 2.75,
-    sunHex: 0xffffff,
-    hemiSkyHex: 0xe0f2fe,
+    turbidity: 2.4,
+    rayleigh: 1.05,
+    mieCoeff: 0.0022,
+    mieG: 0.7,
+    sunIntensity: 2.3,
+    sunHex: 0xfffcf5,
+    hemiSkyHex: 0xdbeafe,
     hemiGroundHex: 0x42523f,
-    hemiIntensity: 1.05,
-    exposure: 1.0,
+    hemiIntensity: 0.6,
+    envIntensity: 0.3,
+    exposure: 0.7,
+    bloomStrength: 0.0,
+    bloomThreshold: 1.85,
     isNight: false,
     timeTag: 'dia',
   },
   {
     id: 'golden',
     label: 'Golden Hour 17h',
-    elevation: 9.5,
-    azimuth: 248,
-    turbidity: 8.5,
-    rayleigh: 2.9,
-    mieCoeff: 0.012,
-    mieG: 0.86,
-    sunIntensity: 2.45,
-    sunHex: 0xffb36b,
+    elevation: 14,
+    azimuth: 245,
+    turbidity: 5.8,
+    rayleigh: 2.25,
+    mieCoeff: 0.007,
+    mieG: 0.78,
+    sunIntensity: 2.05,
+    sunHex: 0xffb870,
     hemiSkyHex: 0xfde6c4,
     hemiGroundHex: 0x382d2b,
-    hemiIntensity: 0.74,
-    exposure: 1.12,
+    hemiIntensity: 0.45,
+    envIntensity: 0.22,
+    exposure: 0.78,
+    bloomStrength: 0.05,
+    bloomThreshold: 1.65,
     isNight: false,
     timeTag: 'entardecer',
   },
   {
     id: 'crepusculo',
     label: 'Crepúsculo 18h30',
-    elevation: 2.2,
-    azimuth: 265,
-    turbidity: 10.0,
-    rayleigh: 3.4,
-    mieCoeff: 0.02,
-    mieG: 0.88,
-    sunIntensity: 1.15,
-    sunHex: 0xfb7185,
-    hemiSkyHex: 0x6366f1,
+    elevation: 22,
+    azimuth: 258,
+    turbidity: 8.0,
+    rayleigh: 2.8,
+    mieCoeff: 0.01,
+    mieG: 0.8,
+    sunIntensity: 0.65,
+    sunHex: 0x93c5fd,
+    hemiSkyHex: 0x64748b,
     hemiGroundHex: 0x1e2430,
-    hemiIntensity: 0.56,
-    exposure: 1.18,
+    hemiIntensity: 0.32,
+    envIntensity: 0.12,
+    exposure: 0.86,
+    bloomStrength: 0.1,
+    bloomThreshold: 1.4,
     isNight: true,
     timeTag: 'entardecer',
   },
   {
     id: 'noite',
     label: 'Noturno 21h',
-    elevation: -8,
-    azimuth: 290,
+    elevation: 36,
+    azimuth: 295,
     turbidity: 1.5,
     rayleigh: 0.35,
     mieCoeff: 0.002,
@@ -174,8 +189,11 @@ const LIGHTING_PRESETS: Array<{
     sunHex: 0x93c5fd,
     hemiSkyHex: 0x1e293b,
     hemiGroundHex: 0x0f172a,
-    hemiIntensity: 0.44,
-    exposure: 1.24,
+    hemiIntensity: 0.24,
+    envIntensity: 0.07,
+    exposure: 0.9,
+    bloomStrength: 0.12,
+    bloomThreshold: 1.35,
     isNight: true,
     timeTag: 'noite',
   },
@@ -395,7 +413,7 @@ export const CinematicRenderStudio: React.FC<CinematicRenderStudioProps> = ({
     if (!isSoftwareGl) {
       composer = new EffectComposer(renderer);
       composer.addPass(new RenderPass(scene, camera));
-      const bloom = new UnrealBloomPass(new THREE.Vector2(initW, initH), 0.24, 0.55, 0.88);
+      const bloom = new UnrealBloomPass(new THREE.Vector2(initW, initH), 0.05, 0.25, 1.65);
       composer.addPass(bloom);
       composer.addPass(new OutputPass());
       composerRef.current = composer;
@@ -483,6 +501,9 @@ export const CinematicRenderStudio: React.FC<CinematicRenderStudioProps> = ({
     uniforms['rayleigh'].value = p.rayleigh;
     uniforms['mieCoefficient'].value = p.mieCoeff;
     uniforms['mieDirectionalG'].value = p.mieG;
+    if (uniforms['showSunDisc']) {
+      uniforms['showSunDisc'].value = 0;
+    }
 
     const phi = THREE.MathUtils.degToRad(90 - p.elevation);
     const theta = THREE.MathUtils.degToRad(p.azimuth);
@@ -496,21 +517,24 @@ export const CinematicRenderStudio: React.FC<CinematicRenderStudioProps> = ({
     hemi.color.setHex(p.hemiSkyHex);
     hemi.groundColor.setHex(p.hemiGroundHex);
     hemi.intensity = p.hemiIntensity;
+    scene.environmentIntensity = p.envIntensity;
 
     scene.fog = !isSoftwareGlRef.current
-      ? new THREE.FogExp2(p.isNight ? 0x0b1220 : p.id === 'golden' ? 0xd9a07b : 0xcbdcf0, p.isNight ? 0.008 : 0.0045)
+      ? new THREE.FogExp2(p.isNight ? 0x0b1220 : p.id === 'golden' ? 0xd9a07b : 0xcbdcf0, p.isNight ? 0.008 : 0.004)
       : null;
 
     if (p.isNight) {
       sky.visible = false;
-      scene.background = new THREE.Color(p.id === 'crepusculo' ? 0x2c223e : 0x070c17);
+      scene.background = new THREE.Color(p.id === 'crepusculo' ? 0x221e33 : 0x070c17);
     } else {
       sky.visible = true;
     }
 
     renderer.toneMappingExposure = round2(p.exposure * exposureBoost);
     if (bloomPassRef.current) {
-      bloomPassRef.current.strength = p.isNight ? 0.36 : p.id === 'golden' ? 0.25 : 0.16;
+      bloomPassRef.current.strength = p.bloomStrength;
+      bloomPassRef.current.threshold = p.bloomThreshold;
+      bloomPassRef.current.radius = 0.25;
     }
 
     const focal = FOCAL_LENGTHS.find((f) => f.mm === focalMm) ?? FOCAL_LENGTHS[1];
@@ -750,7 +774,7 @@ export const CinematicRenderStudio: React.FC<CinematicRenderStudioProps> = ({
       group.add(plantG);
 
       if (gardenLit) {
-        const uplight = new THREE.PointLight(0xfde68a, 0.9, 3.6, 2);
+        const uplight = new THREE.PointLight(0xfde68a, 0.38, 2.8, 2);
         uplight.position.set(pl.x - centerOffset.x, 0.25, pl.y - centerOffset.z);
         group.add(uplight);
       }
@@ -860,7 +884,7 @@ export const CinematicRenderStudio: React.FC<CinematicRenderStudioProps> = ({
         group.add(floorFinish);
 
         if (nightOn && fIdx === 0) {
-          const interiorLight = new THREE.PointLight(0xffdca8, activePreset.isNight ? 3.8 : 1.6, 8.5, 1.5);
+          const interiorLight = new THREE.PointLight(0xffdca8, activePreset.isNight ? 1.55 : 0.75, 6.5, 2);
           interiorLight.position.set(slabC.x, baseY + floor.slabThickness + ut.ceilingHeight - 0.35, slabC.z);
           group.add(interiorLight);
         }
@@ -1329,8 +1353,8 @@ export const CinematicRenderStudio: React.FC<CinematicRenderStudioProps> = ({
                     </div>
                     <input
                       type="range"
-                      min={0.65}
-                      max={1.45}
+                      min={0.5}
+                      max={1.5}
                       step={0.05}
                       value={exposureBoost}
                       onChange={(e) => setExposureBoost(Number(e.target.value))}
