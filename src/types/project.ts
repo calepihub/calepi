@@ -422,6 +422,7 @@ export type ElectricalCategory =
   | 'cftv'
   | 'rack_ti'
   | 'interfone'
+  | 'quadro_luz'
   | 'personalizado';
 
 export interface ElectricalPoint {
@@ -563,6 +564,7 @@ export interface UnitType {
   internalPartitionType?: InternalPartitionType;
   accessible: boolean;
   finishStandard: 'economico' | 'padrao' | 'medio_alto' | 'personalizado';
+  mepProfile?: 'simples' | 'completo';
   rooms: Room[];
   walls: Wall[];
   openings: Opening[];

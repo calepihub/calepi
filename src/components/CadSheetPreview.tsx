@@ -27,6 +27,7 @@ import {
   normalizeSiteData,
 } from '../engine/implantation';
 import { getBotanicalMeta, getExteriorSurfaceMeta } from '../engine/landscaping';
+import { computeElectricalRouting, computeHydraulicRouting, getQdcPosition } from '../engine/mepRouting';
 import { ElectricalSymbolSvg, FurnitureCadBlock } from './CadArchitecturalSymbols';
 import type { Project, UnitType } from '../types/project';
 
@@ -993,7 +994,7 @@ export const CadSheetPreview: React.FC<CadSheetPreviewProps> = ({
     const uoy = py + 52 + (ph - 88 - ut.depth * uScale) / 2;
     const ux = (lx: number) => uox + lx * uScale;
     const uy = (ly: number) => uoy + ly * uScale;
-    const qdcLocal = { x: 0.35, y: 0.35 };
+    const qdcLocal = getQdcPosition(ut);
 
     return (
       <g>
@@ -1228,76 +1229,125 @@ export const CadSheetPreview: React.FC<CadSheetPreviewProps> = ({
         })}
 
         {/* Discipline-specific overlay inside 1:25 unit enlargement */}
-        {showElectrical && (
-          <g>
-            <rect x={ux(qdcLocal.x) - 4} y={uy(qdcLocal.y) - 4} width={8} height={8} fill={pal.electric} />
-            <text x={ux(qdcLocal.x) + 6} y={uy(qdcLocal.y) + 2} fill={pal.electric} fontSize="7" fontWeight="bold" fontFamily="monospace">
-              QDC
-            </text>
-            {ut.electricalPoints
-              .filter((e) => !isSpecialCategory(e.category))
-              .map((ep) => {
-                const midX = (ux(qdcLocal.x) + ux(ep.x)) / 2;
-                const midY = (uy(qdcLocal.y) + uy(ep.y)) / 2 - 14;
-                return (
-                  <g key={`enl-el-${ep.id}`}>
-                    <path
-                      d={`M ${ux(qdcLocal.x)} ${uy(qdcLocal.y)} Q ${midX} ${midY} ${ux(ep.x)} ${uy(ep.y)}`}
+        {showElectrical && (() => {
+          const elRt = computeElectricalRouting(ut);
+          return (
+            <g>
+              {elRt.segments
+                .filter((s) => s.kind === 'electrical')
+                .map((seg) => {
+                  const pts = seg.elbow
+                    ? `${ux(seg.from.x)},${uy(seg.from.y)} ${ux(seg.elbow.x)},${uy(seg.elbow.y)} ${ux(seg.to.x)},${uy(seg.to.y)}`
+                    : `${ux(seg.from.x)},${uy(seg.from.y)} ${ux(seg.to.x)},${uy(seg.to.y)}`;
+                  return (
+                    <polyline
+                      key={`enl-el-rt-${seg.id}`}
+                      points={pts}
                       fill="none"
                       stroke={pal.electric}
-                      strokeWidth="0.8"
+                      strokeWidth="0.85"
                       strokeDasharray="3 2"
-                      opacity={0.75}
+                      opacity={0.78}
                     />
+                  );
+                })}
+              <ElectricalSymbolSvg category="quadro_luz" cx={ux(qdcLocal.x)} cy={uy(qdcLocal.y)} r={5.2} color={pal.electric} bg={pal.bg} />
+              <text x={ux(qdcLocal.x) + 7} y={uy(qdcLocal.y) + 2.5} fill={pal.electric} fontSize="7" fontWeight="bold" fontFamily="monospace">
+                {qdcLocal.code}
+              </text>
+              {ut.electricalPoints
+                .filter((e) => !isSpecialCategory(e.category) && e.category !== 'quadro_luz' && !e.code.toUpperCase().startsWith('QDC'))
+                .map((ep) => (
+                  <g key={`enl-el-${ep.id}`}>
                     <ElectricalSymbolSvg category={ep.category} cx={ux(ep.x)} cy={uy(ep.y)} r={4.2} color={pal.electric} bg={pal.bg} />
                     <text x={ux(ep.x) + 5.5} y={uy(ep.y) + 2.5} fill={pal.electric} fontSize="6.5" fontFamily="monospace">
                       {ep.code}
                     </text>
                   </g>
-                );
-              })}
-          </g>
-        )}
+                ))}
+            </g>
+          );
+        })()}
 
-        {showSpecials && (
-          <g>
-            <rect x={ux(0.35) - 5} y={uy(0.35) - 5} width={10} height={10} fill={specialCable} />
-            <text x={ux(0.35) + 8} y={uy(0.35) + 3} fill={specialLabel} fontSize="7" fontWeight="bold" fontFamily="monospace">
-              CX-TI
-            </text>
-            {ut.electricalPoints
-              .filter((e) => isSpecialCategory(e.category))
-              .map((ep) => (
-                <g key={`enl-sp-${ep.id}`}>
-                  <path
-                    d={`M ${ux(0.35)} ${uy(0.35)} Q ${(ux(0.35) + ux(ep.x)) / 2} ${(uy(0.35) + uy(ep.y)) / 2 - 10} ${ux(ep.x)} ${uy(ep.y)}`}
+        {showSpecials && (() => {
+          const elRt = computeElectricalRouting(ut);
+          return (
+            <g>
+              <ElectricalSymbolSvg category="quadro_luz" cx={ux(qdcLocal.x)} cy={uy(qdcLocal.y)} r={4.5} color={specialCable} bg={pal.bg} />
+              <text x={ux(qdcLocal.x) + 6.5} y={uy(qdcLocal.y) + 2.5} fill={specialLabel} fontSize="6.8" fontWeight="bold" fontFamily="monospace">
+                {qdcLocal.code} / TI
+              </text>
+              {elRt.segments
+                .filter((s) => s.kind === 'special')
+                .map((seg) => {
+                  const pts = seg.elbow
+                    ? `${ux(seg.from.x)},${uy(seg.from.y)} ${ux(seg.elbow.x)},${uy(seg.elbow.y)} ${ux(seg.to.x)},${uy(seg.to.y)}`
+                    : `${ux(seg.from.x)},${uy(seg.from.y)} ${ux(seg.to.x)},${uy(seg.to.y)}`;
+                  return (
+                    <polyline
+                      key={`enl-sp-rt-${seg.id}`}
+                      points={pts}
+                      fill="none"
+                      stroke={specialCable}
+                      strokeWidth="0.95"
+                      strokeDasharray="4 2"
+                      opacity={0.85}
+                    />
+                  );
+                })}
+              {ut.electricalPoints
+                .filter((e) => isSpecialCategory(e.category))
+                .map((ep) => (
+                  <g key={`enl-sp-${ep.id}`}>
+                    <ElectricalSymbolSvg category={ep.category} cx={ux(ep.x)} cy={uy(ep.y)} r={4.6} color={specialStroke} bg={pal.bg} />
+                    <text x={ux(ep.x) + 6} y={uy(ep.y) + 2.5} fill={specialLabel} fontSize="6.8" fontWeight="bold" fontFamily="monospace">
+                      {ep.code}
+                    </text>
+                  </g>
+                ))}
+            </g>
+          );
+        })()}
+
+        {showWater && (() => {
+          const hydRt = computeHydraulicRouting(ut);
+          return (
+            <g>
+              {hydRt.segments.map((seg) => {
+                const col = seg.kind === 'hot_water' ? pal.hotWater : pal.coldWater;
+                const pts = seg.elbow
+                  ? `${ux(seg.from.x)},${uy(seg.from.y)} ${ux(seg.elbow.x)},${uy(seg.elbow.y)} ${ux(seg.to.x)},${uy(seg.to.y)}`
+                  : `${ux(seg.from.x)},${uy(seg.from.y)} ${ux(seg.to.x)},${uy(seg.to.y)}`;
+                return (
+                  <polyline
+                    key={`enl-hyd-rt-${seg.id}`}
+                    points={pts}
                     fill="none"
-                    stroke={specialCable}
-                    strokeWidth="0.9"
-                    strokeDasharray="4 2"
+                    stroke={col}
+                    strokeWidth="1.2"
+                    strokeDasharray={seg.kind === 'hot_water' ? '3 1.5' : undefined}
                     opacity={0.82}
                   />
-                  <ElectricalSymbolSvg category={ep.category} cx={ux(ep.x)} cy={uy(ep.y)} r={4.6} color={specialStroke} bg={pal.bg} />
-                  <text x={ux(ep.x) + 6} y={uy(ep.y) + 2.5} fill={specialLabel} fontSize="6.8" fontWeight="bold" fontFamily="monospace">
-                    {ep.code}
-                  </text>
-                </g>
-              ))}
-          </g>
-        )}
-
-        {showWater &&
-          ut.waterPoints.map((wp) => {
-            const col = wp.waterType === 'quente' ? pal.hotWater : pal.coldWater;
-            return (
-              <g key={`enl-wp-${wp.id}`}>
-                <circle cx={ux(wp.x)} cy={uy(wp.y)} r={4} fill={col} stroke={pal.bg} strokeWidth="0.8" />
-                <text x={ux(wp.x) + 5.5} y={uy(wp.y) + 2.5} fill={col} fontSize="6.5" fontWeight="bold" fontFamily="monospace">
-                  {wp.code} Ø{wp.diameterMm}
-                </text>
-              </g>
-            );
-          })}
+                );
+              })}
+              <circle cx={ux(hydRt.riser.x)} cy={uy(hydRt.riser.y)} r={4.5} fill={pal.coldWater} stroke={pal.bg} strokeWidth="1" />
+              <text x={ux(hydRt.riser.x) + 6} y={uy(hydRt.riser.y) - 4} fill={pal.coldWater} fontSize="6.2" fontWeight="bold" fontFamily="monospace">
+                AF-PRUM
+              </text>
+              {ut.waterPoints.map((wp) => {
+                const col = wp.waterType === 'quente' ? pal.hotWater : pal.coldWater;
+                return (
+                  <g key={`enl-wp-${wp.id}`}>
+                    <circle cx={ux(wp.x)} cy={uy(wp.y)} r={4} fill={col} stroke={pal.bg} strokeWidth="0.8" />
+                    <text x={ux(wp.x) + 5.5} y={uy(wp.y) + 2.5} fill={col} fontSize="6.5" fontWeight="bold" fontFamily="monospace">
+                      {wp.code} Ø{wp.diameterMm}
+                    </text>
+                  </g>
+                );
+              })}
+            </g>
+          );
+        })()}
 
         {showDrain &&
           (() => {
@@ -1844,7 +1894,8 @@ export const CadSheetPreview: React.FC<CadSheetPreviewProps> = ({
         {activeFloor?.units.map((inst) => {
           const ut = project.unitTypes.find((t) => t.id === inst.unitTypeId);
           if (!ut) return null;
-          const qdcPt = unitLocalToWorld(inst, ut, 0.35, 0.35);
+          const qdcLocal = getQdcPosition(ut);
+          const qdcPt = unitLocalToWorld(inst, ut, qdcLocal.x, qdcLocal.y);
 
           return (
             <g key={inst.id}>
@@ -2023,32 +2074,44 @@ export const CadSheetPreview: React.FC<CadSheetPreviewProps> = ({
                   );
                 })()}
 
-              {/* Electrical Curved Conduits + Symbols */}
-              {showElectrical && (
-                <g>
-                  <rect x={mx(qdcPt.x) - 3} y={my(qdcPt.y) - 3} width={6} height={6} fill={pal.electric} />
-                  {ut.electricalPoints
-                    .filter((ep) => !isSpecialCategory(ep.category))
-                    .map((ep) => {
-                      const p = unitLocalToWorld(inst, ut, ep.x, ep.y);
-                      const midX = (mx(qdcPt.x) + mx(p.x)) / 2;
-                      const midY = (my(qdcPt.y) + my(p.y)) / 2 - 10;
-                      return (
-                        <g key={ep.id}>
-                          <path
-                            d={`M ${mx(qdcPt.x)} ${my(qdcPt.y)} Q ${midX} ${midY} ${mx(p.x)} ${my(p.y)}`}
+              {/* Electrical Shortest-Path Conduits + Symbols */}
+              {showElectrical && (() => {
+                const elRt = computeElectricalRouting(ut);
+                return (
+                  <g>
+                    {elRt.segments
+                      .filter((s) => s.kind === 'electrical')
+                      .map((seg) => {
+                        const wFrom = unitLocalToWorld(inst, ut, seg.from.x, seg.from.y);
+                        const wTo = unitLocalToWorld(inst, ut, seg.to.x, seg.to.y);
+                        const wElbow = seg.elbow ? unitLocalToWorld(inst, ut, seg.elbow.x, seg.elbow.y) : null;
+                        const pts = wElbow
+                          ? `${mx(wFrom.x)},${my(wFrom.y)} ${mx(wElbow.x)},${my(wElbow.y)} ${mx(wTo.x)},${my(wTo.y)}`
+                          : `${mx(wFrom.x)},${my(wFrom.y)} ${mx(wTo.x)},${my(wTo.y)}`;
+                        return (
+                          <polyline
+                            key={`fp-el-rt-${seg.id}`}
+                            points={pts}
                             fill="none"
                             stroke={pal.electric}
-                            strokeWidth="0.65"
+                            strokeWidth="0.7"
                             strokeDasharray="2.5 2"
-                            opacity="0.7"
+                            opacity="0.72"
                           />
-                          <ElectricalSymbolSvg category={ep.category} cx={mx(p.x)} cy={my(p.y)} r={2.8} color={pal.electric} bg={pal.bg} />
-                        </g>
-                      );
-                    })}
-                </g>
-              )}
+                        );
+                      })}
+                    <ElectricalSymbolSvg category="quadro_luz" cx={mx(qdcPt.x)} cy={my(qdcPt.y)} r={3.6} color={pal.electric} bg={pal.bg} />
+                    {ut.electricalPoints
+                      .filter((ep) => !isSpecialCategory(ep.category) && ep.category !== 'quadro_luz' && !ep.code.toUpperCase().startsWith('QDC'))
+                      .map((ep) => {
+                        const p = unitLocalToWorld(inst, ut, ep.x, ep.y);
+                        return (
+                          <ElectricalSymbolSvg key={ep.id} category={ep.category} cx={mx(p.x)} cy={my(p.y)} r={2.8} color={pal.electric} bg={pal.bg} />
+                        );
+                      })}
+                  </g>
+                );
+              })()}
 
               {/* Special Installations (CFTV, Wi-Fi, Dados, Antena TV, Interfone) */}
               {showSpecials &&
@@ -2069,18 +2132,40 @@ export const CadSheetPreview: React.FC<CadSheetPreviewProps> = ({
                     );
                   })}
 
-              {/* Hydraulic Water Pipelines */}
-              {showWater &&
-                ut.waterPoints.map((wp) => {
-                  const p = unitLocalToWorld(inst, ut, wp.x, wp.y);
-                  const col = wp.waterType === 'quente' ? pal.hotWater : pal.coldWater;
-                  return (
-                    <g key={wp.id}>
-                      <line x1={mx(qdcPt.x)} y1={my(qdcPt.y)} x2={mx(p.x)} y2={my(p.y)} stroke={col} strokeWidth="0.95" />
-                      <circle cx={mx(p.x)} cy={my(p.y)} r={2.4} fill={col} />
-                    </g>
-                  );
-                })}
+              {/* Hydraulic Water Pipelines (Shortest-Path MST from Wet Riser) */}
+              {showWater && (() => {
+                const hydRt = computeHydraulicRouting(ut);
+                const wRiser = unitLocalToWorld(inst, ut, hydRt.riser.x, hydRt.riser.y);
+                return (
+                  <g>
+                    {hydRt.segments.map((seg) => {
+                      const col = seg.kind === 'hot_water' ? pal.hotWater : pal.coldWater;
+                      const wFrom = unitLocalToWorld(inst, ut, seg.from.x, seg.from.y);
+                      const wTo = unitLocalToWorld(inst, ut, seg.to.x, seg.to.y);
+                      const wElbow = seg.elbow ? unitLocalToWorld(inst, ut, seg.elbow.x, seg.elbow.y) : null;
+                      const pts = wElbow
+                        ? `${mx(wFrom.x)},${my(wFrom.y)} ${mx(wElbow.x)},${my(wElbow.y)} ${mx(wTo.x)},${my(wTo.y)}`
+                        : `${mx(wFrom.x)},${my(wFrom.y)} ${mx(wTo.x)},${my(wTo.y)}`;
+                      return (
+                        <polyline
+                          key={`fp-hyd-rt-${seg.id}`}
+                          points={pts}
+                          fill="none"
+                          stroke={col}
+                          strokeWidth="0.95"
+                          strokeDasharray={seg.kind === 'hot_water' ? '2.5 1.5' : undefined}
+                        />
+                      );
+                    })}
+                    <circle cx={mx(wRiser.x)} cy={my(wRiser.y)} r={2.8} fill={pal.coldWater} stroke={pal.bg} strokeWidth="0.6" />
+                    {ut.waterPoints.map((wp) => {
+                      const p = unitLocalToWorld(inst, ut, wp.x, wp.y);
+                      const col = wp.waterType === 'quente' ? pal.hotWater : pal.coldWater;
+                      return <circle key={wp.id} cx={mx(p.x)} cy={my(p.y)} r={2.4} fill={col} />;
+                    })}
+                  </g>
+                );
+              })()}
 
               {/* Sanitary Drainage Network */}
               {showDrain &&

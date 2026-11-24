@@ -586,6 +586,19 @@ export const ElectricalSymbolSvg: React.FC<ElectricalSymbolSvgProps> = ({
       </g>
     );
   }
+  if (category === 'quadro_luz') {
+    const rw = r * 2.1;
+    const rh = r * 1.25;
+    return (
+      <g>
+        <rect x={cx - rw} y={cy - rh} width={rw * 2} height={rh * 2} fill={bg} stroke={color} strokeWidth={sw * 1.1} />
+        <polygon
+          points={`${cx - rw},${cy - rh} ${cx + rw},${cy - rh} ${cx - rw},${cy + rh}`}
+          fill={color}
+        />
+      </g>
+    );
+  }
   if (category === 'interfone') {
     return (
       <g>

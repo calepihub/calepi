@@ -10,6 +10,7 @@ import {
   round3,
 } from './geometry';
 import { validateImplantation } from './implantation';
+import { computeElectricalRouting } from './mepRouting';
 import type {
   Project,
   RuleEvaluationStatus,
@@ -69,8 +70,10 @@ export function calculateElectricalSizing(project: Project): ProjectElectricalRe
   const pendingItems: string[] = [];
 
   for (const ut of project.unitTypes) {
+    const routing = computeElectricalRouting(ut);
     const circuitMap = new Map<string, typeof ut.electricalPoints>();
     for (const pt of ut.electricalPoints) {
+      if (pt.category === 'quadro_luz' || pt.code.toUpperCase().startsWith('QDC')) continue;
       const key = pt.circuitId || 'SEM-CIRCUITO';
       const arr = circuitMap.get(key) ?? [];
       arr.push(pt);
@@ -79,6 +82,11 @@ export function calculateElectricalSizing(project: Project): ProjectElectricalRe
 
     const circuits: CircuitSummary[] = [];
     const warnings: string[] = [];
+    if (ut.electricalPoints.length > 0 && !routing.qdcPoint.existsInModel) {
+      warnings.push(
+        `Tipologia ${ut.code} não possui Quadro de Distribuição (QDC) cadastrado na planta; usando posição de referência.`,
+      );
+    }
     let installedPowerVA = 0;
     let lightingAndTugVA = 0;
     let tuePowerVA = 0;
@@ -96,8 +104,9 @@ export function calculateElectricalSizing(project: Project): ProjectElectricalRe
       const conduitMm = Math.max(...pts.map((p) => p.conduitDiameterMm || 20), 20);
       const recommendedBreakerA = pickBreaker(currentA);
 
-      // Estimate average circuit run from unit center/board
-      const estimatedLengthM = round2(Math.max(6, ut.width + ut.depth + 3));
+      // Comprimento real otimizado pelo menor caminho ortogonal a partir do QDC-01
+      const routedLen = routing.lengthByCircuit[circuitId] ?? Math.max(4, ut.width + ut.depth);
+      const estimatedLengthM = round2(Math.max(1.5, routedLen));
       // Copper conductivity gamma = 56 m/(ohm*mm2); single-phase/bi-phase factor 200
       const voltageDropPercent = round2(
         (200 * estimatedLengthM * currentA) / (56 * conductorMm2 * voltage),

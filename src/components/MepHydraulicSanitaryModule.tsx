@@ -6,6 +6,7 @@ import {
   calculateRainwaterSizing,
 } from '../engine/engineering';
 import { getOpeningWorldPosition, getWallAngleRad, round2 } from '../engine/geometry';
+import { computeDrainageRouting, computeHydraulicRouting } from '../engine/mepRouting';
 import { nextId } from '../engine/parametricGenerator';
 import { FurnitureCadBlock } from './CadArchitecturalSymbols';
 import type { DrainageCategory, DrainagePoint, Project, UnitType, WaterCategory, WaterPoint } from '../types/project';
@@ -70,6 +71,9 @@ export const MepHydraulicSanitaryModule: React.FC<MepHydraulicSanitaryModuleProp
   const [selectedDpId, setSelectedDpId] = useState<string | null>(null);
   const [draggingWp, setDraggingWp] = useState<{ id: string; offsetX: number; offsetY: number } | null>(null);
   const [draggingDp, setDraggingDp] = useState<{ id: string; offsetX: number; offsetY: number } | null>(null);
+
+  const hydRouting = activeUt ? computeHydraulicRouting(activeUt) : null;
+  const drRouting = activeUt ? computeDrainageRouting(activeUt) : null;
 
   const snapCoord = (v: number) => Math.round(v / 0.05) * 0.05;
 
@@ -298,12 +302,45 @@ export const MepHydraulicSanitaryModule: React.FC<MepHydraulicSanitaryModuleProp
           {activeUt && (
             <div className="rounded-lg border border-[#2A2F38] bg-[#1B1E24] p-4 space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <h2 className="text-sm font-semibold text-white flex items-center gap-2">
-                  <Droplets className="w-4 h-4 text-[#60A5FA]" />
-                  Pontos Hidráulicos de {activeUt.code} ({activeUt.waterPoints.length})
-                </h2>
+                <div>
+                  <h2 className="text-sm font-semibold text-white flex items-center gap-2">
+                    <Droplets className="w-4 h-4 text-[#60A5FA]" />
+                    Pontos Hidráulicos de {activeUt.code} ({activeUt.waterPoints.length})
+                  </h2>
+                  {hydRouting && (
+                    <div className="text-[11px] font-mono text-sky-300 mt-0.5">
+                      Prumada ({hydRouting.riser.x.toFixed(2)}, {hydRouting.riser.y.toFixed(2)}) · Tubulação otimizada (menor caminho MST): {hydRouting.totalPipeM} m
+                    </div>
+                  )}
+                </div>
 
                 <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onUpdateProject((prev) => ({
+                        ...prev,
+                        hydraulicConfig: {
+                          ...prev.hydraulicConfig,
+                          hasHotWaterHeating: false,
+                          hotWaterMaterial: 'Sem Água Quente (Chuveiro Elétrico)',
+                          heatingSystem: 'Sem aquecimento central (kitnet simples: somente água fria + chuveiro elétrico)',
+                        },
+                        unitTypes: prev.unitTypes.map((u) =>
+                          u.id === activeUt.id
+                            ? {
+                                ...u,
+                                mepProfile: 'simples',
+                                waterPoints: u.waterPoints.filter((wp) => wp.waterType !== 'quente'),
+                              }
+                            : u,
+                        ),
+                      }), `Simplificação hidráulica (Só Água Fria) em ${activeUt.code}`);
+                    }}
+                    className="px-2.5 py-1 text-[11px] font-semibold rounded border border-emerald-500/40 bg-emerald-600/20 text-emerald-200 hover:bg-emerald-600/35"
+                  >
+                    Modo Só Água Fria (Simples)
+                  </button>
                   <select
                     value={wCat}
                     onChange={(e) => setWCat(e.target.value as WaterCategory)}
@@ -476,6 +513,44 @@ export const MepHydraulicSanitaryModule: React.FC<MepHydraulicSanitaryModuleProp
                         </g>
                       );
                     })}
+                    {hydRouting && (
+                      <g pointerEvents="none">
+                        {hydRouting.segments.map((seg) => {
+                          const pts = seg.elbow
+                            ? `${seg.from.x},${seg.from.y} ${seg.elbow.x},${seg.elbow.y} ${seg.to.x},${seg.to.y}`
+                            : `${seg.from.x},${seg.from.y} ${seg.to.x},${seg.to.y}`;
+                          return (
+                            <polyline
+                              key={`hyd-rt-${seg.id}`}
+                              points={pts}
+                              fill="none"
+                              stroke={seg.kind === 'hot_water' ? '#EF4444' : '#38BDF8'}
+                              strokeOpacity={0.75}
+                              strokeWidth={0.028}
+                              strokeDasharray={seg.kind === 'hot_water' ? '0.07 0.04' : '0.09 0.03'}
+                            />
+                          );
+                        })}
+                        <circle
+                          cx={hydRouting.riser.x}
+                          cy={hydRouting.riser.y}
+                          r={0.09}
+                          fill="#0EA5E9"
+                          stroke="#FFFFFF"
+                          strokeWidth={0.02}
+                        />
+                        <text
+                          x={hydRouting.riser.x + 0.11}
+                          y={hydRouting.riser.y + 0.04}
+                          fill="#BAE6FD"
+                          fontSize="0.1"
+                          fontWeight="bold"
+                          fontFamily="JetBrains Mono, monospace"
+                        >
+                          PRUMADA AF
+                        </text>
+                      </g>
+                    )}
                     {activeUt.waterPoints.map((wp) => {
                       const isSel = selectedWpId === wp.id;
                       const col = wp.waterType === 'quente' ? '#EF4444' : '#3B82F6';
@@ -739,7 +814,7 @@ export const MepHydraulicSanitaryModule: React.FC<MepHydraulicSanitaryModuleProp
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <h2 className="text-sm font-semibold text-white">
-                  Rede Sanitária Conectada — {activeUt.code} (ΣUHC: {unitDrain.totalUHC} · TQ Ø{unitDrain.recommendedStackMm}mm)
+                  Rede Sanitária Conectada — {activeUt.code} (ΣUHC: {unitDrain.totalUHC} · TQ Ø{unitDrain.recommendedStackMm}mm{drRouting ? ` · ${drRouting.totalDrainPipeM}m` : ''})
                 </h2>
                 <p className="text-xs text-[#949BA8] mt-0.5 font-mono">{unitDrain.methodology}</p>
               </div>

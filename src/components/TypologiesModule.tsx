@@ -61,6 +61,7 @@ export const TypologiesModule: React.FC<TypologiesModuleProps> = ({
   const [newLaundry, setNewLaundry] = useState(true);
   const [newBalcony, setNewBalcony] = useState(false);
   const [newAcc, setNewAcc] = useState(false);
+  const [newMepProfile, setNewMepProfile] = useState<'simples' | 'completo'>('simples');
 
   // Perguntas de mezanino (somente visíveis e aplicáveis se pé-direito >= 3,00m)
   const [newMezzEnabled, setNewMezzEnabled] = useState(false);
@@ -126,6 +127,7 @@ export const TypologiesModule: React.FC<TypologiesModuleProps> = ({
       constructionSystem: project.constructionMethod.methodId,
       entrySide: newEntrySide,
       internalPartitionType: newPartitionType,
+      mepProfile: newMepProfile,
       mezzanineZone: allowMezz ? newMezzZone : undefined,
       mezzanineElevationM: allowMezz ? newMezzElev : undefined,
       mezzanineCoverageRatio: allowMezz ? newMezzCoverage : undefined,
@@ -168,6 +170,7 @@ export const TypologiesModule: React.FC<TypologiesModuleProps> = ({
       finishStandard: ut.finishStandard,
       entrySide: ut.entrySide ?? 'lateral_direita',
       internalPartitionType: partType,
+      mepProfile: ut.mepProfile ?? 'simples',
       mezzanineZone: ut.mezzanine?.zone,
       mezzanineElevationM: ut.mezzanine?.elevationM,
       mezzanineCoverageRatio: ut.mezzanine?.coverageRatio,
@@ -498,6 +501,36 @@ export const TypologiesModule: React.FC<TypologiesModuleProps> = ({
                     }`}
                   >
                     Drywall (9,5 cm)
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-medium text-[#C4C9D4] mb-1">
+                  Perfil das Instalações (Elétrica & Hidrossanitária)
+                </label>
+                <div className="grid grid-cols-2 gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setNewMepProfile('simples')}
+                    className={`px-2 py-1 text-[11px] rounded border transition-colors ${
+                      newMepProfile === 'simples'
+                        ? 'border-emerald-500 bg-emerald-500/20 text-white font-semibold'
+                        : 'border-[#2A2F38] bg-[#1B1E24] text-[#949BA8] hover:text-white'
+                    }`}
+                  >
+                    Kitnet Simples (Menor Caminho)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewMepProfile('completo')}
+                    className={`px-2 py-1 text-[11px] rounded border transition-colors ${
+                      newMepProfile === 'completo'
+                        ? 'border-[#2F7CF6] bg-[#2F7CF6]/20 text-white font-semibold'
+                        : 'border-[#2A2F38] bg-[#1B1E24] text-[#949BA8] hover:text-white'
+                    }`}
+                  >
+                    Completo (AQ + AC + CFTV)
                   </button>
                 </div>
               </div>
@@ -923,8 +956,8 @@ export const TypologiesModule: React.FC<TypologiesModuleProps> = ({
                   </div>
                 </div>
 
-                {/* Entrada Principal & Divisórias Internas da Tipologia Ativa */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-[#2A2F38]">
+                {/* Entrada Principal, Divisórias Internas & Perfil MEP da Tipologia Ativa */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-[#2A2F38]">
                   <div>
                     <label className="block text-[11px] text-[#949BA8] mb-1">
                       Entrada Principal da Kitnet (P1 — 0,80m)
@@ -965,6 +998,26 @@ export const TypologiesModule: React.FC<TypologiesModuleProps> = ({
                     >
                       <option value="alvenaria">Alvenaria Convencional (10 cm)</option>
                       <option value="drywall">Drywall Gesso Acartonado ST/RU (9,5 cm)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-[#949BA8] mb-1">
+                      Perfil Instalações (QDC & Ramais)
+                    </label>
+                    <select
+                      value={activeUt.mepProfile ?? 'simples'}
+                      onChange={(e) => {
+                        const val = e.target.value as 'simples' | 'completo';
+                        const updatedUt: UnitType = {
+                          ...activeUt,
+                          mepProfile: val,
+                        };
+                        handleRegenerateCurrent(updatedUt);
+                      }}
+                      className="w-full px-2.5 py-1.5 text-xs rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                    >
+                      <option value="simples">Kitnet Simples (4 circ. + Só AF + QDC)</option>
+                      <option value="completo">Completo (AQ + Ar-Cond. + CFTV/Wi-Fi)</option>
                     </select>
                   </div>
                 </div>

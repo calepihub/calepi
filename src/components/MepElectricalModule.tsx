@@ -2,6 +2,7 @@ import React, { useRef, useState } from 'react';
 import { AlertTriangle, Move, Plus, Trash2, Zap } from 'lucide-react';
 import { calculateElectricalSizing } from '../engine/engineering';
 import { getOpeningWorldPosition, getWallAngleRad, round2 } from '../engine/geometry';
+import { computeElectricalRouting, getQdcPosition } from '../engine/mepRouting';
 import { nextId } from '../engine/parametricGenerator';
 import { ElectricalSymbolSvg, FurnitureCadBlock } from './CadArchitecturalSymbols';
 import type { ElectricalCategory, ElectricalPoint, Project, UnitType } from '../types/project';
@@ -36,6 +37,7 @@ function findRoomIdAtPoint(
 }
 
 const CATEGORIES: Array<{ value: ElectricalCategory; label: string; defPower: number; defZKey: keyof Project['electricalHeights'] }> = [
+  { value: 'quadro_luz', label: 'Quadro de Distribuição (QDC)', defPower: 0, defZKey: 'interruptor' },
   { value: 'tomada_baixa', label: 'Tomada Baixa (TUG)', defPower: 100, defZKey: 'tomadaBaixa' },
   { value: 'tomada_media', label: 'Tomada Média (TUG)', defPower: 600, defZKey: 'tomadaMedia' },
   { value: 'tomada_alta', label: 'Tomada Alta (TUG)', defPower: 600, defZKey: 'tomadaAlta' },
@@ -98,6 +100,84 @@ export const MepElectricalModule: React.FC<MepElectricalModuleProps> = ({
   const hasMezzanine = Boolean(
     activeUt?.hasMezzanine && activeUt?.mezzanine?.enabled && (activeUt?.ceilingHeight ?? 0) >= 3.0,
   );
+  const elRouting = activeUt ? computeElectricalRouting(activeUt) : null;
+
+  const handleOptimizeSimpleUnit = (keepAc: boolean) => {
+    if (!activeUt) return;
+    const qdcPos = getQdcPosition(activeUt);
+    const living = activeUt.rooms.find((r) => r.category !== 'banheiro' && r.category !== 'mezanino') ?? activeUt.rooms[0];
+    onUpdateProject((prev) => ({
+      ...prev,
+      unitTypes: prev.unitTypes.map((u) => {
+        if (u.id !== activeUt.id) return u;
+        const hasQdc = u.electricalPoints.some((ep) => ep.category === 'quadro_luz' || ep.code.toUpperCase().startsWith('QDC'));
+        const filtered = u.electricalPoints.filter((ep) => {
+          if (ep.category === 'antena_tv' || ep.category === 'wifi_ap' || ep.category === 'cftv' || ep.category === 'interfone' || ep.category === 'tv') {
+            return false;
+          }
+          if (!keepAc && ep.category === 'ar_condicionado') return false;
+          return true;
+        });
+        const remapped: ElectricalPoint[] = filtered.map((ep) => {
+          if (ep.category === 'quadro_luz' || ep.code.toUpperCase().startsWith('QDC')) {
+            return { ...ep, category: 'quadro_luz', circuitId: 'GERAL', powerVA: 0 };
+          }
+          if (ep.category === 'iluminacao_teto' || ep.category === 'arandela' || ep.category === 'interruptor') {
+            return { ...ep, circuitId: 'C1-ILUM' };
+          }
+          if (ep.category === 'chuveiro') {
+            return { ...ep, circuitId: 'C4-CHUV' };
+          }
+          if (ep.category === 'ar_condicionado') {
+            return { ...ep, circuitId: 'C5-AC' };
+          }
+          if (ep.category === 'dados' || ep.category === 'rack_ti') {
+            return { ...ep, code: ep.code === 'RJ45-01' ? 'NET-01' : ep.code, label: 'Ponto Fibra / Internet Unidade', circuitId: 'C-TEL' };
+          }
+          const isKitchenOrLaundry =
+            ep.roomId.includes('-rm-coz') ||
+            ep.roomId.includes('-rm-lav') ||
+            ep.category === 'cooktop' ||
+            ep.category === 'geladeira' ||
+            ep.category === 'maquina_lavar' ||
+            ep.category === 'microondas' ||
+            ep.category === 'forno' ||
+            ep.code.includes('COZ') ||
+            ep.code.includes('MAQ') ||
+            ep.code.includes('GEL') ||
+            ep.code.includes('COOK');
+          return {
+            ...ep,
+            circuitId: isKitchenOrLaundry ? 'C3-COZ' : 'C2-TUG',
+            voltage: ep.category === 'cooktop' ? 127 : ep.voltage,
+          };
+        });
+        if (!hasQdc) {
+          remapped.unshift({
+            id: nextId('el'),
+            code: 'QDC-01',
+            category: 'quadro_luz',
+            label: 'Quadro de Distribuição (QDC)',
+            roomId: living?.id ?? '',
+            x: qdcPos.x,
+            y: qdcPos.y,
+            z: 1.5,
+            referenceWall: 'P-INT-BWC2',
+            referenceDistance: qdcPos.x,
+            powerVA: 0,
+            voltage: 220,
+            powerFactor: 1,
+            circuitId: 'GERAL',
+            conductorSectionMm2: 10,
+            conduitDiameterMm: 25,
+            protection: 'Disjuntor Geral Bipolar + IDR 30mA + DPS',
+            notes: 'Parede seca externa ao BWC (menor trajeto)',
+          });
+        }
+        return { ...u, mepProfile: 'simples', electricalPoints: remapped };
+      }),
+    }), `Otimização elétrica Kitnet Simples em ${activeUt.code}`);
+  };
 
   const clientToUnitCoords = (clientX: number, clientY: number) => {
     const svg = svgRef.current;
@@ -247,8 +327,24 @@ export const MepElectricalModule: React.FC<MepElectricalModuleProps> = ({
         </div>
       </div>
 
-      <div className="text-xs text-[#949BA8] bg-[#1B1E24] border border-[#2A2F38] rounded p-3">
-        <strong className="text-[#E6E9EF]">Critério de Demanda:</strong> {report.diversityNote}
+      <div className="text-xs text-[#949BA8] bg-[#1B1E24] border border-[#2A2F38] rounded p-3 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <strong className="text-[#E6E9EF]">Critério de Demanda:</strong> {report.diversityNote}
+        </div>
+        {activeUt && elRouting && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="px-2 py-1 rounded bg-[#14161A] border border-[#2A2F38] font-mono text-[11px] text-amber-300">
+              {elRouting.qdcPoint.existsInModel ? `QDC: (${elRouting.qdcPoint.x.toFixed(2)}, ${elRouting.qdcPoint.y.toFixed(2)})` : 'Sem QDC na planta'} · Eletrodutos otimizados: {elRouting.totalConduitM} m
+            </span>
+            <button
+              type="button"
+              onClick={() => handleOptimizeSimpleUnit(false)}
+              className="px-2.5 py-1 text-[11px] font-semibold rounded border border-emerald-500/40 bg-emerald-600/20 text-emerald-200 hover:bg-emerald-600/35"
+            >
+              Simplificar p/ Kitnet (4 Circuitos + QDC)
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Configurable Default Heights */}
@@ -586,16 +682,38 @@ export const MepElectricalModule: React.FC<MepElectricalModuleProps> = ({
                   );
                 })}
 
+                {/* Shortest-Path Orthogonal Circuit Routing from QDC */}
+                {elRouting &&
+                  elRouting.segments.map((seg) => {
+                    const isSpecial = seg.kind === 'special';
+                    const pts = seg.elbow
+                      ? `${seg.from.x},${seg.from.y} ${seg.elbow.x},${seg.elbow.y} ${seg.to.x},${seg.to.y}`
+                      : `${seg.from.x},${seg.from.y} ${seg.to.x},${seg.to.y}`;
+                    return (
+                      <polyline
+                        key={`el-rt-${seg.id}`}
+                        points={pts}
+                        fill="none"
+                        stroke={isSpecial ? '#A855F7' : '#F59E0B'}
+                        strokeOpacity={0.45}
+                        strokeWidth={0.02}
+                        strokeDasharray="0.06 0.04"
+                        pointerEvents="none"
+                      />
+                    );
+                  })}
+
                 {/* Draggable Electrical Points */}
                 {activeUt.electricalPoints.map((ep) => {
                   const isMezEp = ep.roomId.endsWith('-rm-mez') || ep.code.includes('MEZ');
                   if (floorFilter === 'terreo' && isMezEp) return null;
                   if (floorFilter === 'mezanino' && !isMezEp) return null;
+                  const isQdc = ep.category === 'quadro_luz' || ep.code.toUpperCase().startsWith('QDC');
                   const isSpec = ['dados', 'tv', 'antena_tv', 'wifi_ap', 'cftv', 'rack_ti', 'interfone'].includes(
                     ep.category,
                   );
                   const isSel = selectedEpId === ep.id;
-                  const col = isSel ? '#FFFFFF' : isMezEp ? '#22D3EE' : isSpec ? '#C084FC' : '#F59E0B';
+                  const col = isSel ? '#FFFFFF' : isQdc ? '#FACC15' : isMezEp ? '#22D3EE' : isSpec ? '#C084FC' : '#F59E0B';
                   return (
                     <g
                       key={ep.id}
@@ -658,19 +776,37 @@ export const MepElectricalModule: React.FC<MepElectricalModuleProps> = ({
                         </span>
                         <span className="font-mono text-[11px] text-[#60A5FA]">{selEp.circuitId}</span>
                       </div>
-                      <div>
-                        <label className="block text-[10px] text-[#949BA8] mb-0.5">Ambiente</label>
-                        <select
-                          value={selEp.roomId}
-                          onChange={(e) => updateElectricalPoint(selEp.id, { roomId: e.target.value })}
-                          className="w-full px-2 py-1 text-xs rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
-                        >
-                          {activeUt.rooms.map((rm) => (
-                            <option key={rm.id} value={rm.id}>
-                              {rm.name} ({rm.code})
-                            </option>
-                          ))}
-                        </select>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-[10px] text-[#949BA8] mb-0.5">Categoria</label>
+                          <select
+                            value={selEp.category}
+                            onChange={(e) =>
+                              updateElectricalPoint(selEp.id, { category: e.target.value as ElectricalCategory })
+                            }
+                            className="w-full px-2 py-1 text-xs rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                          >
+                            {CATEGORIES.map((c) => (
+                              <option key={c.value} value={c.value}>
+                                {c.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-[10px] text-[#949BA8] mb-0.5">Ambiente</label>
+                          <select
+                            value={selEp.roomId}
+                            onChange={(e) => updateElectricalPoint(selEp.id, { roomId: e.target.value })}
+                            className="w-full px-2 py-1 text-xs rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                          >
+                            {activeUt.rooms.map((rm) => (
+                              <option key={rm.id} value={rm.id}>
+                                {rm.name} ({rm.code})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
                       </div>
                       <div className="grid grid-cols-3 gap-2">
                         <div>

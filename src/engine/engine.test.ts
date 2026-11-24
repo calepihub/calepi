@@ -53,6 +53,12 @@ import {
   getNormalizedSanitaryFixtures,
   syncFinishesToTypologyRooms,
 } from './finishesCatalog';
+import {
+  computeDrainageRouting,
+  computeElectricalRouting,
+  computeHydraulicRouting,
+  getQdcPosition,
+} from './mepRouting';
 
 test('Geometry: Shoelace polygon area & perimeter for 12x25m site', () => {
   const verts = buildSiteVerticesFromDimensions(12, 12, 25, 25);
@@ -1402,3 +1408,96 @@ test('Área de Serviço without internal Tanque: Washing Machine only (AF-05, ES
   const dxf = generateProjectDXF(proj, 0);
   assert.ok(dxf.includes('TUE-MAQ'));
 });
+
+test('QDC-01 explicit board, Kitnet Simples default profile (4 circuits + AF only + external CG-01), and shortest-path routing', () => {
+  const ut = generateParametricUnitLayout({
+    code: 'KIT-SIMP',
+    name: 'Kitnet Simples Otimizada',
+    width: 4.0,
+    depth: 5.5,
+    ceilingHeight: 2.8,
+    bedrooms: 0,
+    hasLaundry: true,
+    hasBalcony: false,
+    hasMezzanine: false,
+    accessible: false,
+    extWallThickness: 0.15,
+    intWallThickness: 0.1,
+    constructionSystem: 'alvenaria_convencional',
+    entrySide: 'frente',
+  });
+
+  // 1. Default profile is 'simples' with explicit QDC-01 placed outside BWC dry wall
+  assert.equal(ut.mepProfile, 'simples');
+  const qdc = ut.electricalPoints.find((e) => e.category === 'quadro_luz');
+  const bath = ut.rooms.find((r) => r.category === 'banheiro');
+  assert.ok(qdc && bath, 'QDC-01 and BWC must exist');
+  assert.equal(qdc.code, 'QDC-01');
+  assert.equal(qdc.circuitId, 'GERAL');
+  assert.ok(qdc.y > bath.y + bath.depth, 'QDC-01 must sit on dry wall outside BWC wet area');
+  assert.equal(getQdcPosition(ut).existsInModel, true);
+
+  // 2. Lean 4 load circuits + single telecom point NET-01, zero hot water, external CG-01
+  const loadCircuits = new Set(
+    ut.electricalPoints.filter((e) => e.category !== 'quadro_luz' && e.category !== 'dados').map((e) => e.circuitId),
+  );
+  assert.deepEqual([...loadCircuits].sort(), ['C1-ILUM', 'C2-TUG', 'C3-COZ', 'C4-CHUV']);
+  const specialPts = ut.electricalPoints.filter((e) => e.category === 'dados' || e.category === 'wifi_ap' || e.category === 'cftv');
+  assert.equal(specialPts.length, 1);
+  assert.equal(specialPts[0].code, 'NET-01');
+  assert.equal(ut.waterPoints.filter((w) => w.waterType === 'quente').length, 0);
+  const cg = ut.drainagePoints.find((d) => d.code === 'CG-01');
+  assert.ok(cg && cg.y < 0, 'CG-01 should sit outside unit footprint in simples mode');
+
+  // 3. Blank project defaults hasHotWaterHeating = false & electrical sizing excludes GERAL with zero missing-QDC warning
+  const blank = createBlankProject({
+    name: 'Kitnet Simples Obra',
+    client: '',
+    municipality: 'Rio de Janeiro',
+    state: 'RJ',
+    front: 12,
+    depth: 25,
+    floorsCount: 1,
+    methodId: 'alvenaria_convencional',
+  });
+  assert.equal(blank.hydraulicConfig.hasHotWaterHeating, false);
+
+  const proj = autoDistributeUnitsAcrossFloors({ ...blank, unitTypes: [ut] }, ut.id);
+  const elecBefore = calculateElectricalSizing(proj);
+  const unitElecBefore = elecBefore.byUnitType[0];
+  assert.ok(unitElecBefore);
+  assert.equal(unitElecBefore.circuits.some((c) => c.circuitId === 'GERAL'), false);
+  assert.equal(unitElecBefore.warnings.some((w) => w.includes('Quadro de Luz')), false);
+
+  const routeBefore = computeElectricalRouting(ut);
+  const hydRoute = computeHydraulicRouting(ut);
+  const drainRoute = computeDrainageRouting(ut);
+  assert.ok(routeBefore.totalConduitM > 0 && hydRoute.totalColdPipeM > 0 && drainRoute.totalDrainPipeM > 0);
+  assert.equal(hydRoute.totalHotPipeM, 0);
+
+  const qtyBefore = calculateQuantities(proj);
+  const ele04Before = qtyBefore.items.find((i) => i.code === 'ELE-04');
+  assert.ok(ele04Before);
+
+  // 4. Moving QDC-01 to the far opposite front corner increases routed length, ΔV% circuit length, and ELE-04 quantity
+  qdc.x = round2(ut.width - 0.35);
+  qdc.y = round2(ut.depth - 0.35);
+  const routeAfter = computeElectricalRouting(ut);
+  assert.ok(routeAfter.totalConduitM > routeBefore.totalConduitM, 'Moving QDC away from wet core must increase conduit run');
+
+  const elecAfter = calculateElectricalSizing(proj);
+  const unitElecAfter = elecAfter.byUnitType[0];
+  assert.ok(unitElecAfter);
+  const chuvBefore = unitElecBefore.circuits.find((c) => c.circuitId === 'C4-CHUV');
+  const chuvAfter = unitElecAfter.circuits.find((c) => c.circuitId === 'C4-CHUV');
+  assert.ok(chuvBefore && chuvAfter && chuvAfter.estimatedLengthM > chuvBefore.estimatedLengthM);
+
+  const qtyAfter = calculateQuantities(proj);
+  const ele04After = qtyAfter.items.find((i) => i.code === 'ELE-04');
+  assert.ok(ele04After && ele04After.netQuantity > ele04Before.netQuantity);
+
+  // 5. DXF export includes QDC-01
+  const dxf = generateProjectDXF(proj, 0);
+  assert.ok(dxf.includes('QDC-01'));
+});
+

@@ -103,6 +103,11 @@ export interface ParametricTypologyInput {
   mezzanineStructureType?: MezzanineStructureType;
   mezzanineStairLayout?: MezzanineStairLayout;
   mezzanineStairSide?: 'esquerda' | 'direita';
+  /** 'simples' = Kitnet econômica/enxuta (padrão); 'completo' = completo com AQ, AC e telecom/CFTV */
+  mepProfile?: 'simples' | 'completo';
+  includeHotWater?: boolean;
+  includeAcCircuit?: boolean;
+  includeSpecialSystems?: boolean;
 }
 
 export function computeMezzanineInteriorBounds(
@@ -1754,13 +1759,45 @@ export function generateParametricUnitLayout(
     }
   }
 
-  // 5. Electrical & Special Installations Points (X, Y, Z, circuits, power, CFTV, Antena/TV, Wi-Fi, Dados)
+  // 5. Electrical & Special Installations Points (QDC explícito + menor caminho possível)
+  const mepProfile: 'simples' | 'completo' = input.mepProfile ?? 'simples';
+  const isSimpleMep = mepProfile === 'simples';
+  const includeHotWater = input.includeHotWater ?? !isSimpleMep;
+  const includeAcCircuit = input.includeAcCircuit ?? !isSimpleMep;
+  const includeSpecialSystems = input.includeSpecialSystems ?? !isSimpleMep;
+
   const tvPointX = hasSeparateBedroom ? 0.7 : round2(bathW + 0.45);
   const tvRoom = mainRoomId;
   const deskPointX = hasSeparateBedroom ? 0.64 : round2(W - 0.65);
   const deskPointY = hasSeparateBedroom ? round2(wetD + 1.3) : round2(usableD - 0.16);
+  const qdcX = round2(Math.max(0.24, Math.min(bathDoorOffset - 0.16, 0.34)));
+  const qdcY = round2(bathD + 0.08);
+  const chuvCircuitId = isSimpleMep ? 'C4-CHUV' : 'C3-CHUV';
+  const cozCircuitId = isSimpleMep ? 'C3-COZ' : 'C4-COZ';
+  const cooktopCircuitId = isSimpleMep ? 'C3-COZ' : 'C5-TUE-COZ';
+  const acCircuitId = isSimpleMep ? 'C5-AC' : 'C6-AC';
 
   electricalPoints.push(
+    {
+      id: `${id}-el-qdc`,
+      code: 'QDC-01',
+      category: 'quadro_luz',
+      label: 'Quadro de Distribuição (QDC)',
+      roomId: mainRoomId,
+      x: qdcX,
+      y: qdcY,
+      z: 1.5,
+      referenceWall: 'P-INT-BWC2',
+      referenceDistance: qdcX,
+      powerVA: 0,
+      voltage: 220,
+      powerFactor: 1.0,
+      circuitId: 'GERAL',
+      conductorSectionMm2: 10.0,
+      conduitDiameterMm: 25,
+      protection: 'Disjuntor Geral Bipolar + IDR 30mA + DPS',
+      notes: 'Parede seca externa ao BWC (menor trajeto para chuveiro, cozinha e TUG)',
+    },
     {
       id: `${id}-el-1`,
       code: 'IL-BWC',
@@ -1795,7 +1832,7 @@ export function generateParametricUnitLayout(
       powerVA: 5500,
       voltage: 220,
       powerFactor: 1.0,
-      circuitId: 'C3-CHUV',
+      circuitId: chuvCircuitId,
       conductorSectionMm2: 6.0,
       conduitDiameterMm: 25,
       protection: 'Disjuntor 32A + DR 30mA',
@@ -1855,7 +1892,7 @@ export function generateParametricUnitLayout(
       powerVA: 600,
       voltage: 127,
       powerFactor: 0.85,
-      circuitId: 'C4-COZ',
+      circuitId: cozCircuitId,
       conductorSectionMm2: 2.5,
       conduitDiameterMm: 20,
       protection: 'Disjuntor 20A + DR 30mA',
@@ -1875,7 +1912,7 @@ export function generateParametricUnitLayout(
       powerVA: 350,
       voltage: 127,
       powerFactor: 0.85,
-      circuitId: 'C4-COZ',
+      circuitId: cozCircuitId,
       conductorSectionMm2: 2.5,
       conduitDiameterMm: 20,
       protection: 'Disjuntor 20A + DR 30mA',
@@ -1893,13 +1930,13 @@ export function generateParametricUnitLayout(
       referenceWall: 'P-EXT-N',
       referenceDistance: 1.0,
       powerVA: 1800,
-      voltage: 220,
+      voltage: isSimpleMep ? 127 : 220,
       powerFactor: 0.95,
-      circuitId: 'C5-TUE-COZ',
-      conductorSectionMm2: 4.0,
-      conduitDiameterMm: 25,
+      circuitId: cooktopCircuitId,
+      conductorSectionMm2: isSimpleMep ? 2.5 : 4.0,
+      conduitDiameterMm: isSimpleMep ? 20 : 25,
       protection: 'Disjuntor 20A + DR 30mA',
-      notes: 'Circuito específico bancada',
+      notes: isSimpleMep ? 'Circuito unificado Cozinha & A.S.' : 'Circuito específico bancada',
     },
     {
       id: `${id}-el-8`,
@@ -1962,26 +1999,6 @@ export function generateParametricUnitLayout(
       notes: '',
     },
     {
-      id: `${id}-el-11`,
-      code: 'TA-AC',
-      category: 'ar_condicionado',
-      label: 'Tomada Alta Ar-Condicionado',
-      roomId: hasSeparateBedroom ? bedroomRoomId : mainRoomId,
-      x: round2(W / 2),
-      y: round2(usableD - 0.14),
-      z: 2.25,
-      referenceWall: 'P-EXT-S',
-      referenceDistance: round2(W / 2),
-      powerVA: 1200,
-      voltage: 220,
-      powerFactor: 0.9,
-      circuitId: 'C6-AC',
-      conductorSectionMm2: 2.5,
-      conduitDiameterMm: 20,
-      protection: 'Disjuntor 16A Bipolar',
-      notes: 'Split 9.000 BTUs',
-    },
-    {
       id: `${id}-el-12`,
       code: 'INT-01',
       category: 'interruptor',
@@ -2011,134 +2028,184 @@ export function generateParametricUnitLayout(
       protection: 'Disjuntor 10A Curva B',
       notes: 'Aciona Iluminação Estar + Cozinha',
     },
-    // Special Installations (Telecom, Antena Coletiva/TV, Internet/Wi-Fi, Interfone, CFTV)
-    {
-      id: `${id}-esp-dados`,
-      code: 'RJ45-01',
-      category: 'dados',
-      label: 'Ponto Rede Dados RJ45 Cat6 (Internet)',
-      roomId: tvRoom,
-      x: deskPointX,
-      y: round2(Math.max(kitchenD + 0.18, deskPointY - 0.18)),
-      z: 0.35,
+  );
+
+  if (includeAcCircuit) {
+    electricalPoints.push({
+      id: `${id}-el-11`,
+      code: 'TA-AC',
+      category: 'ar_condicionado',
+      label: 'Tomada Alta Ar-Condicionado',
+      roomId: hasSeparateBedroom ? bedroomRoomId : mainRoomId,
+      x: round2(W / 2),
+      y: round2(usableD - 0.14),
+      z: 2.25,
       referenceWall: 'P-EXT-S',
-      referenceDistance: deskPointX,
-      powerVA: 0,
-      voltage: 127,
-      powerFactor: 1,
-      circuitId: 'C7-ESP',
-      conductorSectionMm2: 1.5,
-      conduitDiameterMm: 25,
-      protection: 'Eletroduto Seco Telecom Ø25mm',
-      notes: 'Cabo UTP Cat6 até Rack Central',
-    },
-    {
-      id: `${id}-esp-tv`,
-      code: 'TV-01',
-      category: 'antena_tv',
-      label: 'Ponto Antena Coletiva UHF/HDTV + Duto HDMI',
-      roomId: tvRoom,
-      x: tvPointX,
-      y: round2(kitchenD + 0.14),
+      referenceDistance: round2(W / 2),
+      powerVA: 1200,
+      voltage: 220,
+      powerFactor: 0.9,
+      circuitId: acCircuitId,
+      conductorSectionMm2: 2.5,
+      conduitDiameterMm: 20,
+      protection: 'Disjuntor 16A Bipolar',
+      notes: 'Split 9.000 BTUs',
+    });
+  }
+
+  if (includeSpecialSystems) {
+    // Projeto Completo: Rede Estruturada, Antena Coletiva/TV, Wi-Fi PoE, Interfone, CFTV
+    electricalPoints.push(
+      {
+        id: `${id}-esp-dados`,
+        code: 'RJ45-01',
+        category: 'dados',
+        label: 'Ponto Rede Dados RJ45 Cat6 (Internet)',
+        roomId: tvRoom,
+        x: deskPointX,
+        y: round2(Math.max(kitchenD + 0.18, deskPointY - 0.18)),
+        z: 0.35,
+        referenceWall: 'P-EXT-S',
+        referenceDistance: deskPointX,
+        powerVA: 0,
+        voltage: 127,
+        powerFactor: 1,
+        circuitId: 'C7-ESP',
+        conductorSectionMm2: 1.5,
+        conduitDiameterMm: 25,
+        protection: 'Eletroduto Seco Telecom Ø25mm',
+        notes: 'Cabo UTP Cat6 até Rack Central',
+      },
+      {
+        id: `${id}-esp-tv`,
+        code: 'TV-01',
+        category: 'antena_tv',
+        label: 'Ponto Antena Coletiva UHF/HDTV + Duto HDMI',
+        roomId: tvRoom,
+        x: tvPointX,
+        y: round2(kitchenD + 0.14),
+        z: 1.1,
+        referenceWall: 'P-INT-BWC2',
+        referenceDistance: tvPointX,
+        powerVA: 0,
+        voltage: 127,
+        powerFactor: 1,
+        circuitId: 'C7-ESP',
+        conductorSectionMm2: 1.5,
+        conduitDiameterMm: 25,
+        protection: 'Caixa 4x2 Coaxial RG6',
+        notes: 'Derivação prumada Antena Coletiva',
+      },
+      {
+        id: `${id}-esp-wifi`,
+        code: 'WIFI-01',
+        category: 'wifi_ap',
+        label: 'Ponto Roteador / Access Point Wi-Fi 6 PoE',
+        roomId: tvRoom,
+        x: round2(tvPointX + 0.35),
+        y: round2(kitchenD + 0.45),
+        z: 2.35,
+        referenceWall: 'Laje/Forro',
+        referenceDistance: round2(tvPointX + 0.35),
+        powerVA: 15,
+        voltage: 127,
+        powerFactor: 0.95,
+        circuitId: 'C7-ESP',
+        conductorSectionMm2: 1.5,
+        conduitDiameterMm: 20,
+        protection: 'Switch PoE Rack Telecom',
+        notes: 'Alimentação PoE via Cat6',
+      },
+      {
+        id: `${id}-esp-intf`,
+        code: 'INTF-01',
+        category: 'interfone',
+        label: 'Interfone / Vídeo Porteiro IP',
+        roomId: mainRoomId,
+        x:
+          entrySide === 'lateral_esquerda'
+            ? 0.14
+            : entrySide === 'frente'
+              ? round2(hasSeparateBedroom ? 1.08 : W - 1.12)
+              : round2(W - 0.14),
+        y:
+          entrySide === 'frente'
+            ? round2(usableD - 0.14)
+            : round2(kitchenD + 1.28),
+        z: 1.4,
+        referenceWall:
+          entrySide === 'lateral_esquerda'
+            ? 'P-EXT-O'
+            : entrySide === 'frente'
+              ? 'P-EXT-S'
+              : 'P-EXT-L',
+        referenceDistance: round2(kitchenD + 1.28),
+        powerVA: 15,
+        voltage: 127,
+        powerFactor: 0.95,
+        circuitId: 'C7-ESP',
+        conductorSectionMm2: 1.5,
+        conduitDiameterMm: 20,
+        protection: 'Central Interfonia Portaria',
+        notes: 'Junto à porta de entrada P1',
+      },
+      {
+        id: `${id}-esp-cftv`,
+        code: 'CFTV-01',
+        category: 'cftv',
+        label: 'Câmera CFTV IP PoE 4MP (Acesso/Corredor)',
+        roomId: mainRoomId,
+        x:
+          entrySide === 'lateral_esquerda'
+            ? -0.06
+            : entrySide === 'frente'
+              ? round2(hasSeparateBedroom ? 0.56 : W - 0.6)
+              : round2(W + 0.06),
+        y:
+          entrySide === 'frente'
+            ? round2(usableD + 0.06)
+            : round2(kitchenD + 0.65),
+        z: 2.55,
+        referenceWall:
+          entrySide === 'lateral_esquerda'
+            ? 'P-EXT-O (Ext)'
+            : entrySide === 'frente'
+              ? 'P-EXT-S (Ext)'
+              : 'P-EXT-L (Ext)',
+        referenceDistance: round2(kitchenD + 0.65),
+        powerVA: 15,
+        voltage: 127,
+        powerFactor: 0.95,
+        circuitId: 'C7-ESP',
+        conductorSectionMm2: 1.5,
+        conduitDiameterMm: 20,
+        protection: 'NVR 8CH + Switch PoE',
+        notes: 'Monitoramento externo acesso da unidade P1',
+      },
+    );
+  } else {
+    // Kitnet Simples: apenas 1 ponto de passagem fibra/internet (eletroduto seco próximo ao QDC/TV)
+    electricalPoints.push({
+      id: `${id}-esp-net`,
+      code: 'NET-01',
+      category: 'dados',
+      label: 'Ponto Fibra / Internet Unidade',
+      roomId: mainRoomId,
+      x: round2(Math.min(W - 0.3, Math.max(bathW + 0.25, qdcX + 0.55))),
+      y: round2(bathD + 0.08),
       z: 1.1,
       referenceWall: 'P-INT-BWC2',
-      referenceDistance: tvPointX,
+      referenceDistance: round2(qdcX + 0.55),
       powerVA: 0,
       voltage: 127,
       powerFactor: 1,
-      circuitId: 'C7-ESP',
+      circuitId: 'C-TEL',
       conductorSectionMm2: 1.5,
       conduitDiameterMm: 25,
-      protection: 'Caixa 4x2 Coaxial RG6',
-      notes: 'Derivação prumada Antena Coletiva',
-    },
-    {
-      id: `${id}-esp-wifi`,
-      code: 'WIFI-01',
-      category: 'wifi_ap',
-      label: 'Ponto Roteador / Access Point Wi-Fi 6 PoE',
-      roomId: tvRoom,
-      x: round2(tvPointX + 0.35),
-      y: round2(kitchenD + 0.45),
-      z: 2.35,
-      referenceWall: 'Laje/Forro',
-      referenceDistance: round2(tvPointX + 0.35),
-      powerVA: 15,
-      voltage: 127,
-      powerFactor: 0.95,
-      circuitId: 'C7-ESP',
-      conductorSectionMm2: 1.5,
-      conduitDiameterMm: 20,
-      protection: 'Switch PoE Rack Telecom',
-      notes: 'Alimentação PoE via Cat6',
-    },
-    {
-      id: `${id}-esp-intf`,
-      code: 'INTF-01',
-      category: 'interfone',
-      label: 'Interfone / Vídeo Porteiro IP',
-      roomId: mainRoomId,
-      x:
-        entrySide === 'lateral_esquerda'
-          ? 0.14
-          : entrySide === 'frente'
-            ? round2(hasSeparateBedroom ? 1.08 : W - 1.12)
-            : round2(W - 0.14),
-      y:
-        entrySide === 'frente'
-          ? round2(usableD - 0.14)
-          : round2(kitchenD + 1.28),
-      z: 1.4,
-      referenceWall:
-        entrySide === 'lateral_esquerda'
-          ? 'P-EXT-O'
-          : entrySide === 'frente'
-            ? 'P-EXT-S'
-            : 'P-EXT-L',
-      referenceDistance: round2(kitchenD + 1.28),
-      powerVA: 15,
-      voltage: 127,
-      powerFactor: 0.95,
-      circuitId: 'C7-ESP',
-      conductorSectionMm2: 1.5,
-      conduitDiameterMm: 20,
-      protection: 'Central Interfonia Portaria',
-      notes: 'Junto à porta de entrada P1',
-    },
-    {
-      id: `${id}-esp-cftv`,
-      code: 'CFTV-01',
-      category: 'cftv',
-      label: 'Câmera CFTV IP PoE 4MP (Acesso/Corredor)',
-      roomId: mainRoomId,
-      x:
-        entrySide === 'lateral_esquerda'
-          ? -0.06
-          : entrySide === 'frente'
-            ? round2(hasSeparateBedroom ? 0.56 : W - 0.6)
-            : round2(W + 0.06),
-      y:
-        entrySide === 'frente'
-          ? round2(usableD + 0.06)
-          : round2(kitchenD + 0.65),
-      z: 2.55,
-      referenceWall:
-        entrySide === 'lateral_esquerda'
-          ? 'P-EXT-O (Ext)'
-          : entrySide === 'frente'
-            ? 'P-EXT-S (Ext)'
-            : 'P-EXT-L (Ext)',
-      referenceDistance: round2(kitchenD + 0.65),
-      powerVA: 15,
-      voltage: 127,
-      powerFactor: 0.95,
-      circuitId: 'C7-ESP',
-      conductorSectionMm2: 1.5,
-      conduitDiameterMm: 20,
-      protection: 'NVR 8CH + Switch PoE',
-      notes: 'Monitoramento externo acesso da unidade P1',
-    },
-  );
+      protection: 'Eletroduto Seco Ø25mm (Fibra/Rede)',
+      notes: 'Chegada simples de internet/fibra da unidade',
+    });
+  }
 
   if (input.hasLaundry) {
     electricalPoints.push({
@@ -2155,7 +2222,7 @@ export function generateParametricUnitLayout(
       powerVA: 1000,
       voltage: 127,
       powerFactor: 0.85,
-      circuitId: 'C4-COZ',
+      circuitId: cozCircuitId,
       conductorSectionMm2: 2.5,
       conduitDiameterMm: 20,
       protection: 'Disjuntor 20A + DR 30mA',
@@ -2220,7 +2287,7 @@ export function generateParametricUnitLayout(
     );
   }
 
-  // 6. Water Points (AF & AQ)
+  // 6. Water Points (AF padrão econômico; AQ somente se includeHotWater)
   waterPoints.push(
     {
       id: `${id}-af-chuv`,
@@ -2237,24 +2304,6 @@ export function generateParametricUnitLayout(
       availablePressureMca: 4.5,
       supplySource: 'Coluna AF-01',
       branchName: 'Sub-ramal BWC',
-      weightHunter: 0.1,
-      notes: '',
-    },
-    {
-      id: `${id}-aq-chuv`,
-      code: 'AQ-02',
-      category: 'agua_quente',
-      equipment: 'Misturador Chuveiro BWC (Água Quente)',
-      roomId: bathRoomId,
-      x: 0.48,
-      y: 0.14,
-      z: 1.15,
-      waterType: 'quente',
-      diameterMm: 22,
-      material: 'CPVC Aquatherm',
-      availablePressureMca: 4.5,
-      supplySource: 'Aquecedor Central/Passagem',
-      branchName: 'Sub-ramal AQ BWC',
       weightHunter: 0.1,
       notes: '',
     },
@@ -2307,30 +2356,53 @@ export function generateParametricUnitLayout(
       diameterMm: 25,
       material: 'PVC Soldável',
       availablePressureMca: 6.0,
-      supplySource: 'Coluna AF-02',
-      branchName: 'Ramal Cozinha',
+      supplySource: 'Coluna AF-01',
+      branchName: 'Ramal Cozinha (parede úmida)',
       weightHunter: 0.7,
-      notes: '',
-    },
-    {
-      id: `${id}-aq-pia`,
-      code: 'AQ-01',
-      category: 'agua_quente',
-      equipment: 'Pia de Cozinha (Água Quente)',
-      roomId: kitchenRoomId,
-      x: round2(bathW + 0.6),
-      y: 0.14,
-      z: 0.6,
-      waterType: 'quente',
-      diameterMm: 22,
-      material: 'CPVC Aquatherm',
-      availablePressureMca: 5.5,
-      supplySource: 'Aquecedor Passagem / Central',
-      branchName: 'Ramal AQ Cozinha',
-      weightHunter: 0.7,
-      notes: '',
+      notes: 'Derivação direta da prumada compartilhada BWC/Cozinha',
     },
   );
+
+  if (includeHotWater) {
+    waterPoints.push(
+      {
+        id: `${id}-aq-chuv`,
+        code: 'AQ-02',
+        category: 'agua_quente',
+        equipment: 'Misturador Chuveiro BWC (Água Quente)',
+        roomId: bathRoomId,
+        x: 0.48,
+        y: 0.14,
+        z: 1.15,
+        waterType: 'quente',
+        diameterMm: 22,
+        material: 'CPVC Aquatherm',
+        availablePressureMca: 4.5,
+        supplySource: 'Aquecedor Central/Passagem',
+        branchName: 'Sub-ramal AQ BWC',
+        weightHunter: 0.1,
+        notes: '',
+      },
+      {
+        id: `${id}-aq-pia`,
+        code: 'AQ-01',
+        category: 'agua_quente',
+        equipment: 'Pia de Cozinha (Água Quente)',
+        roomId: kitchenRoomId,
+        x: round2(bathW + 0.6),
+        y: 0.14,
+        z: 0.6,
+        waterType: 'quente',
+        diameterMm: 22,
+        material: 'CPVC Aquatherm',
+        availablePressureMca: 5.5,
+        supplySource: 'Aquecedor Passagem / Central',
+        branchName: 'Ramal AQ Cozinha',
+        weightHunter: 0.7,
+        notes: '',
+      },
+    );
+  }
 
   if (input.hasLaundry) {
     waterPoints.push({
@@ -2346,7 +2418,7 @@ export function generateParametricUnitLayout(
       diameterMm: 20,
       material: 'PVC Soldável',
       availablePressureMca: 5.7,
-      supplySource: 'Coluna AF-02',
+      supplySource: 'Coluna AF-01',
       branchName: 'Ramal A.S.',
       weightHunter: 1.0,
       notes: 'Ponto exclusivo máquina de lavar (sem tanque interno)',
@@ -2448,14 +2520,16 @@ export function generateParametricUnitLayout(
       code: 'CG-01',
       category: 'caixa_gordura',
       roomId: kitchenRoomId,
-      x: round2(bathW + 0.28),
-      y: 0.36,
+      x: isSimpleMep ? round2(bathW + 0.55) : round2(bathW + 0.28),
+      y: isSimpleMep ? -0.22 : 0.36,
       diameterMm: 75,
       material: 'PVC Esgoto SN',
       slopePercent: 2.0,
       uhc: 0,
       connectedToId: tqId,
-      notes: 'Caixa de gordura (saída Ø75mm p/ coletor)',
+      notes: isSimpleMep
+        ? 'Caixa de gordura externa na parede da pia (menor trajeto reto)'
+        : 'Caixa de gordura (saída Ø75mm p/ coletor)',
     },
     {
       id: `${id}-esg-pia`,
@@ -2524,6 +2598,7 @@ export function generateParametricUnitLayout(
     internalPartitionType,
     accessible: input.accessible,
     finishStandard: input.finishStandard ?? 'padrao',
+    mepProfile,
     rooms,
     walls,
     openings,
@@ -2740,6 +2815,7 @@ export function createDefaultDemoProject(): Project {
     intWallThickness: intT,
     constructionSystem: sys,
     finishStandard: 'padrao',
+    mepProfile: 'completo',
   });
 
   const tipoB = generateParametricUnitLayout({
@@ -2759,6 +2835,7 @@ export function createDefaultDemoProject(): Project {
     intWallThickness: intT,
     constructionSystem: sys,
     finishStandard: 'padrao',
+    mepProfile: 'completo',
   });
 
   const tipoC = generateParametricUnitLayout({
@@ -2778,6 +2855,7 @@ export function createDefaultDemoProject(): Project {
     intWallThickness: intT,
     constructionSystem: sys,
     finishStandard: 'padrao',
+    mepProfile: 'completo',
   });
 
   const createFloorUnits = (floorId: string, prefix: string): UnitInstance[] => [
@@ -3346,9 +3424,9 @@ export function createBlankProject(params: {
       reserveDays: 2,
       supplyVoltage: uf === 'RJ' ? 127 : 220,
       coldWaterMaterial: 'PVC Soldável Marrom',
-      hotWaterMaterial: 'CPVC Aquatherm',
-      hasHotWaterHeating: true,
-      heatingSystem: 'A definir no projeto hidrossanitário',
+      hotWaterMaterial: 'Sem Água Quente (Chuveiro Elétrico)',
+      hasHotWaterHeating: false,
+      heatingSystem: 'Sem aquecimento central (kitnet simples: somente água fria + chuveiro elétrico)',
     },
     professionals: [],
     budgetEntries: [],

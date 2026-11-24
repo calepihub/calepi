@@ -5,6 +5,11 @@ import {
   round2,
 } from './geometry';
 import {
+  computeDrainageRouting,
+  computeElectricalRouting,
+  computeHydraulicRouting,
+} from './mepRouting';
+import {
   CONSTRUCTION_STAGE_ORDER,
   SINAPI_RJ_METADATA,
   getDynamicSinapiRJItem,
@@ -124,8 +129,13 @@ export function calculateQuantities(project: Project): QuantitiesReport {
   let totalLuminaires = 0;
   let totalSpecialPoints = 0;
   let totalElectricalPoints = 0;
+  let totalQdcBoards = 0;
   let totalWaterPoints = 0;
   let totalDrainagePoints = 0;
+  let routedConduitM = 0;
+  let routedWireM = 0;
+  let routedWaterPipeM = 0;
+  let routedDrainPipeM = 0;
 
   let totalToilets = 0;
   let totalWashbasins = 0;
@@ -270,6 +280,10 @@ export function calculateQuantities(project: Project): QuantitiesReport {
     }
 
     for (const ep of ut.electricalPoints) {
+      if (ep.category === 'quadro_luz' || ep.code.toUpperCase().startsWith('QDC')) {
+        totalQdcBoards += count;
+        continue;
+      }
       totalElectricalPoints += count;
       if (ep.category === 'interruptor') totalSwitches += count;
       else if (ep.category === 'iluminacao_teto' || ep.category === 'arandela') totalLuminaires += count;
@@ -285,6 +299,14 @@ export function calculateQuantities(project: Project): QuantitiesReport {
         totalSpecialPoints += count;
       } else totalOutlets += count;
     }
+
+    const elRoute = computeElectricalRouting(ut);
+    const hydRoute = computeHydraulicRouting(ut);
+    const drRoute = computeDrainageRouting(ut);
+    routedConduitM += elRoute.totalConduitM * count;
+    routedWireM += elRoute.totalWireM * count;
+    routedWaterPipeM += hydRoute.totalPipeM * count;
+    routedDrainPipeM += drRoute.totalDrainPipeM * count;
 
     totalWaterPoints += ut.waterPoints.length * count;
     totalDrainagePoints += ut.drainagePoints.length * count;
@@ -363,11 +385,12 @@ export function calculateQuantities(project: Project): QuantitiesReport {
     ? round2(Math.max(0, totalExternalWallNetAreaM2 * 2 + totalInternalAlvenariaNetAreaM2 * 2 - totalWetWallTileM2))
     : 0;
 
-  const avgConduitPerPoint = 4.2;
-  const totalConduitM = round2(totalElectricalPoints * avgConduitPerPoint);
-  const totalWireM = round2(totalConduitM * 3.0);
-  const totalWaterPipeM = round2(totalWaterPoints * 3.5);
-  const totalDrainPipeM = round2(totalDrainagePoints * 2.8);
+  const totalConduitM = round2(routedConduitM);
+  const totalWireM = round2(routedWireM);
+  const totalWaterPipeM = round2(routedWaterPipeM);
+  const totalDrainPipeM = round2(routedDrainPipeM);
+  const avgConduitPerPoint =
+    totalElectricalPoints > 0 ? round2(totalConduitM / totalElectricalPoints) : 0;
 
   const totalBuiltAreaM2 = round2(totalPrivateAreaM2 + totalCommonAreaM2);
   const groundFloor = project.floors[0];
@@ -890,29 +913,29 @@ export function calculateQuantities(project: Project): QuantitiesReport {
       id: 'q-ele-cond',
       code: 'ELE-04',
       discipline: 'Elétrica',
-      description: 'Eletroduto Corrugado Ø20/25mm (Estimativa paramétrica por ponto)',
+      description: 'Eletroduto Corrugado Ø20/25mm (Roteamento Otimizado a partir do QDC)',
       unit: 'm',
       netQuantity: totalConduitM,
       lossFactorPercent: 10,
       grossQuantity: round2(totalConduitM * 1.1),
-      measurementCriterion: `Estimativa de ${avgConduitPerPoint}m/ponto elétrico até o QDC da unidade`,
-      sourceOrigin: 'Quantidade de pontos elétricos × trajeto médio paramétrico',
-      calculationMemory: `${totalElectricalPoints} pts × ${avgConduitPerPoint} m/pt = ${totalConduitM} m`,
-      unitTypeBreakdown: {},
+      measurementCriterion: `Menor caminho ortogonal QDC → pontos por circuito (${avgConduitPerPoint} m/pt médio; ${totalQdcBoards} QDCs)`,
+      sourceOrigin: 'Traçado real otimizado por circuito a partir do QDC-01 nas tipologias',
+      calculationMemory: `Σ(Trajeto otimizado QDC→Circuitos) = ${totalConduitM} m (${totalElectricalPoints} pts; média ${avgConduitPerPoint} m/pt)`,
+      unitTypeBreakdown: breakdownByUt((ut) => computeElectricalRouting(ut).totalConduitM),
     },
     {
       id: 'q-ele-wire',
       code: 'ELE-05',
       discipline: 'Elétrica',
-      description: 'Condutores Isolados (Fase + Neutro + Terra — estimativa 3x eletroduto)',
+      description: 'Condutores Isolados (Fase + Neutro + Terra sobre trajeto otimizado)',
       unit: 'm',
       netQuantity: totalWireM,
       lossFactorPercent: 10,
       grossQuantity: round2(totalWireM * 1.1),
-      measurementCriterion: '3 condutores médios por trecho de eletroduto',
-      sourceOrigin: 'Comprimento de eletrodutos × 3 vias',
-      calculationMemory: `${totalConduitM} m × 3 = ${totalWireM} m`,
-      unitTypeBreakdown: {},
+      measurementCriterion: 'Soma real dos condutores por circuito (3 vias padrão / 1 via telecom) sobre o trajeto otimizado',
+      sourceOrigin: 'Comprimento real de eletrodutos por circuito × vias do circuito',
+      calculationMemory: `Σ(L_circuito × n_vias) = ${totalWireM} m`,
+      unitTypeBreakdown: breakdownByUt((ut) => computeElectricalRouting(ut).totalWireM),
     },
     {
       id: 'q-esp-dados',
@@ -946,15 +969,15 @@ export function calculateQuantities(project: Project): QuantitiesReport {
       id: 'q-hid-pipe',
       code: 'HID-02',
       discipline: 'Hidráulica',
-      description: 'Tubulação de Água Fria/Quente (Estimativa 3,5m/ponto)',
+      description: 'Tubulação de Água Fria/Quente (Menor Caminho a partir da Prumada)',
       unit: 'm',
       netQuantity: totalWaterPipeM,
       lossFactorPercent: 10,
       grossQuantity: round2(totalWaterPipeM * 1.1),
-      measurementCriterion: '3,5m médios por ponto de consumo (sub-ramais e ramais)',
-      sourceOrigin: 'Pontos hidráulicos × fator geométrico de ramal',
-      calculationMemory: `${totalWaterPoints} pts × 3,5 m = ${totalWaterPipeM} m`,
-      unitTypeBreakdown: {},
+      measurementCriterion: 'Árvore geradora mínima (MST) ortogonal a partir da prumada compartilhada BWC/Cozinha',
+      sourceOrigin: 'Traçado real otimizado entre prumada hidráulica e pontos de consumo',
+      calculationMemory: `Σ(MST Prumada→Pontos AF/AQ) = ${totalWaterPipeM} m (${totalWaterPoints} pts)`,
+      unitTypeBreakdown: breakdownByUt((ut) => computeHydraulicRouting(ut).totalPipeM),
     },
     ...(totalUnits > 0
       ? [
@@ -992,15 +1015,15 @@ export function calculateQuantities(project: Project): QuantitiesReport {
       id: 'q-san-pipe',
       code: 'SAN-02',
       discipline: 'Sanitária',
-      description: 'Tubulação de Esgoto PVC SN (Estimativa 2,8m/elemento)',
+      description: 'Tubulação de Esgoto PVC SN (Trajeto Direto Conectado)',
       unit: 'm',
       netQuantity: totalDrainPipeM,
       lossFactorPercent: 10,
       grossQuantity: round2(totalDrainPipeM * 1.1),
-      measurementCriterion: '2,8m médios por trecho conectado',
-      sourceOrigin: 'Elementos sanitários × fator geométrico',
-      calculationMemory: `${totalDrainagePoints} pts × 2,8 m = ${totalDrainPipeM} m`,
-      unitTypeBreakdown: {},
+      measurementCriterion: 'Soma real dos trechos conectados entre aparelhos, ralos, caixas e tubo de queda',
+      sourceOrigin: 'Conexões reais da rede sanitária nas tipologias',
+      calculationMemory: `Σ(trechos conectados SAN) = ${totalDrainPipeM} m (${totalDrainagePoints} elementos)`,
+      unitTypeBreakdown: breakdownByUt((ut) => computeDrainageRouting(ut).totalDrainPipeM),
     },
     ...(totalFloorAreaM2 > 0
       ? [

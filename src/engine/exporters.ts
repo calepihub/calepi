@@ -36,6 +36,7 @@ import {
   calculateHydraulicSizing,
   runCompatibilityAnalysis,
 } from './engineering';
+import { computeElectricalRouting, computeHydraulicRouting, getQdcPosition } from './mepRouting';
 import {
   buildConstructionSchedule,
   calculateAnalyticalBreakdown,
@@ -489,11 +490,53 @@ export function generateProjectDXF(project: Project, floorIndex = 0): string {
       const isSpecCat = (cat: string) =>
         ['dados', 'tv', 'antena_tv', 'wifi_ap', 'cftv', 'rack_ti', 'interfone'].includes(cat);
 
+      const elRoute = computeElectricalRouting(ut);
+      for (const seg of elRoute.segments) {
+        const layer = seg.kind === 'special' ? 'ESPECIAIS' : 'ELETRICA';
+        const pFrom = unitLocalToWorld(inst, ut, seg.from.x, seg.from.y);
+        const pTo = unitLocalToWorld(inst, ut, seg.to.x, seg.to.y);
+        if (seg.elbow) {
+          const pElbow = unitLocalToWorld(inst, ut, seg.elbow.x, seg.elbow.y);
+          entities.push(dxfLine(pFrom.x, pFrom.y, pElbow.x, pElbow.y, layer));
+          entities.push(dxfLine(pElbow.x, pElbow.y, pTo.x, pTo.y, layer));
+        } else {
+          entities.push(dxfLine(pFrom.x, pFrom.y, pTo.x, pTo.y, layer));
+        }
+      }
+
       for (const ep of ut.electricalPoints) {
         const p = unitLocalToWorld(inst, ut, ep.x, ep.y);
         const layer = isSpecCat(ep.category) ? 'ESPECIAIS' : 'ELETRICA';
-        entities.push(dxfCircle(p.x, p.y, 0.08, layer));
+        if (ep.category === 'quadro_luz' || ep.code.toUpperCase().startsWith('QDC')) {
+          entities.push(
+            dxfClosedPoly(
+              [
+                { x: p.x - 0.14, y: p.y - 0.09 },
+                { x: p.x + 0.14, y: p.y - 0.09 },
+                { x: p.x + 0.14, y: p.y + 0.09 },
+                { x: p.x - 0.14, y: p.y + 0.09 },
+              ],
+              'ELETRICA',
+            ),
+          );
+          entities.push(dxfLine(p.x - 0.14, p.y - 0.09, p.x + 0.14, p.y + 0.09, 'ELETRICA'));
+        } else {
+          entities.push(dxfCircle(p.x, p.y, 0.08, layer));
+        }
         entities.push(dxfText(p.x + 0.1, p.y, 0.11, `${ep.code}(z=${ep.z}m)`, layer));
+      }
+
+      const hydRoute = computeHydraulicRouting(ut);
+      for (const seg of hydRoute.segments) {
+        const pFrom = unitLocalToWorld(inst, ut, seg.from.x, seg.from.y);
+        const pTo = unitLocalToWorld(inst, ut, seg.to.x, seg.to.y);
+        if (seg.elbow) {
+          const pElbow = unitLocalToWorld(inst, ut, seg.elbow.x, seg.elbow.y);
+          entities.push(dxfLine(pFrom.x, pFrom.y, pElbow.x, pElbow.y, 'HIDRAULICA'));
+          entities.push(dxfLine(pElbow.x, pElbow.y, pTo.x, pTo.y, 'HIDRAULICA'));
+        } else {
+          entities.push(dxfLine(pFrom.x, pFrom.y, pTo.x, pTo.y, 'HIDRAULICA'));
+        }
       }
 
       for (const wp of ut.waterPoints) {
@@ -1458,14 +1501,50 @@ function drawUnitCADInPDF(
       doc.text(ep.code, mapX(p.x) + 1.4, mapY(p.y) + 0.6);
     }
   } else if (sheetId.startsWith('E')) {
+    const elRt = computeElectricalRouting(ut);
     doc.setDrawColor(217, 119, 6);
+    doc.setLineWidth(0.24);
+    for (const seg of elRt.segments.filter((s) => s.kind === 'electrical')) {
+      const pA = unitLocalToWorld(inst, ut, seg.from.x, seg.from.y);
+      const pB = unitLocalToWorld(inst, ut, seg.to.x, seg.to.y);
+      if (seg.elbow) {
+        const pE = unitLocalToWorld(inst, ut, seg.elbow.x, seg.elbow.y);
+        doc.line(mapX(pA.x), mapY(pA.y), mapX(pE.x), mapY(pE.y));
+        doc.line(mapX(pE.x), mapY(pE.y), mapX(pB.x), mapY(pB.y));
+      } else {
+        doc.line(mapX(pA.x), mapY(pA.y), mapX(pB.x), mapY(pB.y));
+      }
+    }
+    const qdcPos = getQdcPosition(ut);
+    const qdcWorld = unitLocalToWorld(inst, ut, qdcPos.x, qdcPos.y);
+    doc.setFillColor(234, 179, 8);
+    doc.rect(mapX(qdcWorld.x) - 1.4, mapY(qdcWorld.y) - 0.9, 2.8, 1.8, 'F');
+    doc.setFontSize(4.5);
+    doc.setTextColor(161, 98, 7);
+    doc.text(qdcPos.code, mapX(qdcWorld.x) + 1.8, mapY(qdcWorld.y) + 0.6);
+
     doc.setFillColor(217, 119, 6);
-    for (const ep of ut.electricalPoints.filter((e) => !isSpec(e.category))) {
+    for (const ep of ut.electricalPoints.filter((e) => !isSpec(e.category) && e.category !== 'quadro_luz' && !e.code.toUpperCase().startsWith('QDC'))) {
       const p = unitLocalToWorld(inst, ut, ep.x, ep.y);
       doc.circle(mapX(p.x), mapY(p.y), 1.0, 'F');
     }
   }
   if (sheetId === 'H01' || sheetId === 'H02') {
+    const hydRt = computeHydraulicRouting(ut);
+    doc.setLineWidth(0.28);
+    for (const seg of hydRt.segments) {
+      if (seg.kind === 'hot_water') doc.setDrawColor(220, 38, 38);
+      else doc.setDrawColor(37, 99, 235);
+      const pA = unitLocalToWorld(inst, ut, seg.from.x, seg.from.y);
+      const pB = unitLocalToWorld(inst, ut, seg.to.x, seg.to.y);
+      if (seg.elbow) {
+        const pE = unitLocalToWorld(inst, ut, seg.elbow.x, seg.elbow.y);
+        doc.line(mapX(pA.x), mapY(pA.y), mapX(pE.x), mapY(pE.y));
+        doc.line(mapX(pE.x), mapY(pE.y), mapX(pB.x), mapY(pB.y));
+      } else {
+        doc.line(mapX(pA.x), mapY(pA.y), mapX(pB.x), mapY(pB.y));
+      }
+    }
     for (const wp of ut.waterPoints) {
       const p = unitLocalToWorld(inst, ut, wp.x, wp.y);
       doc.setFillColor(wp.waterType === 'quente' ? 220 : 37, wp.waterType === 'quente' ? 38 : 99, wp.waterType === 'quente' ? 38 : 235);

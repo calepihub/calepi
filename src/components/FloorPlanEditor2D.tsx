@@ -34,10 +34,12 @@ import {
   round3,
 } from '../engine/geometry';
 import { runCompatibilityAnalysis } from '../engine/engineering';
+import { computeElectricalRouting, computeHydraulicRouting } from '../engine/mepRouting';
 import { nextId } from '../engine/parametricGenerator';
 import { ElectricalSymbolSvg, FurnitureCadBlock } from './CadArchitecturalSymbols';
 import type {
   DrainagePoint,
+  ElectricalCategory,
   ElectricalPoint,
   FurnitureCategory,
   FurnitureItem,
@@ -1615,6 +1617,28 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
           </g>
         )}
 
+        {/* Electrical Shortest-Path Routing Lines from QDC */}
+        {layers.electrical &&
+          !roomScope &&
+          computeElectricalRouting(ut).segments.map((seg) => {
+            const isSpec = seg.kind === 'special';
+            const pts = seg.elbow
+              ? `${mapX(seg.from.x)},${seg.from.y} ${mapX(seg.elbow.x)},${seg.elbow.y} ${mapX(seg.to.x)},${seg.to.y}`
+              : `${mapX(seg.from.x)},${seg.from.y} ${mapX(seg.to.x)},${seg.to.y}`;
+            return (
+              <polyline
+                key={`cad-el-rt-${seg.id}`}
+                points={pts}
+                fill="none"
+                stroke={isSpec ? '#A855F7' : '#F59E0B'}
+                strokeOpacity={0.35}
+                strokeWidth="0.018"
+                strokeDasharray="0.06 0.04"
+                pointerEvents="none"
+              />
+            );
+          })}
+
         {/* Electrical & Special Points (Selectable & Draggable -> Syncs to Projeto Elétrico) */}
         {layers.electrical &&
           ut.electricalPoints.map((ep) => {
@@ -1622,11 +1646,12 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
             if (mezView === 'terreo' && isMezEp) return null;
             if (mezView === 'mezanino' && !isMezEp) return null;
             if (roomScope && !isInRoom(ep.x, ep.y, ep.roomId)) return null;
+            const isQdc = ep.category === 'quadro_luz' || ep.code.toUpperCase().startsWith('QDC');
             const isSpec = ['dados', 'tv', 'antena_tv', 'wifi_ap', 'cftv', 'rack_ti', 'interfone'].includes(
               ep.category,
             );
             const isSel = interactive && selected?.kind === 'electrical' && selected.id === ep.id;
-            const col = isSel ? '#FFFFFF' : isMezEp ? '#22D3EE' : isSpec ? '#C084FC' : '#F59E0B';
+            const col = isSel ? '#FFFFFF' : isQdc ? '#FACC15' : isMezEp ? '#22D3EE' : isSpec ? '#C084FC' : '#F59E0B';
             return (
               <g
                 key={ep.id}
@@ -1651,19 +1676,48 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
                 className={interactive && tool === 'select' ? 'cursor-move' : ''}
               >
                 <circle
-                  r={isSel ? 0.16 : 0.13}
-                  fill={isSel ? 'rgba(245, 158, 11, 0.25)' : 'transparent'}
-                  stroke={isSel ? '#60A5FA' : 'transparent'}
+                  r={isSel ? 0.16 : isQdc ? 0.15 : 0.13}
+                  fill={isSel ? 'rgba(245, 158, 11, 0.25)' : isQdc ? 'rgba(250, 204, 21, 0.16)' : 'transparent'}
+                  stroke={isSel ? '#60A5FA' : isQdc ? '#FACC15' : 'transparent'}
                   strokeWidth="0.025"
-                  strokeDasharray="0.04 0.03"
+                  strokeDasharray={isQdc && !isSel ? undefined : '0.04 0.03'}
                 />
-                <ElectricalSymbolSvg category={ep.category} cx={0} cy={0} r={0.085} color={col} bg="#111317" />
-                <text x="0.12" y="0.04" fill={col} fontSize="0.1" fontWeight={isSel ? 'bold' : undefined} fontFamily="JetBrains Mono, monospace">
+                <ElectricalSymbolSvg category={ep.category} cx={0} cy={0} r={isQdc ? 0.1 : 0.085} color={col} bg="#111317" />
+                <text x="0.12" y="0.04" fill={col} fontSize="0.1" fontWeight={isSel || isQdc ? 'bold' : undefined} fontFamily="JetBrains Mono, monospace">
                   {ep.code}
                 </text>
               </g>
             );
           })}
+
+        {/* Hydraulic Shortest-Path MST Routing + Prumada AF */}
+        {layers.water &&
+          !roomScope &&
+          mezView !== 'mezanino' &&
+          (() => {
+            const hydRt = computeHydraulicRouting(ut);
+            return (
+              <g pointerEvents="none">
+                {hydRt.segments.map((seg) => {
+                  const pts = seg.elbow
+                    ? `${mapX(seg.from.x)},${seg.from.y} ${mapX(seg.elbow.x)},${seg.elbow.y} ${mapX(seg.to.x)},${seg.to.y}`
+                    : `${mapX(seg.from.x)},${seg.from.y} ${mapX(seg.to.x)},${seg.to.y}`;
+                  return (
+                    <polyline
+                      key={`cad-hyd-rt-${seg.id}`}
+                      points={pts}
+                      fill="none"
+                      stroke={seg.kind === 'hot_water' ? '#EF4444' : '#38BDF8'}
+                      strokeOpacity={0.65}
+                      strokeWidth="0.024"
+                      strokeDasharray={seg.kind === 'hot_water' ? '0.06 0.04' : '0.08 0.03'}
+                    />
+                  );
+                })}
+                <circle cx={mapX(hydRt.riser.x)} cy={hydRt.riser.y} r="0.075" fill="#0EA5E9" stroke="#FFFFFF" strokeWidth="0.02" />
+              </g>
+            );
+          })()}
 
         {/* Hydraulic Points (Selectable & Draggable -> Syncs to Projeto Hidráulico) */}
         {layers.water &&
@@ -3164,6 +3218,47 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
                     className="w-full px-2 py-1 font-mono bg-[#14161A] border border-[#2A2F38] rounded text-white"
                   />
                 </div>
+              </div>
+              <div>
+                <label className="block text-[10px] text-[#949BA8] mb-0.5">Categoria</label>
+                <select
+                  value={selectedElectrical.category}
+                  onChange={(e) => {
+                    const val = e.target.value as ElectricalCategory;
+                    updateActiveUt((ut) => ({
+                      ...ut,
+                      electricalPoints: ut.electricalPoints.map((ep) =>
+                        ep.id === selectedElectrical.id
+                          ? {
+                              ...ep,
+                              category: val,
+                              ...(val === 'quadro_luz' ? { circuitId: 'GERAL', powerVA: 0 } : {}),
+                            }
+                          : ep,
+                      ),
+                    }));
+                  }}
+                  className="w-full px-2 py-1 bg-[#14161A] border border-[#2A2F38] rounded text-white"
+                >
+                  <option value="quadro_luz">Quadro de Distribuição (QDC)</option>
+                  <option value="tomada_baixa">Tomada Baixa (TUG)</option>
+                  <option value="tomada_media">Tomada Média (TUG)</option>
+                  <option value="tomada_alta">Tomada Alta (TUG)</option>
+                  <option value="tomada_tue">Tomada Uso Específico (TUE)</option>
+                  <option value="interruptor">Interruptor</option>
+                  <option value="iluminacao_teto">Iluminação Teto</option>
+                  <option value="arandela">Arandela</option>
+                  <option value="chuveiro">Chuveiro</option>
+                  <option value="cooktop">Cooktop</option>
+                  <option value="geladeira">Geladeira</option>
+                  <option value="maquina_lavar">Máquina de Lavar</option>
+                  <option value="ar_condicionado">Ar-Condicionado</option>
+                  <option value="dados">Fibra / Internet / Dados</option>
+                  <option value="antena_tv">Antena / TV</option>
+                  <option value="wifi_ap">Wi-Fi AP</option>
+                  <option value="interfone">Interfone</option>
+                  <option value="cftv">CFTV</option>
+                </select>
               </div>
               <div>
                 <label className="block text-[10px] text-[#949BA8] mb-0.5">Descrição</label>
