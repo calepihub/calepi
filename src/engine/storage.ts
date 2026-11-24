@@ -151,6 +151,120 @@ function migrateProject(raw: Partial<Project>, renders: CapturedRender[] = []): 
   };
 }
 
+const BLOCKED_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+const SAFE_RENDER_DATAURL_REGEX = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/;
+
+function stripDangerousObjectKeys<T>(value: T, depth = 0): T {
+  if (depth > 24 || value === null || typeof value !== 'object') {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => stripDangerousObjectKeys(item, depth + 1)) as unknown as T;
+  }
+  const src = value as Record<string, unknown>;
+  const clean: Record<string, unknown> = {};
+  for (const key of Object.keys(src)) {
+    if (BLOCKED_KEYS.has(key)) continue;
+    clean[key] = stripDangerousObjectKeys(src[key], depth + 1);
+  }
+  return clean as T;
+}
+
+/**
+ * Sanitiza e valida um JSON de projeto importado manualmente antes de aplicá-lo ao estado ou enviá-lo ao Firestore.
+ */
+export function sanitizeImportedProject(raw: unknown): Project {
+  const clean = stripDangerousObjectKeys(raw);
+  if (!clean || typeof clean !== 'object' || Array.isArray(clean)) {
+    throw new Error('Estrutura JSON inválida: objeto de projeto esperado.');
+  }
+  const obj = clean as Partial<Project>;
+  if (
+    typeof obj.id !== 'string' ||
+    !obj.id.trim() ||
+    !obj.site ||
+    !Array.isArray(obj.site.vertices) ||
+    obj.site.vertices.length < 3 ||
+    !Array.isArray(obj.floors) ||
+    !obj.constructionMethod
+  ) {
+    throw new Error('Arquivo JSON incompatível: campos obrigatórios do empreendimento ausentes.');
+  }
+
+  const validRenders: CapturedRender[] = Array.isArray(obj.capturedRenders)
+    ? obj.capturedRenders
+        .filter(
+          (r): r is CapturedRender =>
+            Boolean(r) &&
+            typeof r === 'object' &&
+            typeof r.dataUrl === 'string' &&
+            r.dataUrl.length <= 750000 &&
+            SAFE_RENDER_DATAURL_REGEX.test(r.dataUrl),
+        )
+        .slice(0, 20)
+        .map((r) => ({
+          id: normalizeId(String(r.id || ''), 'rnd'),
+          title: String(r.title || 'Perspectiva 3D').slice(0, 160),
+          preset: String(r.preset || 'perspectiva').slice(0, 40),
+          timeOfDay: String(r.timeOfDay || 'dia').slice(0, 24),
+          dataUrl: r.dataUrl,
+          createdAt: String(r.createdAt || new Date().toISOString()).slice(0, 64),
+        }))
+    : [];
+
+  const bounded: Partial<Project> = {
+    ...obj,
+    id: normalizeId(obj.id, 'proj'),
+    code: String(obj.code || 'KPS-IMP').slice(0, 48),
+    name: String(obj.name || 'Empreendimento Importado').slice(0, 160),
+    client: String(obj.client || 'Não informado').slice(0, 160),
+    owner: String(obj.owner || 'Não informado').slice(0, 160),
+    address: String(obj.address || 'Não informado').slice(0, 240),
+    municipality: String(obj.municipality || 'Não informado').slice(0, 120),
+    state: String(obj.state || '').slice(0, 8),
+    status:
+      obj.status === 'em_andamento' || obj.status === 'concluido' || obj.status === 'arquivado'
+        ? obj.status
+        : 'em_andamento',
+    urbanRules: Array.isArray(obj.urbanRules) ? obj.urbanRules.slice(0, 40) : [],
+    floors: obj.floors.slice(0, 20),
+    unitTypes: Array.isArray(obj.unitTypes) ? obj.unitTypes.slice(0, 30) : [],
+    structuralElements: Array.isArray(obj.structuralElements)
+      ? obj.structuralElements.slice(0, 600)
+      : [],
+    rainwaterElements: Array.isArray(obj.rainwaterElements)
+      ? obj.rainwaterElements.slice(0, 100)
+      : [],
+    professionals: Array.isArray(obj.professionals) ? obj.professionals.slice(0, 20) : [],
+    budgetEntries: Array.isArray(obj.budgetEntries) ? obj.budgetEntries.slice(0, 250) : [],
+    normativeRefs: Array.isArray(obj.normativeRefs) ? obj.normativeRefs.slice(0, 50) : [],
+    revisions: Array.isArray(obj.revisions) ? obj.revisions.slice(-100) : [],
+  };
+
+  return migrateProject(bounded, validRenders);
+}
+
+/**
+ * Converte erros de sincronização em mensagens seguras para a interface, sem expor metadados internos.
+ */
+export function formatCloudErrorForUI(err: unknown): string {
+  const rawMsg = err instanceof Error ? err.message : String(err ?? '');
+  const lower = rawMsg.toLowerCase();
+  if (lower.includes('permission') || lower.includes('insufficient permissions')) {
+    return 'Permissão negada na sincronização em nuvem. Verifique se sua conta está autenticada.';
+  }
+  if (lower.includes('quota')) {
+    return 'Cota diária gratuita de leitura/escrita do banco excedida. Tente novamente mais tarde.';
+  }
+  if (lower.includes('offline') || lower.includes('unavailable') || lower.includes('network')) {
+    return 'Sem conexão com a nuvem no momento. As alterações serão sincronizadas quando a rede retornar.';
+  }
+  if (lower.includes('750 kb') || lower.includes('1048576') || lower.includes('exceeds')) {
+    return 'O tamanho do projeto ou imagem excede o limite suportado por documento.';
+  }
+  return 'Falha ao sincronizar alterações com a nuvem. Tente novamente em instantes.';
+}
+
 /**
  * Ensures the user's private profile exists and is kept fresh in /users/{uid}.
  */

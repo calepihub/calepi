@@ -5,8 +5,9 @@ import {
   round2,
 } from './geometry';
 import {
+  CONSTRUCTION_STAGE_ORDER,
   SINAPI_RJ_METADATA,
-  getSinapiRJItem,
+  getDynamicSinapiRJItem,
   getSinapiRJWallBenchmarkPerM2,
   type ConstructionStageName,
 } from './sinapiRJ';
@@ -17,10 +18,28 @@ import type {
   UnitType,
 } from '../types/project';
 import {
+  BASEBOARD_OPTIONS,
+  CEILING_OPTIONS,
   DRAIN_OPTIONS,
+  FLOOR_INTERNAL_OPTIONS,
+  INTERIOR_DOOR_OPTIONS,
+  GLASS_TYPE_OPTIONS,
+  KITCHEN_FAUCET_OPTIONS,
+  KITCHEN_SINK_OPTIONS,
+  LAUNDRY_TUB_OPTIONS,
   METALS_FINISH_OPTIONS,
+  ROOF_MATERIAL_OPTIONS,
+  SANITARY_COLOR_OPTIONS,
   SHOWER_OPTIONS,
   TOILET_OPTIONS,
+  WALL_EXTERIOR_OPTIONS,
+  WALL_INTERIOR_OPTIONS,
+  WASHBASIN_FAUCET_OPTIONS,
+  WASHBASIN_OPTIONS,
+  WET_FLOOR_OPTIONS,
+  WET_WALL_BATHROOM_OPTIONS,
+  WET_WALL_KITCHEN_OPTIONS,
+  WINDOW_FRAME_OPTIONS,
   findLabel,
   getNormalizedSanitaryFixtures,
 } from './finishesCatalog';
@@ -28,7 +47,15 @@ import {
 export interface QuantityItem {
   id: string;
   code: string;
-  discipline: 'Arquitetura' | 'Estrutura' | 'Elétrica' | 'Hidráulica' | 'Sanitária' | 'Mobiliário' | 'Paisagismo';
+  discipline:
+    | 'Arquitetura'
+    | 'Estrutura'
+    | 'Elétrica'
+    | 'Hidráulica'
+    | 'Sanitária'
+    | 'Louças e Metais'
+    | 'Mobiliário'
+    | 'Paisagismo';
   description: string;
   unit: string;
   netQuantity: number;
@@ -58,6 +85,7 @@ export interface QuantitiesReport {
 
 export function calculateQuantities(project: Project): QuantitiesReport {
   const sanFix = getNormalizedSanitaryFixtures(project);
+  const rs = project.renderSettings;
   const unitCounts = new Map<string, number>();
   let totalUnits = 0;
   let totalCommonAreaM2 = 0;
@@ -75,15 +103,20 @@ export function calculateQuantities(project: Project): QuantitiesReport {
   let totalExternalWallNetAreaM2 = 0;
   let totalInternalAlvenariaNetAreaM2 = 0;
   let totalInternalDrywallNetAreaM2 = 0;
-  let totalFloorAreaM2 = 0;
+  let totalDryFloorAreaM2 = 0;
   let totalWetFloorAreaM2 = 0;
   let totalWetWallTileM2 = 0;
   let totalPaintAreaM2 = 0;
   let totalCeilingAreaM2 = 0;
   let totalBaseboardM = 0;
-  let totalDoors = 0;
-  let totalWindows = 0;
+
+  let totalEntryDoors = 0;
+  let totalBedroomDoors = 0;
+  let totalBathDoors = 0;
+  let totalSlidingWindows = 0;
+  let totalBalconySlidingDoors = 0;
   let totalVitros = 0;
+
   let totalMezzanineAreaM2 = 0;
   let totalMezzanineStairs = 0;
   let totalOutlets = 0;
@@ -93,7 +126,14 @@ export function calculateQuantities(project: Project): QuantitiesReport {
   let totalElectricalPoints = 0;
   let totalWaterPoints = 0;
   let totalDrainagePoints = 0;
-  let totalFurniture = 0;
+
+  let totalToilets = 0;
+  let totalWashbasins = 0;
+  let totalKitchenSinks = 0;
+  let totalLaundryTubs = 0;
+  let totalShowers = 0;
+  let totalDrainKits = 0;
+  let totalRemainingFurniture = 0;
 
   const isWallDrywall = (w: UnitType['walls'][number], ut: UnitType): boolean => {
     if (w.isExternal) return false;
@@ -108,6 +148,12 @@ export function calculateQuantities(project: Project): QuantitiesReport {
     op.subtype.toLowerCase().includes('vitrô') ||
     op.subtype.toLowerCase().includes('basculante');
 
+  const isOpeningBalconyDoor = (op: UnitType['openings'][number]): boolean =>
+    op.role === 'varanda' ||
+    (op.type === 'porta' && op.openingKind === 'porta_correr') ||
+    op.subtype.toLowerCase().includes('varanda') ||
+    op.subtype.toLowerCase().includes('sacada');
+
   const breakdownByUt = (fn: (ut: UnitType) => number): Record<string, number> => {
     const out: Record<string, number> = {};
     for (const ut of project.unitTypes) {
@@ -115,6 +161,27 @@ export function calculateQuantities(project: Project): QuantitiesReport {
       if (qty > 0) out[ut.code] = round2(fn(ut) * qty);
     }
     return out;
+  };
+
+  const wallTouchesRoom = (w: UnitType['walls'][number], r: UnitType['rooms'][number]): boolean => {
+    const minX = Math.min(w.start.x, w.end.x);
+    const maxX = Math.max(w.start.x, w.end.x);
+    const minY = Math.min(w.start.y, w.end.y);
+    const maxY = Math.max(w.start.y, w.end.y);
+    const tol = 0.22;
+    const horiz = Math.abs(w.end.y - w.start.y) < 0.05;
+    const vert = Math.abs(w.end.x - w.start.x) < 0.05;
+    if (horiz) {
+      const nearY = Math.abs(w.start.y - r.y) <= tol || Math.abs(w.start.y - (r.y + r.depth)) <= tol;
+      const overlapX = Math.min(maxX, r.x + r.width) - Math.max(minX, r.x) > 0.25;
+      return nearY && overlapX;
+    }
+    if (vert) {
+      const nearX = Math.abs(w.start.x - r.x) <= tol || Math.abs(w.start.x - (r.x + r.width)) <= tol;
+      const overlapY = Math.min(maxY, r.y + r.depth) - Math.max(minY, r.y) > 0.25;
+      return nearX && overlapY;
+    }
+    return false;
   };
 
   for (const ut of project.unitTypes) {
@@ -127,15 +194,24 @@ export function calculateQuantities(project: Project): QuantitiesReport {
     }
     totalMezzanineStairs += ut.furniture.filter((f) => f.category === 'escada').length * count;
 
-    // Openings map by wallId
     const openingAreaByWall = new Map<string, number>();
+    const openingsByWall = new Map<string, UnitType['openings']>();
     for (const op of ut.openings) {
       const area = op.width * op.height;
       openingAreaByWall.set(op.wallId, (openingAreaByWall.get(op.wallId) ?? 0) + area);
-      if (op.type === 'porta') totalDoors += count;
+      const list = openingsByWall.get(op.wallId) ?? [];
+      list.push(op);
+      openingsByWall.set(op.wallId, list);
+
+      if (op.type === 'porta') {
+        if (isOpeningBalconyDoor(op)) totalBalconySlidingDoors += count;
+        else if (op.role === 'banheiro' || op.width <= 0.65) totalBathDoors += count;
+        else if (op.role === 'quarto' || (op.width > 0.65 && op.width <= 0.75)) totalBedroomDoors += count;
+        else totalEntryDoors += count;
+      }
       if (op.type === 'janela') {
         if (isOpeningVitro(op)) totalVitros += count;
-        else totalWindows += count;
+        else totalSlidingWindows += count;
       }
     }
 
@@ -157,17 +233,41 @@ export function calculateQuantities(project: Project): QuantitiesReport {
     for (const r of ut.rooms) {
       const area = getRoomArea(r);
       const perim = getRoomPerimeter(r);
-      totalFloorAreaM2 += area * count;
-      totalCeilingAreaM2 += area * count;
-      if (r.category === 'banheiro' || r.category === 'cozinha' || r.category === 'area_servico') {
-        // Wet wall tiles up to ceilingHeight in bath, 1.5m/ceiling in kitchen/AS
-        totalWetFloorAreaM2 += area * count;
-        totalWetWallTileM2 += perim * r.ceilingHeight * 0.65 * count;
-        totalPaintAreaM2 += area * count; // ceiling paint
-      } else {
-        totalPaintAreaM2 += (perim * r.ceilingHeight * 0.85 + area) * count;
+
+      // Mezanino possui deck estrutural próprio e pé-direito compartilhado — não entra no forro nem no rodapé de alvenaria térrea
+      if (r.category === 'mezanino') {
+        continue;
       }
-      totalBaseboardM += Math.max(0, perim - 0.9) * count;
+
+      const roomWalls = ut.walls.filter((w) => wallTouchesRoom(w, r));
+      const roomOpenings = roomWalls.flatMap((w) => openingsByWall.get(w.id) ?? []);
+      const roomDoorWidths = roomOpenings
+        .filter((op) => op.type === 'porta')
+        .reduce((s, op) => s + op.width, 0);
+      const roomOpeningArea = roomOpenings.reduce((s, op) => s + op.width * op.height, 0);
+
+      totalCeilingAreaM2 += area * count;
+
+      if (r.category === 'banheiro') {
+        totalWetFloorAreaM2 += area * count;
+        const effectiveWallHeight = Math.min(r.ceilingHeight, ut.ceilingHeight);
+        const wetWallNet = Math.max(0, perim * effectiveWallHeight - roomOpeningArea);
+        totalWetWallTileM2 += wetWallNet * count;
+        totalPaintAreaM2 += area * count; // pintura apenas no teto do BWC
+      } else if (r.category === 'cozinha' || r.category === 'area_servico') {
+        totalWetFloorAreaM2 += area * count;
+        // Faixa hidráulica/bancada (aprox. 55% do perímetro com h=1,50m descontando janelas/portas no trecho)
+        const splashNet = Math.max(0, perim * 0.55 * 1.5 - roomOpeningArea * 0.35);
+        totalWetWallTileM2 += splashNet * count;
+        totalPaintAreaM2 += (Math.max(0, perim * r.ceilingHeight - splashNet - roomOpeningArea * 0.65) + area) * count;
+        totalBaseboardM += Math.max(0, perim - roomDoorWidths) * count;
+      } else {
+        totalDryFloorAreaM2 += area * count;
+        totalPaintAreaM2 += (Math.max(0, perim * r.ceilingHeight - roomOpeningArea) + area) * count;
+        if (r.category !== 'varanda') {
+          totalBaseboardM += Math.max(0, perim - roomDoorWidths) * count;
+        }
+      }
     }
 
     for (const ep of ut.electricalPoints) {
@@ -189,8 +289,39 @@ export function calculateQuantities(project: Project): QuantitiesReport {
 
     totalWaterPoints += ut.waterPoints.length * count;
     totalDrainagePoints += ut.drainagePoints.length * count;
-    totalFurniture += ut.furniture.length * count;
+
+    // Separação precisa entre louças/metais (LOU-01..06) e mobiliário restante (MOB-01)
+    const utVaso = ut.furniture.filter((f) => f.category === 'vaso_sanitario').length;
+    const utLav = ut.furniture.filter((f) => f.category === 'lavatorio').length;
+    const utShower = ut.furniture.filter((f) => f.category === 'chuveiro').length;
+    const utTanque = ut.furniture.filter((f) => f.category === 'tanque').length;
+    const utKitchenSink = ut.furniture.filter(
+      (f) => f.category === 'bancada' && !f.name.toLowerCase().includes('mesa'),
+    ).length;
+    const hasBathRoom = ut.rooms.some((r) => r.category === 'banheiro');
+    const hasKitchenRoom = ut.rooms.some((r) => r.category === 'cozinha');
+    const hasLaundryRoom = ut.rooms.some((r) => r.category === 'area_servico');
+
+    totalToilets += Math.max(utVaso, hasBathRoom ? 1 : 0) * count;
+    totalWashbasins += Math.max(utLav, hasBathRoom ? 1 : 0) * count;
+    totalShowers += Math.max(utShower, hasBathRoom ? 1 : 0) * count;
+    totalKitchenSinks += Math.max(utKitchenSink, hasKitchenRoom ? 1 : 0) * count;
+    totalLaundryTubs += Math.max(utTanque, hasLaundryRoom ? 1 : 0) * count;
+    totalDrainKits += (hasBathRoom ? 1 : 0) * count;
+
+    const remainingFur = ut.furniture.filter(
+      (f) =>
+        f.category !== 'vaso_sanitario' &&
+        f.category !== 'lavatorio' &&
+        f.category !== 'chuveiro' &&
+        f.category !== 'tanque' &&
+        f.category !== 'escada' &&
+        !(f.category === 'bancada' && !f.name.toLowerCase().includes('mesa')),
+    ).length;
+    totalRemainingFurniture += remainingFur * count;
   }
+
+  const totalFloorAreaM2 = round2(totalDryFloorAreaM2 + totalWetFloorAreaM2);
 
   // Structural concrete volume (conceptual geometry from pillars + floor slabs)
   const slabVolumeM3 = round2(
@@ -221,19 +352,21 @@ export function calculateQuantities(project: Project): QuantitiesReport {
         .reduce((sum, s) => sum + 2 * (s.width + s.depth) * s.height, 0),
   );
 
-  // Masonry blocks estimate (only on masonry walls, excluding Drywall partitions)
+  // Masonry blocks & plastering (chapisco/emboço/reboco)
   const isMasonry =
     project.constructionMethod.methodId === 'alvenaria_convencional' ||
     project.constructionMethod.methodId === 'alvenaria_estrutural';
   const masonryWallNetAreaM2 = totalExternalWallNetAreaM2 + totalInternalAlvenariaNetAreaM2;
-  const blocksPerM2 = 25; // 19x19cm block nominal 25 un/m2 (10% loss)
+  const blocksPerM2 = 25;
   const blockCount = isMasonry ? Math.ceil(masonryWallNetAreaM2 * blocksPerM2 * 1.1) : 0;
   const mortarVolumeM3 = isMasonry ? round2(masonryWallNetAreaM2 * 0.018 * 1.15) : 0;
+  const plasterAreaM2 = isMasonry
+    ? round2(Math.max(0, totalExternalWallNetAreaM2 * 2 + totalInternalAlvenariaNetAreaM2 * 2 - totalWetWallTileM2))
+    : 0;
 
-  // Estimated conduit and wire lengths based on unit perimeter + ceiling drops
-  const avgConduitPerPoint = 4.2; // m per point (geometric average drop + horizontal run)
+  const avgConduitPerPoint = 4.2;
   const totalConduitM = round2(totalElectricalPoints * avgConduitPerPoint);
-  const totalWireM = round2(totalConduitM * 3.0); // fase + neutro + terra
+  const totalWireM = round2(totalConduitM * 3.0);
   const totalWaterPipeM = round2(totalWaterPoints * 3.5);
   const totalDrainPipeM = round2(totalDrainagePoints * 2.8);
 
@@ -247,11 +380,20 @@ export function calculateQuantities(project: Project): QuantitiesReport {
         }, 0) + (groundFloor.commonAreaM2 || 0),
       )
     : 0;
+  const groundRoofPerimM = groundFloor
+    ? round2(
+        groundFloor.units.reduce((sum, inst) => {
+          const ut = project.unitTypes.find((t) => t.id === inst.unitTypeId);
+          return sum + (ut ? 2 * (ut.width + ut.depth) : 0);
+        }, 0) * 0.65,
+      )
+    : 0;
   const tapumeAreaM2 = totalUnits > 0 ? round2(Math.max(4, project.site.front) * 2.2) : 0;
   const foundationConcreteM3 = totalUnits > 0 ? round2(groundFloorProjectionM2 * 0.085) : 0;
   const waterproofingAreaM2 =
-    totalUnits > 0 ? round2(totalWetFloorAreaM2 + groundFloorProjectionM2 * 0.25) : 0;
-  const roofShape = project.renderSettings.roofShape ?? 'platibanda';
+    totalUnits > 0 ? round2(totalWetFloorAreaM2 + groundFloorProjectionM2 * 0.35) : 0;
+
+  const roofShape = rs.roofShape ?? 'platibanda';
   const roofShapeFactor =
     roofShape === 'duas_aguas'
       ? 1.16
@@ -261,8 +403,33 @@ export function calculateQuantities(project: Project): QuantitiesReport {
           ? 1.05
           : 1.08;
   const roofAreaM2 = totalUnits > 0 ? round2(groundFloorProjectionM2 * roofShapeFactor) : 0;
+  const hasRoofTruss =
+    totalUnits > 0 && !(roofShape === 'laje_plana' && rs.roofMaterial === 'concreto_impermeabilizado');
 
-  // Exterior landscaping & leisure areas
+  // Dynamic finish / fixture labels
+  const floorDryLbl = findLabel(FLOOR_INTERNAL_OPTIONS, rs.floorMaterial);
+  const floorWetLbl = findLabel(WET_FLOOR_OPTIONS, rs.wetFloorMaterial);
+  const wallBathLbl = findLabel(WET_WALL_BATHROOM_OPTIONS, rs.wetWallBathroom);
+  const wallKitchenLbl = findLabel(WET_WALL_KITCHEN_OPTIONS, rs.wetWallKitchen);
+  const wallIntLbl = findLabel(WALL_INTERIOR_OPTIONS, rs.wallInteriorFinish);
+  const wallExtLbl = findLabel(WALL_EXTERIOR_OPTIONS, rs.wallExteriorFinish);
+  const ceilingLbl = findLabel(CEILING_OPTIONS, rs.ceilingType);
+  const baseboardLbl = findLabel(BASEBOARD_OPTIONS, rs.baseboardType);
+  const roofLbl = findLabel(ROOF_MATERIAL_OPTIONS, rs.roofMaterial);
+  const frameLbl = findLabel(WINDOW_FRAME_OPTIONS, rs.windowFrameColor);
+  const doorMatLbl = findLabel(INTERIOR_DOOR_OPTIONS, rs.interiorDoorMaterial);
+  const glassLbl = findLabel(GLASS_TYPE_OPTIONS, rs.glassType);
+  const metalsLbl = findLabel(METALS_FINISH_OPTIONS, sanFix.metalsFinish);
+  const toiletLbl = findLabel(TOILET_OPTIONS, sanFix.toiletType);
+  const wareColorLbl = findLabel(SANITARY_COLOR_OPTIONS, sanFix.sanitaryWareColor);
+  const showerLbl = findLabel(SHOWER_OPTIONS, sanFix.showerType);
+  const wbLbl = findLabel(WASHBASIN_OPTIONS, sanFix.washbasinType);
+  const wbFaucetLbl = findLabel(WASHBASIN_FAUCET_OPTIONS, sanFix.washbasinFaucet);
+  const kSinkLbl = findLabel(KITCHEN_SINK_OPTIONS, sanFix.kitchenSinkType);
+  const kFaucetLbl = findLabel(KITCHEN_FAUCET_OPTIONS, sanFix.kitchenFaucet);
+  const tubLbl = findLabel(LAUNDRY_TUB_OPTIONS, sanFix.laundryTubType);
+  const drainLbl = findLabel(DRAIN_OPTIONS, sanFix.drainType);
+
   const extSurfaceAreaM2 = round2(
     (project.landscaping?.surfaceZones ?? []).reduce((s, z) => s + z.width * z.depth, 0),
   );
@@ -318,6 +485,89 @@ export function calculateQuantities(project: Project): QuantitiesReport {
             sourceOrigin: 'Projeção da edificação no térreo',
             calculationMemory: `${groundFloorProjectionM2} m² × 0,085 m³/m² = ${foundationConcreteM3} m³`,
             unitTypeBreakdown: {},
+          },
+        ]
+      : []),
+    {
+      id: 'q-conc',
+      code: 'EST-01',
+      discipline: 'Estrutura',
+      description: 'Concreto Estrutural Conceitual (Lajes de Pavimento + Pilares modelados)',
+      unit: 'm³',
+      netQuantity: totalConcreteVolumeM3,
+      lossFactorPercent: 5,
+      grossQuantity: round2(totalConcreteVolumeM3 * 1.05),
+      measurementCriterion: 'Volume geométrico de lajes (área × espessura) + pilares lançados (CONCEITUAL)',
+      sourceOrigin: 'Pavimentos (espessura da laje) + Elementos Estruturais',
+      calculationMemory: `Lajes (${slabVolumeM3} m³) + Pilares (${columnsVolumeM3} m³) = ${totalConcreteVolumeM3} m³`,
+      unitTypeBreakdown: {},
+    },
+    {
+      id: 'q-form',
+      code: 'EST-02',
+      discipline: 'Estrutura',
+      description: 'Fôrmas de Concreto para Lajes e Pilares (Conceitual)',
+      unit: 'm²',
+      netQuantity: totalFormworkAreaM2,
+      lossFactorPercent: 5,
+      grossQuantity: round2(totalFormworkAreaM2 * 1.05),
+      measurementCriterion: 'Fundo de lajes + faces laterais de pilares modelados',
+      sourceOrigin: 'Geometria de pavimentos e pilares',
+      calculationMemory: `Área total de fôrmas estimada = ${totalFormworkAreaM2} m²`,
+      unitTypeBreakdown: {},
+    },
+    ...(totalMezzanineAreaM2 > 0
+      ? (() => {
+          const mezSample = project.unitTypes.find(
+            (u) => u.hasMezzanine && u.mezzanine?.enabled && u.ceilingHeight >= 3.0,
+          )?.mezzanine;
+          const stLbl =
+            mezSample?.structureType === 'madeira_estrutural'
+              ? 'Estrutura em Madeira Estrutural + Deck'
+              : mezSample?.structureType === 'steel_deck'
+                ? 'Estrutura Metálica + Steel Deck'
+                : mezSample?.structureType === 'concreto_armado'
+                  ? 'Laje Concreto Armado'
+                  : 'Estrutura Metálica + Deck Madeira';
+          const elevTxt = mezSample ? ` · Cota +${mezSample.elevationM.toFixed(2)}m` : '';
+          const pctTxt = mezSample ? ` (${Math.round(mezSample.coverageRatio * 100)}% área interna)` : '';
+          return [
+            {
+              id: 'q-mezzanine',
+              code: 'MEZ-01',
+              discipline: 'Estrutura' as const,
+              description: `Plataforma de Mezanino (${stLbl} + Guarda-Corpo h=1,05m${elevTxt})`,
+              unit: 'm²',
+              netQuantity: round2(totalMezzanineAreaM2),
+              lossFactorPercent: 5,
+              grossQuantity: round2(totalMezzanineAreaM2 * 1.05),
+              measurementCriterion: `Área da plataforma 100% interna do mezanino${pctTxt} (não computado como pavimento)`,
+              sourceOrigin: 'Mezaninos habilitados em tipologias com pé-direito >= 3,00m',
+              calculationMemory: `Σ(A_mezanino × N_unid) = ${round2(totalMezzanineAreaM2)} m² (+5% = ${round2(totalMezzanineAreaM2 * 1.05)} m²) · ${stLbl}`,
+              unitTypeBreakdown: breakdownByUt((ut) =>
+                ut.hasMezzanine && ut.mezzanine?.enabled ? round2(ut.mezzanine.width * ut.mezzanine.depth) : 0,
+              ),
+            },
+          ];
+        })()
+      : []),
+    ...(totalMezzanineStairs > 0
+      ? [
+          {
+            id: 'q-stairs',
+            code: 'ESC-01',
+            discipline: 'Estrutura' as const,
+            description: 'Escada Interna Planejada p/ Mezanino c/ Corrimão (Blondel)',
+            unit: 'un',
+            netQuantity: totalMezzanineStairs,
+            lossFactorPercent: 0,
+            grossQuantity: totalMezzanineStairs,
+            measurementCriterion: 'Contagem unitária de escadas planejadas de acesso ao mezanino',
+            sourceOrigin: 'Mobiliário/circulação categoria escada nas tipologias',
+            calculationMemory: `Contagem direta × N_unid = ${totalMezzanineStairs} un`,
+            unitTypeBreakdown: breakdownByUt((ut) =>
+              ut.furniture.filter((f) => f.category === 'escada').length,
+            ),
           },
         ]
       : []),
@@ -397,7 +647,7 @@ export function calculateQuantities(project: Project): QuantitiesReport {
             id: 'q-mortar',
             code: 'ALV-02',
             discipline: 'Arquitetura' as const,
-            description: 'Argamassa de assentamento',
+            description: 'Argamassa de Assentamento',
             unit: 'm³',
             netQuantity: round2(masonryWallNetAreaM2 * 0.018),
             lossFactorPercent: 15,
@@ -409,139 +659,171 @@ export function calculateQuantities(project: Project): QuantitiesReport {
           },
         ]
       : []),
-    {
-      id: 'q-floor',
-      code: 'REV-01',
-      discipline: 'Arquitetura',
-      description: `Piso Interno (${(project.renderSettings.floorMaterial || 'porcelanato_cinza').replace(/_/g, ' ')}) & Molhados (${(project.renderSettings.wetFloorMaterial || 'porcelanato_antiderrapante').replace(/_/g, ' ')})`,
-      unit: 'm²',
-      netQuantity: round2(totalFloorAreaM2),
-      lossFactorPercent: 10,
-      grossQuantity: round2(totalFloorAreaM2 * 1.1),
-      measurementCriterion: 'Soma das áreas úteis de todos os ambientes + 10% recortes',
-      sourceOrigin: 'Cadastro geométrico de ambientes (largura × comprimento)',
-      calculationMemory: `Σ(A_ambiente) × N_unid = ${round2(totalFloorAreaM2)} m² (+10% = ${round2(totalFloorAreaM2 * 1.1)} m²)`,
-      unitTypeBreakdown: breakdownByUt((ut) => ut.rooms.reduce((s, r) => s + getRoomArea(r), 0)),
-    },
-    {
-      id: 'q-tile-wall',
-      code: 'REV-02',
-      discipline: 'Arquitetura',
-      description: `Revestimento de Paredes Áreas Molhadas (BWC: ${(project.renderSettings.wetWallBathroom || 'porcelanato_marmorizado').replace(/_/g, ' ')} / Coz: ${(project.renderSettings.wetWallKitchen || 'azulejo_metro').replace(/_/g, ' ')})`,
-      unit: 'm²',
-      netQuantity: round2(totalWetWallTileM2),
-      lossFactorPercent: 10,
-      grossQuantity: round2(totalWetWallTileM2 * 1.1),
-      measurementCriterion: 'Perímetro dos ambientes molhados × pé-direito × 0,65 (desconto vãos/parcial)',
-      sourceOrigin: 'Ambientes categoria banheiro/cozinha/área de serviço',
-      calculationMemory: `Σ(P_molhado × H × 0,65) = ${round2(totalWetWallTileM2)} m²`,
-      unitTypeBreakdown: {},
-    },
     ...(totalUnits > 0
       ? [
           {
-            id: 'q-imp-wet',
-            code: 'IMP-01',
-            discipline: 'Arquitetura' as const,
-            description: 'Impermeabilização de Áreas Molhadas e Baldrames (Argamassa Polimérica)',
+            id: 'q-slab-top',
+            code: 'EST-03',
+            discipline: 'Estrutura' as const,
+            description: 'Laje de Cobertura Superior (Sob o Telhado / Apoio do Castelo Caixa d’Água)',
             unit: 'm²',
-            netQuantity: waterproofingAreaM2,
+            netQuantity: groundFloorProjectionM2,
             lossFactorPercent: 5,
-            grossQuantity: round2(waterproofingAreaM2 * 1.05),
-            measurementCriterion: 'Pisos de BWC/Cozinha/A.S. + faixa de 25% da projeção térrea nos baldrames',
-            sourceOrigin: 'Ambientes molhados das tipologias e projeção térrea',
-            calculationMemory: `${round2(totalWetFloorAreaM2)} m² (molhados) + ${round2(groundFloorProjectionM2 * 0.25)} m² (baldrames) = ${waterproofingAreaM2} m²`,
+            grossQuantity: round2(groundFloorProjectionM2 * 1.05),
+            measurementCriterion: 'Projeção da cobertura sobre o último pavimento habitável',
+            sourceOrigin: 'Projeção das unidades no pavimento tipo/superior',
+            calculationMemory: `Projeção laje superior = ${groundFloorProjectionM2} m²`,
             unitTypeBreakdown: {},
           },
           {
             id: 'q-cob-roof',
             code: 'COB-01',
             discipline: 'Arquitetura' as const,
-            description: `Cobertura ${roofShape.replace(/_/g, ' ')} (${project.constructionMethod.roofType.replace(/_/g, ' ')})`,
+            description: `Cobertura ${roofShape.replace(/_/g, ' ')} — ${roofLbl}`,
             unit: 'm²',
             netQuantity: roofAreaM2,
             lossFactorPercent: 5,
             grossQuantity: round2(roofAreaM2 * 1.05),
             measurementCriterion: `Projeção da edificação no térreo × ${roofShapeFactor} (formato ${roofShape.replace(/_/g, ' ')})`,
-            sourceOrigin: 'Projeção da edificação, formato e método de cobertura cadastrado',
-            calculationMemory: `${groundFloorProjectionM2} m² × ${roofShapeFactor} = ${roofAreaM2} m²`,
+            sourceOrigin: 'Especificação de cobertura + formato e inclinação do telhado',
+            calculationMemory: `${groundFloorProjectionM2} m² × ${roofShapeFactor} = ${roofAreaM2} m² (${roofLbl})`,
+            unitTypeBreakdown: {},
+          },
+          ...(hasRoofTruss
+            ? [
+                {
+                  id: 'q-cob-truss',
+                  code: 'COB-02',
+                  discipline: 'Estrutura' as const,
+                  description: 'Estrutura de Cobertura (Trama Metálica / Enmadeiramento de Telhado)',
+                  unit: 'm²',
+                  netQuantity: groundFloorProjectionM2,
+                  lossFactorPercent: 5,
+                  grossQuantity: round2(groundFloorProjectionM2 * 1.05),
+                  measurementCriterion: 'Área de projeção coberta por tesouras/terças de apoio das telhas',
+                  sourceOrigin: 'Projeção da laje de cobertura superior',
+                  calculationMemory: `Projeção estrutura = ${groundFloorProjectionM2} m²`,
+                  unitTypeBreakdown: {},
+                },
+              ]
+            : []),
+          {
+            id: 'q-cob-gutter',
+            code: 'COB-03',
+            discipline: 'Arquitetura' as const,
+            description: 'Calhas, Rufos e Pingadeiras em Chapa Galvanizada Pintada',
+            unit: 'm',
+            netQuantity: groundRoofPerimM,
+            lossFactorPercent: 8,
+            grossQuantity: round2(groundRoofPerimM * 1.08),
+            measurementCriterion: 'Perímetro exposto de beiral/platibanda para captação pluvial',
+            sourceOrigin: 'Perímetro dos blocos implantados',
+            calculationMemory: `Perímetro estimado de calhas/rufos = ${groundRoofPerimM} m`,
+            unitTypeBreakdown: {},
+          },
+          {
+            id: 'q-imp-wet',
+            code: 'IMP-01',
+            discipline: 'Arquitetura' as const,
+            description: 'Impermeabilização de Áreas Molhadas, Laje Superior e Baldrames',
+            unit: 'm²',
+            netQuantity: waterproofingAreaM2,
+            lossFactorPercent: 5,
+            grossQuantity: round2(waterproofingAreaM2 * 1.05),
+            measurementCriterion: 'Pisos de BWC/Cozinha/A.S. + faixa de 35% da projeção térrea nos baldrames/laje',
+            sourceOrigin: 'Ambientes molhados das tipologias e projeção térrea',
+            calculationMemory: `${round2(totalWetFloorAreaM2)} m² (molhados) + ${round2(groundFloorProjectionM2 * 0.35)} m² (baldrames/laje) = ${waterproofingAreaM2} m²`,
             unitTypeBreakdown: {},
           },
         ]
       : []),
-    {
-      id: 'q-paint',
-      code: 'PIN-01',
-      discipline: 'Arquitetura',
-      description: `Pintura / Acabamento Parede Interna (${(project.renderSettings.wallInteriorFinish || 'pintura_fosca').replace(/_/g, ' ')}) e Fachada (${(project.renderSettings.wallExteriorFinish || 'textura_acrilica').replace(/_/g, ' ')})`,
-      unit: 'm²',
-      netQuantity: round2(totalPaintAreaM2),
-      lossFactorPercent: 5,
-      grossQuantity: round2(totalPaintAreaM2 * 1.05),
-      measurementCriterion: 'Área líquida estimada de paredes secas e tetos',
-      sourceOrigin: 'Perímetros e áreas de ambientes secos + tetos',
-      calculationMemory: `Σ(P_seco × H × 0,85 + A_teto) = ${round2(totalPaintAreaM2)} m²`,
-      unitTypeBreakdown: {},
-    },
-    {
-      id: 'q-ceiling',
-      code: 'FOR-01',
-      discipline: 'Arquitetura',
-      description: `Forro / Acabamento de Teto (${(project.renderSettings.ceilingType || 'gesso_drywall_tabica').replace(/_/g, ' ')})`,
-      unit: 'm²',
-      netQuantity: round2(totalCeilingAreaM2),
-      lossFactorPercent: 5,
-      grossQuantity: round2(totalCeilingAreaM2 * 1.05),
-      measurementCriterion: 'Projeção horizontal da área útil dos ambientes',
-      sourceOrigin: 'Áreas dos ambientes cadastrados',
-      calculationMemory: `Σ(A_ambiente) = ${round2(totalCeilingAreaM2)} m²`,
-      unitTypeBreakdown: {},
-    },
-    {
-      id: 'q-baseboard',
-      code: 'ROD-01',
-      discipline: 'Arquitetura',
-      description: `Rodapés (${(project.renderSettings.baseboardType || 'porcelanato_10cm').replace(/_/g, ' ')})`,
-      unit: 'm',
-      netQuantity: round2(totalBaseboardM),
-      lossFactorPercent: 8,
-      grossQuantity: round2(totalBaseboardM * 1.08),
-      measurementCriterion: 'Perímetro dos ambientes descontando vão médio de 0,90m de porta',
-      sourceOrigin: 'Perímetro geométrico dos ambientes',
-      calculationMemory: `Σ(P_ambiente − 0,90m) = ${round2(totalBaseboardM)} m`,
-      unitTypeBreakdown: {},
-    },
-    {
-      id: 'q-doors',
-      code: 'ESQ-01',
-      discipline: 'Arquitetura',
-      description: 'Portas Completas (Entrada 0,80m, Quarto 0,70m, Banheiro 0,60m)',
-      unit: 'un',
-      netQuantity: totalDoors,
-      lossFactorPercent: 0,
-      grossQuantity: totalDoors,
-      measurementCriterion: 'Contagem unitária de portas cadastradas nas tipologias implantadas',
-      sourceOrigin: 'Aberturas tipo "porta" nas paredes',
-      calculationMemory: `Contagem direta × N_unid = ${totalDoors} un`,
-      unitTypeBreakdown: breakdownByUt((ut) => ut.openings.filter((o) => o.type === 'porta').length),
-    },
-    ...(totalWindows > 0
+    ...(totalEntryDoors > 0
+      ? [
+          {
+            id: 'q-doors-entry',
+            code: 'ESQ-01A',
+            discipline: 'Arquitetura' as const,
+            description: `Portas de Entrada Social 0,80×2,10m (${doorMatLbl})`,
+            unit: 'un',
+            netQuantity: totalEntryDoors,
+            lossFactorPercent: 0,
+            grossQuantity: totalEntryDoors,
+            measurementCriterion: 'Contagem direta das portas de acesso principal das unidades',
+            sourceOrigin: 'Aberturas P1/Entrada nas tipologias',
+            calculationMemory: `Contagem direta × N_unid = ${totalEntryDoors} un`,
+            unitTypeBreakdown: {},
+          },
+        ]
+      : []),
+    ...(totalBedroomDoors > 0
+      ? [
+          {
+            id: 'q-doors-bed',
+            code: 'ESQ-01B',
+            discipline: 'Arquitetura' as const,
+            description: `Portas Internas de Dormitório 0,70×2,10m (${doorMatLbl})`,
+            unit: 'un',
+            netQuantity: totalBedroomDoors,
+            lossFactorPercent: 0,
+            grossQuantity: totalBedroomDoors,
+            measurementCriterion: 'Contagem direta das portas internas de quartos',
+            sourceOrigin: 'Aberturas de dormitório nas tipologias',
+            calculationMemory: `Contagem direta × N_unid = ${totalBedroomDoors} un`,
+            unitTypeBreakdown: {},
+          },
+        ]
+      : []),
+    ...(totalBathDoors > 0
+      ? [
+          {
+            id: 'q-doors-bath',
+            code: 'ESQ-01C',
+            discipline: 'Arquitetura' as const,
+            description: `Portas Internas de Banheiro 0,60×2,10m (${doorMatLbl})`,
+            unit: 'un',
+            netQuantity: totalBathDoors,
+            lossFactorPercent: 0,
+            grossQuantity: totalBathDoors,
+            measurementCriterion: 'Contagem direta das portas de BWC com trinco privativo',
+            sourceOrigin: 'Aberturas de banheiro nas tipologias',
+            calculationMemory: `Contagem direta × N_unid = ${totalBathDoors} un`,
+            unitTypeBreakdown: {},
+          },
+        ]
+      : []),
+    ...(totalSlidingWindows > 0
       ? [
           {
             id: 'q-windows',
-            code: 'ESQ-02',
+            code: 'ESQ-02A',
             discipline: 'Arquitetura' as const,
-            description: 'Janelas de Correr / Esquadrias Externas',
+            description: `Janelas de Correr (${frameLbl} + ${glassLbl})`,
             unit: 'un',
-            netQuantity: totalWindows,
+            netQuantity: totalSlidingWindows,
             lossFactorPercent: 0,
-            grossQuantity: totalWindows,
-            measurementCriterion: 'Contagem unitária de janelas cadastradas (exceto vitrôs)',
-            sourceOrigin: 'Aberturas tipo "janela" padrão nas paredes',
-            calculationMemory: `Contagem direta × N_unid = ${totalWindows} un`,
-            unitTypeBreakdown: breakdownByUt((ut) =>
-              ut.openings.filter((o) => o.type === 'janela' && !isOpeningVitro(o)).length,
-            ),
+            grossQuantity: totalSlidingWindows,
+            measurementCriterion: 'Contagem unitária de janelas de correr nas salas/dormitórios/cozinha',
+            sourceOrigin: 'Aberturas tipo janela padrão',
+            calculationMemory: `Contagem direta × N_unid = ${totalSlidingWindows} un`,
+            unitTypeBreakdown: {},
+          },
+        ]
+      : []),
+    ...(totalBalconySlidingDoors > 0
+      ? [
+          {
+            id: 'q-balcony-doors',
+            code: 'ESQ-02B',
+            discipline: 'Arquitetura' as const,
+            description: `Portas-Janela de Correr p/ Varanda (${frameLbl} + ${glassLbl})`,
+            unit: 'un',
+            netQuantity: totalBalconySlidingDoors,
+            lossFactorPercent: 0,
+            grossQuantity: totalBalconySlidingDoors,
+            measurementCriterion: 'Contagem unitária de portas de correr de acesso à varanda',
+            sourceOrigin: 'Aberturas de varanda nas tipologias',
+            calculationMemory: `Contagem direta × N_unid = ${totalBalconySlidingDoors} un`,
+            unitTypeBreakdown: {},
           },
         ]
       : []),
@@ -551,7 +833,7 @@ export function calculateQuantities(project: Project): QuantitiesReport {
             id: 'q-vitros',
             code: 'ESQ-03',
             discipline: 'Arquitetura' as const,
-            description: 'Vitrôs Basculantes / Maxim-Ar (Banheiro e Áreas Técnicas)',
+            description: `Vitrôs Basculantes / Maxim-Ar BWC (${frameLbl} + ${glassLbl})`,
             unit: 'un',
             netQuantity: totalVitros,
             lossFactorPercent: 0,
@@ -559,95 +841,10 @@ export function calculateQuantities(project: Project): QuantitiesReport {
             measurementCriterion: 'Contagem unitária de vitrôs basculantes/maxim-ar',
             sourceOrigin: 'Aberturas classificadas como vitrô nas paredes',
             calculationMemory: `Contagem direta × N_unid = ${totalVitros} un`,
-            unitTypeBreakdown: breakdownByUt((ut) =>
-              ut.openings.filter((o) => o.type === 'janela' && isOpeningVitro(o)).length,
-            ),
+            unitTypeBreakdown: {},
           },
         ]
       : []),
-    ...(totalMezzanineAreaM2 > 0
-      ? (() => {
-          const mezSample = project.unitTypes.find(
-            (u) => u.hasMezzanine && u.mezzanine?.enabled && u.ceilingHeight >= 3.0,
-          )?.mezzanine;
-          const stLbl =
-            mezSample?.structureType === 'madeira_estrutural'
-              ? 'Estrutura em Madeira Estrutural + Deck'
-              : mezSample?.structureType === 'steel_deck'
-                ? 'Estrutura Metálica + Steel Deck'
-                : mezSample?.structureType === 'concreto_armado'
-                  ? 'Laje Concreto Armado'
-                  : 'Estrutura Metálica + Deck Madeira';
-          const elevTxt = mezSample ? ` · Cota +${mezSample.elevationM.toFixed(2)}m` : '';
-          const pctTxt = mezSample ? ` (${Math.round(mezSample.coverageRatio * 100)}% área interna)` : '';
-          return [
-            {
-              id: 'q-mezzanine',
-              code: 'MEZ-01',
-              discipline: 'Estrutura' as const,
-              description: `Plataforma de Mezanino (${stLbl} + Guarda-Corpo h=1,05m${elevTxt})`,
-              unit: 'm²',
-              netQuantity: round2(totalMezzanineAreaM2),
-              lossFactorPercent: 5,
-              grossQuantity: round2(totalMezzanineAreaM2 * 1.05),
-              measurementCriterion: `Área da plataforma 100% interna do mezanino${pctTxt} (não computado como pavimento)`,
-              sourceOrigin: 'Mezaninos habilitados em tipologias com pé-direito >= 3,00m',
-              calculationMemory: `Σ(A_mezanino × N_unid) = ${round2(totalMezzanineAreaM2)} m² (+5% = ${round2(totalMezzanineAreaM2 * 1.05)} m²) · ${stLbl}`,
-              unitTypeBreakdown: breakdownByUt((ut) =>
-                ut.hasMezzanine && ut.mezzanine?.enabled ? round2(ut.mezzanine.width * ut.mezzanine.depth) : 0,
-              ),
-            },
-          ];
-        })()
-      : []),
-    ...(totalMezzanineStairs > 0
-      ? [
-          {
-            id: 'q-stairs',
-            code: 'ESC-01',
-            discipline: 'Estrutura' as const,
-            description: 'Escada Interna Planejada p/ Mezanino c/ Corrimão (Blondel)',
-            unit: 'un',
-            netQuantity: totalMezzanineStairs,
-            lossFactorPercent: 0,
-            grossQuantity: totalMezzanineStairs,
-            measurementCriterion: 'Contagem unitária de escadas planejadas de acesso ao mezanino',
-            sourceOrigin: 'Mobiliário/circulação categoria escada nas tipologias',
-            calculationMemory: `Contagem direta × N_unid = ${totalMezzanineStairs} un`,
-            unitTypeBreakdown: breakdownByUt((ut) =>
-              ut.furniture.filter((f) => f.category === 'escada').length,
-            ),
-          },
-        ]
-      : []),
-    {
-      id: 'q-conc',
-      code: 'EST-01',
-      discipline: 'Estrutura',
-      description: 'Concreto Estrutural Conceitual (Lajes + Pilares modelados)',
-      unit: 'm³',
-      netQuantity: totalConcreteVolumeM3,
-      lossFactorPercent: 5,
-      grossQuantity: round2(totalConcreteVolumeM3 * 1.05),
-      measurementCriterion: 'Volume geométrico de lajes (área × espessura) + pilares lançados (CONCEITUAL — não dimensionado)',
-      sourceOrigin: 'Pavimentos (espessura da laje) + Elementos Estruturais',
-      calculationMemory: `Lajes (${slabVolumeM3} m³) + Pilares (${columnsVolumeM3} m³) = ${totalConcreteVolumeM3} m³`,
-      unitTypeBreakdown: {},
-    },
-    {
-      id: 'q-form',
-      code: 'EST-02',
-      discipline: 'Estrutura',
-      description: 'Fôrmas de Concreto (Conceitual)',
-      unit: 'm²',
-      netQuantity: totalFormworkAreaM2,
-      lossFactorPercent: 5,
-      grossQuantity: round2(totalFormworkAreaM2 * 1.05),
-      measurementCriterion: 'Fundo de lajes + faces laterais de pilares modelados',
-      sourceOrigin: 'Geometria de pavimentos e pilares',
-      calculationMemory: `Área total de fôrmas estimada = ${totalFormworkAreaM2} m²`,
-      unitTypeBreakdown: {},
-    },
     {
       id: 'q-ele-pts',
       code: 'ELE-01',
@@ -666,7 +863,7 @@ export function calculateQuantities(project: Project): QuantitiesReport {
       id: 'q-ele-sw',
       code: 'ELE-02',
       discipline: 'Elétrica',
-      description: 'Interruptores',
+      description: 'Interruptores Simples e Paralelos',
       unit: 'pt',
       netQuantity: totalSwitches,
       lossFactorPercent: 0,
@@ -680,7 +877,7 @@ export function calculateQuantities(project: Project): QuantitiesReport {
       id: 'q-ele-lum',
       code: 'ELE-03',
       discipline: 'Elétrica',
-      description: 'Pontos de Iluminação / Luminárias',
+      description: 'Pontos de Iluminação / Luminárias LED',
       unit: 'pt',
       netQuantity: totalLuminaires,
       lossFactorPercent: 0,
@@ -760,18 +957,36 @@ export function calculateQuantities(project: Project): QuantitiesReport {
       calculationMemory: `${totalWaterPoints} pts × 3,5 m = ${totalWaterPipeM} m`,
       unitTypeBreakdown: {},
     },
+    ...(totalUnits > 0
+      ? [
+          {
+            id: 'q-hid-tower',
+            code: 'HID-03',
+            discipline: 'Hidráulica' as const,
+            description: 'Castelo Técnico e Reservatório Superior (Barrilete, Extravasor e Boia)',
+            unit: 'un',
+            netQuantity: 1,
+            lossFactorPercent: 0,
+            grossQuantity: 1,
+            measurementCriterion: 'Conjunto técnico de reservação superior dimensionado pela população total',
+            sourceOrigin: 'Laje de cobertura / dimensionamento hidráulico',
+            calculationMemory: '1 conjunto de reservatório superior sobre laje técnica',
+            unitTypeBreakdown: {},
+          },
+        ]
+      : []),
     {
       id: 'q-san-pts',
       code: 'SAN-01',
       discipline: 'Sanitária',
-      description: `Pontos e Dispositivos Sanitários (Saídas, ${findLabel(DRAIN_OPTIONS, sanFix.drainType)}, Caixas)`,
+      description: `Pontos e Caixas Sifonadas Sanitárias (${drainLbl})`,
       unit: 'pt',
       netQuantity: totalDrainagePoints,
       lossFactorPercent: 0,
       grossQuantity: totalDrainagePoints,
       measurementCriterion: 'Contagem direta da rede sanitária modelada',
       sourceOrigin: 'Módulo Sanitário e Esgoto',
-      calculationMemory: `${totalDrainagePoints} elementos sanitários (${findLabel(DRAIN_OPTIONS, sanFix.drainType)})`,
+      calculationMemory: `${totalDrainagePoints} elementos sanitários (${drainLbl})`,
       unitTypeBreakdown: {},
     },
     {
@@ -788,20 +1003,278 @@ export function calculateQuantities(project: Project): QuantitiesReport {
       calculationMemory: `${totalDrainagePoints} pts × 2,8 m = ${totalDrainPipeM} m`,
       unitTypeBreakdown: {},
     },
+    ...(totalFloorAreaM2 > 0
+      ? [
+          {
+            id: 'q-contrapiso',
+            code: 'REV-00',
+            discipline: 'Arquitetura' as const,
+            description: 'Contrapiso Regularizado Argamassa 1:4 e=3cm (Áreas Secas e Molhadas)',
+            unit: 'm²',
+            netQuantity: totalFloorAreaM2,
+            lossFactorPercent: 5,
+            grossQuantity: round2(totalFloorAreaM2 * 1.05),
+            measurementCriterion: 'Soma das áreas úteis de piso interno (exclui deck de mezanino)',
+            sourceOrigin: 'Cadastro geométrico de ambientes',
+            calculationMemory: `${round2(totalDryFloorAreaM2)} m² (seco) + ${round2(totalWetFloorAreaM2)} m² (molhado) = ${totalFloorAreaM2} m²`,
+            unitTypeBreakdown: {},
+          },
+        ]
+      : []),
+    ...(totalDryFloorAreaM2 > 0
+      ? [
+          {
+            id: 'q-floor-dry',
+            code: 'REV-01A',
+            discipline: 'Arquitetura' as const,
+            description: `Piso Interno Áreas Secas — ${floorDryLbl}`,
+            unit: 'm²',
+            netQuantity: round2(totalDryFloorAreaM2),
+            lossFactorPercent: 10,
+            grossQuantity: round2(totalDryFloorAreaM2 * 1.1),
+            measurementCriterion: 'Área útil de sala, dormitório e circulação (exclui deck de mezanino) + 10% cortes',
+            sourceOrigin: 'Ambientes secos das tipologias',
+            calculationMemory: `Σ(A_seco) × N_unid = ${round2(totalDryFloorAreaM2)} m² (+10% = ${round2(totalDryFloorAreaM2 * 1.1)} m²)`,
+            unitTypeBreakdown: {},
+          },
+        ]
+      : []),
+    ...(totalWetFloorAreaM2 > 0
+      ? [
+          {
+            id: 'q-floor-wet',
+            code: 'REV-01B',
+            discipline: 'Arquitetura' as const,
+            description: `Piso Áreas Molhadas — ${floorWetLbl}`,
+            unit: 'm²',
+            netQuantity: round2(totalWetFloorAreaM2),
+            lossFactorPercent: 10,
+            grossQuantity: round2(totalWetFloorAreaM2 * 1.1),
+            measurementCriterion: 'Área útil de BWC, cozinha e área de serviço + 10% cortes',
+            sourceOrigin: 'Ambientes molhados das tipologias',
+            calculationMemory: `Σ(A_molhado) × N_unid = ${round2(totalWetFloorAreaM2)} m² (+10% = ${round2(totalWetFloorAreaM2 * 1.1)} m²)`,
+            unitTypeBreakdown: {},
+          },
+        ]
+      : []),
     {
-      id: 'q-mob-pts',
-      code: 'MOB-01',
-      discipline: 'Mobiliário',
-      description: `Louças, Metais (${findLabel(METALS_FINISH_OPTIONS, sanFix.metalsFinish)}), Chuveiros e Bancadas — ${findLabel(TOILET_OPTIONS, sanFix.toiletType)}`,
-      unit: 'un',
-      netQuantity: totalFurniture,
-      lossFactorPercent: 0,
-      grossQuantity: totalFurniture,
-      measurementCriterion: 'Contagem direta de itens de mobiliário, louças e chuveiros nas unidades',
-      sourceOrigin: 'Módulo Mobiliário & Acabamentos',
-      calculationMemory: `${totalFurniture} itens · Bacia: ${findLabel(TOILET_OPTIONS, sanFix.toiletType)} · Chuveiro: ${findLabel(SHOWER_OPTIONS, sanFix.showerType)}`,
+      id: 'q-tile-wall',
+      code: 'REV-02',
+      discipline: 'Arquitetura',
+      description: `Revestimento Parede Molhada (BWC: ${wallBathLbl} / Coz: ${wallKitchenLbl})`,
+      unit: 'm²',
+      netQuantity: round2(totalWetWallTileM2),
+      lossFactorPercent: 10,
+      grossQuantity: round2(totalWetWallTileM2 * 1.1),
+      measurementCriterion: 'BWC até o teto e Cozinha/A.S. faixa 1,50m descontando os vãos reais de portas/vitrôs',
+      sourceOrigin: 'Paredes delimitadoras de BWC/Cozinha/A.S. e respectivas esquadrias',
+      calculationMemory: `Área líquida real descontando esquadrias = ${round2(totalWetWallTileM2)} m²`,
       unitTypeBreakdown: {},
     },
+    ...(plasterAreaM2 > 0
+      ? [
+          {
+            id: 'q-plaster',
+            code: 'REV-03',
+            discipline: 'Arquitetura' as const,
+            description: 'Chapisco + Emboço / Reboco Massa Única (Paredes em Alvenaria)',
+            unit: 'm²',
+            netQuantity: plasterAreaM2,
+            lossFactorPercent: 5,
+            grossQuantity: round2(plasterAreaM2 * 1.05),
+            measurementCriterion: '2 faces das paredes de alvenaria líquidas menos área com revestimento cerâmico',
+            sourceOrigin: 'Paredes em alvenaria (exclui Drywall)',
+            calculationMemory: `Área líquida reboco = ${plasterAreaM2} m²`,
+            unitTypeBreakdown: {},
+          },
+        ]
+      : []),
+    {
+      id: 'q-ceiling',
+      code: 'FOR-01',
+      discipline: 'Arquitetura',
+      description: `Forro / Acabamento de Teto — ${ceilingLbl}`,
+      unit: 'm²',
+      netQuantity: round2(totalCeilingAreaM2),
+      lossFactorPercent: 5,
+      grossQuantity: round2(totalCeilingAreaM2 * 1.05),
+      measurementCriterion: 'Projeção dos ambientes principais (exclui sobreposição de mezanino)',
+      sourceOrigin: 'Áreas úteis dos ambientes (exceto mezanino)',
+      calculationMemory: `Σ(A_teto_real) = ${round2(totalCeilingAreaM2)} m²`,
+      unitTypeBreakdown: {},
+    },
+    {
+      id: 'q-baseboard',
+      code: 'ROD-01',
+      discipline: 'Arquitetura',
+      description: `Rodapés — ${baseboardLbl}`,
+      unit: 'm',
+      netQuantity: round2(totalBaseboardM),
+      lossFactorPercent: 8,
+      grossQuantity: round2(totalBaseboardM * 1.08),
+      measurementCriterion: 'Perímetro dos ambientes secos/cozinha (exclui BWC, varanda e mezanino) descontando vãos reais de portas',
+      sourceOrigin: 'Perímetro dos ambientes e aberturas vinculadas',
+      calculationMemory: `Σ(P_ambiente − L_portas_reais) = ${round2(totalBaseboardM)} m`,
+      unitTypeBreakdown: {},
+    },
+    {
+      id: 'q-paint',
+      code: 'PIN-01',
+      discipline: 'Arquitetura',
+      description: `Pintura / Acabamento Interno Paredes e Tetos — ${wallIntLbl}`,
+      unit: 'm²',
+      netQuantity: round2(totalPaintAreaM2),
+      lossFactorPercent: 5,
+      grossQuantity: round2(totalPaintAreaM2 * 1.05),
+      measurementCriterion: 'Paredes secas descontando esquadrias e faixas cerâmicas + tetos',
+      sourceOrigin: 'Ambientes internos das tipologias',
+      calculationMemory: `Área líquida pintura interna = ${round2(totalPaintAreaM2)} m²`,
+      unitTypeBreakdown: {},
+    },
+    ...(totalExternalWallNetAreaM2 > 0
+      ? [
+          {
+            id: 'q-paint-ext',
+            code: 'PIN-02',
+            discipline: 'Arquitetura' as const,
+            description: `Acabamento de Fachada Externa — ${wallExtLbl}`,
+            unit: 'm²',
+            netQuantity: round2(totalExternalWallNetAreaM2),
+            lossFactorPercent: 5,
+            grossQuantity: round2(totalExternalWallNetAreaM2 * 1.05),
+            measurementCriterion: 'Área líquida de fachada externa descontando janelas e portas',
+            sourceOrigin: 'Paredes externas das unidades',
+            calculationMemory: `Σ(A_fachada_ext − A_vãos) = ${round2(totalExternalWallNetAreaM2)} m²`,
+            unitTypeBreakdown: {},
+          },
+        ]
+      : []),
+    ...(totalToilets > 0
+      ? [
+          {
+            id: 'q-lou-toilet',
+            code: 'LOU-01',
+            discipline: 'Louças e Metais' as const,
+            description: `Bacia Sanitária — ${toiletLbl} (Cor: ${wareColorLbl})`,
+            unit: 'un',
+            netQuantity: totalToilets,
+            lossFactorPercent: 0,
+            grossQuantity: totalToilets,
+            measurementCriterion: '1 conjunto completo instalado por banheiro das unidades',
+            sourceOrigin: 'Catálogo de Louças e Metais + banheiros',
+            calculationMemory: `${totalToilets} conjunto(s) completos`,
+            unitTypeBreakdown: {},
+          },
+        ]
+      : []),
+    ...(totalWashbasins > 0
+      ? [
+          {
+            id: 'q-lou-basin',
+            code: 'LOU-02',
+            discipline: 'Louças e Metais' as const,
+            description: `Lavatório c/ Bancada e Torneira — ${wbLbl} + ${wbFaucetLbl} (${metalsLbl})`,
+            unit: 'un',
+            netQuantity: totalWashbasins,
+            lossFactorPercent: 0,
+            grossQuantity: totalWashbasins,
+            measurementCriterion: '1 conjunto de lavatório + torneira por banheiro',
+            sourceOrigin: 'Catálogo de Louças e Metais + banheiros',
+            calculationMemory: `${totalWashbasins} conjunto(s) completos`,
+            unitTypeBreakdown: {},
+          },
+        ]
+      : []),
+    ...(totalKitchenSinks > 0
+      ? [
+          {
+            id: 'q-lou-kitchen',
+            code: 'LOU-03',
+            discipline: 'Louças e Metais' as const,
+            description: `Pia / Bancada de Cozinha — ${kSinkLbl} + ${kFaucetLbl} (${metalsLbl})`,
+            unit: 'un',
+            netQuantity: totalKitchenSinks,
+            lossFactorPercent: 0,
+            grossQuantity: totalKitchenSinks,
+            measurementCriterion: '1 conjunto bancada + cuba + torneira por cozinha',
+            sourceOrigin: 'Catálogo de Louças e Metais + cozinhas',
+            calculationMemory: `${totalKitchenSinks} conjunto(s) completos`,
+            unitTypeBreakdown: {},
+          },
+        ]
+      : []),
+    ...(totalLaundryTubs > 0
+      ? [
+          {
+            id: 'q-lou-tub',
+            code: 'LOU-04',
+            discipline: 'Louças e Metais' as const,
+            description: `Tanque de Serviço — ${tubLbl} (Metais: ${metalsLbl})`,
+            unit: 'un',
+            netQuantity: totalLaundryTubs,
+            lossFactorPercent: 0,
+            grossQuantity: totalLaundryTubs,
+            measurementCriterion: '1 tanque instalado por unidade com área de serviço',
+            sourceOrigin: 'Catálogo de Louças e Metais + área de serviço',
+            calculationMemory: `${totalLaundryTubs} unidade(s)`,
+            unitTypeBreakdown: {},
+          },
+        ]
+      : []),
+    ...(totalShowers > 0
+      ? [
+          {
+            id: 'q-lou-shower',
+            code: 'LOU-05',
+            discipline: 'Louças e Metais' as const,
+            description: `Chuveiro / Ducha — ${showerLbl} (Acabamento: ${metalsLbl})`,
+            unit: 'un',
+            netQuantity: totalShowers,
+            lossFactorPercent: 0,
+            grossQuantity: totalShowers,
+            measurementCriterion: '1 conjunto chuveiro/ducha + registro de pressão por banheiro',
+            sourceOrigin: 'Catálogo de Louças e Metais + banheiros',
+            calculationMemory: `${totalShowers} unidade(s)`,
+            unitTypeBreakdown: {},
+          },
+        ]
+      : []),
+    ...(totalDrainKits > 0
+      ? [
+          {
+            id: 'q-lou-drain',
+            code: 'LOU-06',
+            discipline: 'Louças e Metais' as const,
+            description: `Ralo BWC & Kit Metais — ${drainLbl} (${metalsLbl})`,
+            unit: 'un',
+            netQuantity: totalDrainKits,
+            lossFactorPercent: 0,
+            grossQuantity: totalDrainKits,
+            measurementCriterion: 'Kit ralo + acabamentos de registro + acessórios por banheiro',
+            sourceOrigin: 'Catálogo de Louças e Metais + banheiros',
+            calculationMemory: `${totalDrainKits} kit(s)`,
+            unitTypeBreakdown: {},
+          },
+        ]
+      : []),
+    ...(totalRemainingFurniture > 0
+      ? [
+          {
+            id: 'q-mob-pts',
+            code: 'MOB-01',
+            discipline: 'Mobiliário' as const,
+            description: 'Mobiliário Fixo & Itens Complementares (Box Vidro, Armários, Camas, Sofá, Cooktop)',
+            unit: 'un',
+            netQuantity: totalRemainingFurniture,
+            lossFactorPercent: 0,
+            grossQuantity: totalRemainingFurniture,
+            measurementCriterion: 'Itens de layout excluindo louças/metais já discriminados em LOU-01..06',
+            sourceOrigin: 'Planta Baixa 2D & Mobiliário Paramétrico',
+            calculationMemory: `${totalRemainingFurniture} itens mobiliário/equipamentos nas unidades`,
+            unitTypeBreakdown: {},
+          },
+        ]
+      : []),
     ...(extSurfaceAreaM2 > 0
       ? [
           {
@@ -884,7 +1357,7 @@ export function calculateQuantities(project: Project): QuantitiesReport {
       totalCommonAreaM2: round2(totalCommonAreaM2),
       totalBuiltAreaM2,
       totalWallNetAreaM2: round2(totalWallNetAreaM2),
-      totalFloorAreaM2: round2(totalFloorAreaM2),
+      totalFloorAreaM2,
       totalPaintAreaM2: round2(totalPaintAreaM2),
       totalFacadeAreaM2: round2(totalExternalWallNetAreaM2),
       totalBaseboardM: round2(totalBaseboardM),
@@ -924,11 +1397,12 @@ export function syncBudgetWithQuantities(
 
   const synced: BudgetEntry[] = quantities.items.map((q) => {
     const prev = existingByCode.get(q.code);
-    const sinapiRef = getSinapiRJItem(q.code);
+    const sinapiRef = getDynamicSinapiRJItem(q.code, project);
+    const prevWasAutoSinapi = Boolean(prev?.supplier && prev.supplier.startsWith('SINAPI-RJ'));
     const shouldFillSinapiPrice =
       autoApplySinapi &&
       Boolean(sinapiRef) &&
-      (!prev || (prev.unitPrice === null && (!prev.supplier || prev.supplier.startsWith('SINAPI-RJ'))));
+      (!prev || prev.unitPrice === null || prevWasAutoSinapi);
 
     const unitPrice = shouldFillSinapiPrice && sinapiRef
       ? regime === 'desonerado'
@@ -949,8 +1423,8 @@ export function syncBudgetWithQuantities(
     return {
       id: prev?.id ?? `bdg-${q.code}`,
       code: q.code,
-      sinapiCode: prev?.sinapiCode ?? sinapiRef?.sinapiCode,
-      description: prev?.description ?? q.description,
+      sinapiCode: sinapiRef?.sinapiCode ?? prev?.sinapiCode,
+      description: prevWasAutoSinapi || !prev ? q.description : prev.description,
       discipline: q.discipline,
       category: prev?.category ?? sinapiRef?.category ?? 'servico',
       unit: q.unit,
@@ -959,7 +1433,7 @@ export function syncBudgetWithQuantities(
       lossFactorPercent: prev?.lossFactorPercent ?? q.lossFactorPercent,
       supplier,
       sourceBase,
-      notes: prev?.notes ?? sinapiRef?.sinapiDescription ?? '',
+      notes: shouldFillSinapiPrice && sinapiRef ? sinapiRef.sinapiDescription : (prev?.notes ?? sinapiRef?.sinapiDescription ?? ''),
     };
   });
 
@@ -974,7 +1448,7 @@ export function syncBudgetWithQuantities(
 }
 
 export interface AnalyticalStageSummary {
-  stageName: ConstructionStageName | '09. Serviços Complementares';
+  stageName: ConstructionStageName;
   itemsCount: number;
   materialTotal: number;
   laborTotal: number;
@@ -991,7 +1465,7 @@ export interface AnalyticalBudgetDetails {
   stageSummaries: AnalyticalStageSummary[];
   lineDetails: Array<{
     code: string;
-    stageName: ConstructionStageName | '09. Serviços Complementares';
+    stageName: ConstructionStageName;
     materialUnitPrice: number | null;
     laborUnitPrice: number | null;
     materialSubtotal: number | null;
@@ -1010,7 +1484,7 @@ export function calculateAnalyticalBreakdown(
     (1 - (project.budgetSettings.discountPercent || 0) / 100);
 
   const stageMap = new Map<
-    ConstructionStageName | '09. Serviços Complementares',
+    ConstructionStageName,
     { itemsCount: number; materialTotal: number; laborTotal: number; directTotal: number }
   >();
 
@@ -1018,9 +1492,9 @@ export function calculateAnalyticalBreakdown(
   let totalLaborCost = 0;
 
   const lineDetails = budget.lines.map((line) => {
-    const ref = getSinapiRJItem(line.code);
-    const stageName: ConstructionStageName | '09. Serviços Complementares' =
-      ref?.stageGroup ?? '09. Serviços Complementares';
+    const ref = getDynamicSinapiRJItem(line.code, project);
+    const stageName: ConstructionStageName =
+      ref?.stageGroup ?? '10. Louças, Metais, Bancadas e Paisagismo';
     const matRatio =
       ref?.materialRatio ?? (line.category === 'material' ? 1 : line.category === 'equipamento' ? 0.75 : 0.55);
 
@@ -1060,8 +1534,9 @@ export function calculateAnalyticalBreakdown(
     };
   });
 
+  const stageOrderIndex = new Map(CONSTRUCTION_STAGE_ORDER.map((s, idx) => [s, idx]));
   const stageSummaries: AnalyticalStageSummary[] = Array.from(stageMap.entries())
-    .sort((a, b) => a[0].localeCompare(b[0]))
+    .sort((a, b) => (stageOrderIndex.get(a[0]) ?? 99) - (stageOrderIndex.get(b[0]) ?? 99))
     .map(([stageName, st]) => ({
       stageName,
       itemsCount: st.itemsCount,
@@ -1240,6 +1715,75 @@ export function calculateBudgetSummary(
     costPerM2: grandTotalCost > 0 && area > 0 ? round2(grandTotalCost / area) : null,
     costPerUnit: grandTotalCost > 0 && units > 0 ? round2(grandTotalCost / units) : null,
     unquotedCount,
+  };
+}
+
+export interface InvestorROIReport {
+  totalUnits: number;
+  landCost: number;
+  constructionCost: number;
+  totalInvestment: number;
+  monthlyRentPerUnit: number;
+  grossMonthlyRent: number;
+  vacancyRatePercent: number;
+  adminFeePercent: number;
+  monthlyCondoCostPerUnit: number;
+  netMonthlyIncome: number;
+  netAnnualIncome: number;
+  monthlyYieldPercent: number;
+  annualYieldPercent: number;
+  paybackMonths: number | null;
+  paybackYears: number | null;
+}
+
+export function calculateInvestorROI(
+  project: Project,
+  grandTotalCost: number,
+): InvestorROIReport {
+  const totalUnits = project.floors.reduce((sum, fl) => sum + fl.units.length, 0);
+  const bs = project.budgetSettings;
+  const landCost = Math.max(0, Number(bs.landCost ?? 0));
+  const constructionCost = Math.max(0, grandTotalCost);
+  const totalInvestment = round2(landCost + constructionCost);
+
+  const monthlyRentPerUnit = Math.max(0, Number(bs.monthlyRentPerUnit ?? 1450));
+  const vacancyRatePercent = Math.min(80, Math.max(0, Number(bs.vacancyRatePercent ?? 5)));
+  const adminFeePercent = Math.min(35, Math.max(0, Number(bs.adminFeePercent ?? 8)));
+  const monthlyCondoCostPerUnit = Math.max(0, Number(bs.monthlyCondoCostPerUnit ?? 95));
+
+  const grossMonthlyRent = round2(totalUnits * monthlyRentPerUnit);
+  const effectiveMonthlyRent = grossMonthlyRent * (1 - vacancyRatePercent / 100);
+  const adminDeduction = effectiveMonthlyRent * (adminFeePercent / 100);
+  const condoDeduction = totalUnits * monthlyCondoCostPerUnit;
+  const netMonthlyIncome = round2(Math.max(0, effectiveMonthlyRent - adminDeduction - condoDeduction));
+  const netAnnualIncome = round2(netMonthlyIncome * 12);
+
+  const monthlyYieldPercent =
+    totalInvestment > 0 ? round2((netMonthlyIncome / totalInvestment) * 100) : 0;
+  const annualYieldPercent =
+    totalInvestment > 0 ? round2((netAnnualIncome / totalInvestment) * 100) : 0;
+
+  const paybackMonths =
+    netMonthlyIncome > 0 && totalInvestment > 0 ? Math.ceil(totalInvestment / netMonthlyIncome) : null;
+  const paybackYears =
+    paybackMonths !== null ? round2(paybackMonths / 12) : null;
+
+  return {
+    totalUnits,
+    landCost,
+    constructionCost,
+    totalInvestment,
+    monthlyRentPerUnit,
+    grossMonthlyRent,
+    vacancyRatePercent,
+    adminFeePercent,
+    monthlyCondoCostPerUnit,
+    netMonthlyIncome,
+    netAnnualIncome,
+    monthlyYieldPercent,
+    annualYieldPercent,
+    paybackMonths,
+    paybackYears,
   };
 }
 

@@ -1,5 +1,5 @@
 import { jsPDF } from 'jspdf';
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import {
   AlignmentType,
   BorderStyle,
@@ -40,8 +40,10 @@ import {
   buildConstructionSchedule,
   calculateAnalyticalBreakdown,
   calculateBudgetSummary,
+  calculateInvestorROI,
   calculateQuantities,
 } from './quantitiesAndBudget';
+import { CONSTRUCTION_STAGE_ORDER } from './sinapiRJ';
 import { generateAllMemorials } from './memorialGenerator';
 import {
   detectSharedWallsAndGaps,
@@ -564,31 +566,64 @@ export function generateProjectDXF(project: Project, floorIndex = 0): string {
 }
 
 // ============================================================================
-// 3. EXCEL XLSX EXPORTER (7-sheet executive workbook with SINAPI-RJ analytical split)
+// 3. EXCEL XLSX EXPORTER (7-sheet executive workbook via ExcelJS + Formula Guard)
 // ============================================================================
-function setSheetCols(ws: XLSX.WorkSheet, widths: number[]) {
-  ws['!cols'] = widths.map((wch) => ({ wch }));
+export function sanitizeSpreadsheetCell(val: unknown): string | number {
+  if (typeof val === 'number') {
+    return Number.isFinite(val) ? val : 0;
+  }
+  const str = String(val ?? '');
+  if (str.length > 0 && /^[=+\-@\t\r]/.test(str)) {
+    return `'${str}`;
+  }
+  return str;
 }
 
-export function generateProjectXLSXBuffer(
+function populateExcelSheet(
+  wb: ExcelJS.Workbook,
+  sheetName: string,
+  rows: Array<Array<string | number>>,
+  widths: number[],
+  headerRowIndex = 0,
+): ExcelJS.Worksheet {
+  const ws = wb.addWorksheet(sheetName);
+  rows.forEach((r, idx) => {
+    const added = ws.addRow(r.map((cell) => sanitizeSpreadsheetCell(cell)));
+    if (idx === headerRowIndex && r.length > 1) {
+      added.font = { bold: true, color: { argb: 'FF0F172A' } };
+      added.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFE2E8F0' },
+      };
+    }
+  });
+  ws.columns = widths.map((width) => ({ width }));
+  return ws;
+}
+
+export async function generateProjectXLSXBuffer(
   project: Project,
   scheduleMonths = 6,
-): Uint8Array {
+): Promise<Uint8Array> {
   const quantities = calculateQuantities(project);
   const budget = calculateBudgetSummary(project, quantities);
   const analytical = calculateAnalyticalBreakdown(budget, project);
+  const roi = calculateInvestorROI(project, budget.grandTotalCost);
   const schedule = buildConstructionSchedule(budget.grandTotalCost, scheduleMonths);
   const elec = calculateElectricalSizing(project);
   const siteCheck = analyzeSiteGeometry(project.site);
   const detailByCode = new Map(analytical.lineDetails.map((d) => [d.code, d]));
-  const wb = XLSX.utils.book_new();
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'KITNET PRO STUDIO';
+  wb.created = new Date();
 
   // Sheet 1: Resumo Executivo
   const summaryRows: Array<Array<string | number>> = [
     ['KITNET PRO STUDIO — RESUMO EXECUTIVO DE ENGENHARIA E ORÇAMENTO'],
     ['Empreendimento', project.name],
     ['Código', project.code],
-    ['Contratante / Proprietário', project.client],
+    ['Contratante / Proprietário', project.client || 'Não informado'],
     ['Município / UF', `${project.municipality}${project.state ? ` / ${project.state}` : ''}`],
     ['Etapa', project.stage],
     ['Sistema Construtivo', project.constructionMethod.name],
@@ -603,9 +638,6 @@ export function generateProjectXLSXBuffer(
     ['Área Construída Total (m²)', quantities.summary.totalBuiltAreaM2],
     [],
     ['RESUMO FINANCEIRO CONSOLIDADO (R$)'],
-    ['Material Total Estimado (R$)', analytical.totalMaterialCost],
-    ['Mão de Obra + Encargos RJ (R$)', analytical.totalLaborCost],
-    ['  └─ Parcela Implícita de Encargos Sociais (R$)', analytical.socialChargesImpliedValue],
     ['Custo Direto Total Cotado (R$)', budget.directTotalCost],
     [`Custos Indiretos (${project.budgetSettings.indirectCostsPercent}%)`, budget.indirectCost],
     [`BDI Aplicado (${project.budgetSettings.bdiPercent}%)`, budget.bdiValue],
@@ -614,24 +646,30 @@ export function generateProjectXLSXBuffer(
     ['Custo Médio por Unidade Habitacional (R$/un)', budget.costPerUnit ?? 0],
     ['Itens Sem Cotação', budget.unquotedCount],
     [],
-    ['RESUMO POR ETAPA CONSTRUTIVA (WBS)'],
-    ['Etapa', 'Itens', 'Material (R$)', 'Mão de Obra (R$)', 'Custo Direto (R$)', 'Com BDI (R$)', '% Participação'],
+    ['VIABILIDADE FINANCEIRA (ROI DO INVESTIDOR)'],
+    ['Custo do Terreno Informado (R$)', roi.landCost],
+    ['Investimento Total (Terreno + Obra) (R$)', roi.totalInvestment],
+    ['Aluguel Mensal Estimado por Unidade (R$)', roi.monthlyRentPerUnit],
+    ['Receita Bruta Mensal Potencial (R$)', roi.grossMonthlyRent],
+    ['Taxa de Vacância (%) / Adm. (%)', `${roi.vacancyRatePercent}% / ${roi.adminFeePercent}%`],
+    ['Receita Líquida Mensal Estimada (R$)', roi.netMonthlyIncome],
+    ['Yield Mensal (%) / Yield Anual (%)', `${roi.monthlyYieldPercent.toFixed(2)}% / ${roi.annualYieldPercent.toFixed(2)}%`],
+    ['Payback Estimado (meses / anos)', roi.paybackMonths !== null ? `${roi.paybackMonths} meses (${roi.paybackYears} anos)` : 'N/A'],
+    [],
+    ['RESUMO DA PLANILHA ORÇAMENTÁRIA POR ETAPA EAP (10 ETAPAS)'],
+    ['Etapa EAP', 'Itens', 'Custo Direto (R$)', 'Com BDI (R$)', '% Participação'],
     ...analytical.stageSummaries.map((st) => [
       st.stageName,
       st.itemsCount,
-      st.materialTotal,
-      st.laborTotal,
       st.directTotal,
       st.withBdiTotal,
       st.sharePercent,
     ]),
   ];
-  const wsSummary = XLSX.utils.aoa_to_sheet(summaryRows);
-  setSheetCols(wsSummary, [44, 24, 18, 18, 18, 18, 16]);
-  XLSX.utils.book_append_sheet(wb, wsSummary, 'Resumo Executivo');
+  populateExcelSheet(wb, 'Resumo Executivo', summaryRows, [46, 26, 20, 20, 16], 37);
 
   // Sheet 2: Quantitativos
-  const qtyRows = [
+  const qtyRows: Array<Array<string | number>> = [
     [
       'Código',
       'Disciplina',
@@ -657,43 +695,41 @@ export function generateProjectXLSXBuffer(
       q.calculationMemory,
     ]),
   ];
-  const wsQty = XLSX.utils.aoa_to_sheet(qtyRows);
-  setSheetCols(wsQty, [12, 16, 48, 10, 14, 12, 16, 44, 38, 48]);
-  XLSX.utils.book_append_sheet(wb, wsQty, 'Quantitativos');
+  populateExcelSheet(wb, 'Quantitativos', qtyRows, [12, 18, 52, 10, 14, 12, 16, 44, 38, 48], 0);
 
-  // Sheet 3: Orçamento Analítico (Material vs Mão de Obra + Encargos + SINAPI-RJ)
+  // Sheet 3: Orçamento Analítico (Planilha Orçamentária 10 Etapas EAP SINAPI-RJ sem sub-insumos)
+  const stageOrderIndex = new Map(CONSTRUCTION_STAGE_ORDER.map((s, idx) => [s, idx]));
+  const sortedBudgetLines = [...budget.lines].sort((a, b) => {
+    const sa = detailByCode.get(a.code)?.stageName ?? '10. Louças, Metais, Bancadas e Paisagismo';
+    const sb = detailByCode.get(b.code)?.stageName ?? '10. Louças, Metais, Bancadas e Paisagismo';
+    const diff = (stageOrderIndex.get(sa) ?? 99) - (stageOrderIndex.get(sb) ?? 99);
+    return diff !== 0 ? diff : a.code.localeCompare(b.code);
+  });
+
   const bdgRows: Array<Array<string | number>> = [
     [
-      'Etapa WBS',
+      'Etapa EAP',
       'Código',
       'SINAPI-RJ',
-      'Descrição',
+      'Descrição do Serviço / Especificação',
       'Unid.',
-      'Qtd Efetiva',
-      'Unit. Material (R$)',
-      'Unit. Mão de Obra (R$)',
-      'Unit. Total (R$)',
-      'Total Material (R$)',
-      'Total Mão de Obra (R$)',
-      'Subtotal Direto (R$)',
+      'Qtd. Efetiva',
+      'Preço Unit. (R$)',
+      'Total Direto (R$)',
       '% Part.',
       'ABC',
       'Base / Fornecedor',
     ],
-    ...budget.lines.map((l) => {
+    ...sortedBudgetLines.map((l) => {
       const det = detailByCode.get(l.code);
       return [
-        det?.stageName ?? '09. Serviços Complementares',
+        det?.stageName ?? '10. Louças, Metais, Bancadas e Paisagismo',
         l.code,
         l.sinapiCode || '—',
         l.description,
         l.unit,
         l.effectiveQuantity,
-        det?.materialUnitPrice ?? 'SEM COTAÇÃO',
-        det?.laborUnitPrice ?? 'SEM COTAÇÃO',
         l.unitPrice !== null ? l.unitPrice : 'SEM COTAÇÃO',
-        det?.materialSubtotal ?? 'SEM COTAÇÃO',
-        det?.laborSubtotal ?? 'SEM COTAÇÃO',
         l.subtotal !== null ? l.subtotal : 'SEM COTAÇÃO',
         det?.sharePercent ?? 0,
         l.abcClass,
@@ -701,23 +737,19 @@ export function generateProjectXLSXBuffer(
       ];
     }),
     [],
-    ['Total Material (R$)', analytical.totalMaterialCost],
-    ['Total Mão de Obra c/ Encargos RJ (R$)', analytical.totalLaborCost],
     ['Custo Direto Total Cotado (R$)', budget.directTotalCost],
     [`Custos Indiretos (${project.budgetSettings.indirectCostsPercent}%)`, budget.indirectCost],
     [`BDI (${project.budgetSettings.bdiPercent}%)`, budget.bdiValue],
     ['TOTAL GERAL COM BDI (R$)', budget.grandTotalCost],
     ['Itens Sem Cotação', budget.unquotedCount],
   ];
-  const wsBudget = XLSX.utils.aoa_to_sheet(bdgRows);
-  setSheetCols(wsBudget, [34, 10, 12, 46, 8, 12, 16, 18, 16, 16, 18, 16, 10, 10, 28]);
-  XLSX.utils.book_append_sheet(wb, wsBudget, 'Orçamento Analítico');
+  populateExcelSheet(wb, 'Orçamento Analítico', bdgRows, [40, 10, 12, 52, 8, 13, 16, 17, 10, 10, 30], 0);
 
   // Sheet 4: Curva ABC
   const abcSorted = [...budget.lines]
     .filter((l) => l.subtotal !== null)
     .sort((a, b) => (b.subtotal ?? 0) - (a.subtotal ?? 0));
-  const abcRows = [
+  const abcRows: Array<Array<string | number>> = [
     ['Ordem', 'Código', 'SINAPI-RJ', 'Descrição', 'Unid.', 'Qtd Efetiva', 'Subtotal (R$)', '% Item', '% Acumulado', 'Classe ABC'],
     ...abcSorted.map((l, idx) => [
       idx + 1,
@@ -732,9 +764,7 @@ export function generateProjectXLSXBuffer(
       l.abcClass,
     ]),
   ];
-  const wsAbc = XLSX.utils.aoa_to_sheet(abcRows);
-  setSheetCols(wsAbc, [8, 10, 12, 48, 8, 14, 16, 12, 14, 12]);
-  XLSX.utils.book_append_sheet(wb, wsAbc, 'Curva ABC');
+  populateExcelSheet(wb, 'Curva ABC', abcRows, [8, 10, 12, 50, 8, 14, 16, 12, 14, 12], 0);
 
   // Sheet 5: Cronograma Físico-Financeiro
   const monthHeaders = Array.from({ length: schedule.months }, (_, i) => `Mês ${i + 1} (R$)`);
@@ -755,12 +785,16 @@ export function generateProjectXLSXBuffer(
     ['', 'DESEMBOLSO ACUMULADO (R$)', '', '', '', budget.grandTotalCost, ...schedule.cumulativeTotals],
     ['', 'AVANÇO FÍSICO-FINANCEIRO ACUMULADO (%)', '', '', '', '', ...schedule.cumulativePercents],
   ];
-  const wsSched = XLSX.utils.aoa_to_sheet(schedRows);
-  setSheetCols(wsSched, [10, 44, 10, 10, 10, 18, ...Array(schedule.months).fill(14)]);
-  XLSX.utils.book_append_sheet(wb, wsSched, 'Cronograma Físico-Fin');
+  populateExcelSheet(
+    wb,
+    'Cronograma Físico-Fin',
+    schedRows,
+    [10, 44, 10, 10, 10, 18, ...Array(schedule.months).fill(14)],
+    0,
+  );
 
   // Sheet 6: Quadro de Cargas Elétricas
-  const elecRows = [
+  const elecRows: Array<Array<string | number>> = [
     ['Tipologia', 'Circuito', 'Tensão (V)', 'Potência (VA)', 'Corrente (A)', 'Disjuntor Rec. (A)', 'Condutor (mm²)', 'Eletroduto (mm)', 'Queda Tensão (%)', 'Metodologia'],
     ...elec.byUnitType.flatMap((u) =>
       u.circuits.map((c) => [
@@ -777,12 +811,10 @@ export function generateProjectXLSXBuffer(
       ]),
     ),
   ];
-  const wsElec = XLSX.utils.aoa_to_sheet(elecRows);
-  setSheetCols(wsElec, [30, 14, 12, 14, 14, 16, 14, 14, 16, 36]);
-  XLSX.utils.book_append_sheet(wb, wsElec, 'Quadro de Cargas');
+  populateExcelSheet(wb, 'Quadro de Cargas', elecRows, [30, 14, 12, 14, 14, 16, 14, 14, 16, 36], 0);
 
   // Sheet 7: Pontos Elétricos, Hidráulicos e Sanitários
-  const ptsRows = [
+  const ptsRows: Array<Array<string | number>> = [
     ['Tipologia', 'Disciplina', 'Código', 'Descrição / Equipamento', 'X (m)', 'Y (m)', 'Altura Z (m)', 'Especificação'],
     ...project.unitTypes.flatMap((ut) => [
       ...ut.electricalPoints.map((p) => [ut.code, 'Elétrica', p.code, p.label, p.x, p.y, p.z, `${p.powerVA}VA / ${p.voltage}V / ${p.circuitId}`]),
@@ -790,11 +822,9 @@ export function generateProjectXLSXBuffer(
       ...ut.drainagePoints.map((p) => [ut.code, 'Sanitária', p.code, p.category, p.x, p.y, 0, `Ø${p.diameterMm}mm i=${p.slopePercent}% UHC=${p.uhc}`]),
     ]),
   ];
-  const wsPts = XLSX.utils.aoa_to_sheet(ptsRows);
-  setSheetCols(wsPts, [12, 14, 12, 34, 10, 10, 12, 36]);
-  XLSX.utils.book_append_sheet(wb, wsPts, 'Pontos MEP');
+  populateExcelSheet(wb, 'Pontos MEP', ptsRows, [12, 14, 12, 34, 10, 10, 12, 36], 0);
 
-  const out = XLSX.write(wb, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer;
+  const out = await wb.xlsx.writeBuffer();
   return new Uint8Array(out);
 }
 
@@ -952,6 +982,7 @@ export function generateAnalyticalBudgetAndSchedulePDFBlob(
   const quantities = calculateQuantities(project);
   const budget = calculateBudgetSummary(project, quantities);
   const analytical = calculateAnalyticalBreakdown(budget, project);
+  const roi = calculateInvestorROI(project, budget.grandTotalCost);
   const schedule = buildConstructionSchedule(budget.grandTotalCost, scheduleMonths);
   const detailByCode = new Map(analytical.lineDetails.map((d) => [d.code, d]));
 
@@ -966,7 +997,7 @@ export function generateAnalyticalBudgetAndSchedulePDFBlob(
     doc.rect(margin, 10, contentW, 16, 'F');
     doc.setTextColor(255, 255, 255);
     doc.setFontSize(11);
-    doc.text('ORÇAMENTO ANALÍTICO SINAPI-RJ & CRONOGRAMA FÍSICO-FINANCEIRO', margin + 4, 17);
+    doc.text('PLANILHA ORÇAMENTÁRIA SINAPI-RJ (10 ETAPAS EAP) & CRONOGRAMA', margin + 4, 17);
     doc.setFontSize(7.5);
     doc.setTextColor(203, 213, 225);
     doc.text(`${project.name} (${project.code}) · ${subtitle} · Emissão: ${today}`, margin + 4, 23);
@@ -978,19 +1009,22 @@ export function generateAnalyticalBudgetAndSchedulePDFBlob(
   let y = 31;
   doc.setDrawColor(203, 213, 225);
   doc.setFillColor(248, 250, 252);
-  doc.rect(margin, y, contentW, 24, 'FD');
+  doc.rect(margin, y, contentW, 27, 'FD');
   doc.setTextColor(15, 23, 42);
   doc.setFontSize(8);
   doc.text(`Terreno / Área Construída: ${analyzeSiteGeometry(project.site).calculatedArea} m² / ${quantities.summary.totalBuiltAreaM2} m² (${quantities.summary.totalUnits} unid.)`, margin + 3, y + 6);
-  doc.text(`Regime / Encargos RJ: ${project.budgetSettings.sourceBase} (Encargos: ${analytical.socialChargesRatePercent}%)`, margin + 3, y + 11.5);
-  doc.text(`Material: ${fmtBRL(analytical.totalMaterialCost)}  |  Mão de Obra c/ Enc.: ${fmtBRL(analytical.totalLaborCost)}  |  Custo Direto: ${fmtBRL(budget.directTotalCost)}`, margin + 3, y + 17);
+  doc.text(`Base / Regime SINAPI-RJ: ${project.budgetSettings.sourceBase}`, margin + 3, y + 11);
+  doc.text(`Custo Direto: ${fmtBRL(budget.directTotalCost)}  |  Indiretos (${project.budgetSettings.indirectCostsPercent}%): ${fmtBRL(budget.indirectCost)}  |  BDI (${project.budgetSettings.bdiPercent}%): ${fmtBRL(budget.bdiValue)}`, margin + 3, y + 16);
   doc.setFontSize(8.5);
-  doc.text(`Indiretos (${project.budgetSettings.indirectCostsPercent}%): ${fmtBRL(budget.indirectCost)}  |  BDI (${project.budgetSettings.bdiPercent}%): ${fmtBRL(budget.bdiValue)}  |  TOTAL GERAL: ${fmtBRL(budget.grandTotalCost)}  (${fmtBRL(budget.costPerM2)}/m²)`, margin + 3, y + 22);
+  doc.text(`TOTAL GERAL DA OBRA: ${fmtBRL(budget.grandTotalCost)}  (${fmtBRL(budget.costPerM2)}/m² · ${fmtBRL(budget.costPerUnit)}/unid.)`, margin + 3, y + 21);
+  doc.setFontSize(7.5);
+  doc.setTextColor(30, 64, 175);
+  doc.text(`ROI Estimado: Aluguel ${fmtBRL(roi.monthlyRentPerUnit)}/un · Receita Líq. ${fmtBRL(roi.netMonthlyIncome)}/mês · Yield ${roi.annualYieldPercent.toFixed(1)}%/ano · Payback ${roi.paybackYears ? `${roi.paybackYears} anos` : 'N/A'}`, margin + 3, y + 25.5);
 
-  y += 29;
+  y += 32;
   doc.setFontSize(9.5);
   doc.setTextColor(15, 23, 42);
-  doc.text('1. RESUMO ANALÍTICO POR ETAPA CONSTRUTIVA (WBS)', margin, y);
+  doc.text('1. RESUMO ORÇAMENTÁRIO POR ETAPA CONSTRUTIVA (10 ETAPAS EAP)', margin, y);
   y += 3;
 
   const drawStageHeader = () => {
@@ -998,12 +1032,11 @@ export function generateAnalyticalBudgetAndSchedulePDFBlob(
     doc.rect(margin, y, contentW, 6.5, 'FD');
     doc.setFontSize(7);
     doc.setTextColor(15, 23, 42);
-    doc.text('ETAPA CONSTRUTIVA', margin + 2, y + 4.5);
-    doc.text('MAT. (R$)', margin + 88, y + 4.5, { align: 'right' });
-    doc.text('M.O.+ENC (R$)', margin + 118, y + 4.5, { align: 'right' });
-    doc.text('DIRETO (R$)', margin + 148, y + 4.5, { align: 'right' });
-    doc.text('C/ BDI (R$)', margin + 174, y + 4.5, { align: 'right' });
-    doc.text('%', margin + contentW - 2, y + 4.5, { align: 'right' });
+    doc.text('ETAPA CONSTRUTIVA (EAP)', margin + 2, y + 4.5);
+    doc.text('ITENS', margin + 96, y + 4.5, { align: 'right' });
+    doc.text('CUSTO DIRETO (R$)', margin + 134, y + 4.5, { align: 'right' });
+    doc.text('TOTAL C/ BDI (R$)', margin + 170, y + 4.5, { align: 'right' });
+    doc.text('% PART.', margin + contentW - 2, y + 4.5, { align: 'right' });
     y += 6.5;
   };
   drawStageHeader();
@@ -1013,11 +1046,10 @@ export function generateAnalyticalBudgetAndSchedulePDFBlob(
     doc.rect(margin, y, contentW, 6);
     doc.setFontSize(7);
     doc.setTextColor(30, 41, 59);
-    doc.text(st.stageName.slice(0, 40), margin + 2, y + 4.2);
-    doc.text(fmtBRL(st.materialTotal), margin + 88, y + 4.2, { align: 'right' });
-    doc.text(fmtBRL(st.laborTotal), margin + 118, y + 4.2, { align: 'right' });
-    doc.text(fmtBRL(st.directTotal), margin + 148, y + 4.2, { align: 'right' });
-    doc.text(fmtBRL(st.withBdiTotal), margin + 174, y + 4.2, { align: 'right' });
+    doc.text(st.stageName.slice(0, 48), margin + 2, y + 4.2);
+    doc.text(String(st.itemsCount), margin + 96, y + 4.2, { align: 'right' });
+    doc.text(fmtBRL(st.directTotal), margin + 134, y + 4.2, { align: 'right' });
+    doc.text(fmtBRL(st.withBdiTotal), margin + 170, y + 4.2, { align: 'right' });
     doc.text(`${st.sharePercent.toFixed(1)}%`, margin + contentW - 2, y + 4.2, { align: 'right' });
     y += 6;
   }
@@ -1025,7 +1057,7 @@ export function generateAnalyticalBudgetAndSchedulePDFBlob(
   y += 7;
   doc.setFontSize(9.5);
   doc.setTextColor(15, 23, 42);
-  doc.text('2. PLANILHA ANALÍTICA DE COMPOSIÇÕES UNITÁRIAS (SINAPI-RJ)', margin, y);
+  doc.text('2. PLANILHA ORÇAMENTÁRIA COMPLETA DE SERVIÇOS E ESPECIFICAÇÕES (SINAPI-RJ)', margin, y);
   y += 3;
 
   const drawItemTableHeader = () => {
@@ -1034,20 +1066,28 @@ export function generateAnalyticalBudgetAndSchedulePDFBlob(
     doc.setFontSize(6.5);
     doc.setTextColor(15, 23, 42);
     doc.text('CÓD / SINAPI', margin + 2, y + 4.5);
-    doc.text('DESCRIÇÃO DO SERVIÇO / INSUMO', margin + 25, y + 4.5);
-    doc.text('UN', margin + 104, y + 4.5);
-    doc.text('QTD EF.', margin + 123, y + 4.5, { align: 'right' });
-    doc.text('MAT+MO UNIT.', margin + 148, y + 4.5, { align: 'right' });
+    doc.text('DESCRIÇÃO DO SERVIÇO / ESPECIFICAÇÃO', margin + 25, y + 4.5);
+    doc.text('UN', margin + 106, y + 4.5);
+    doc.text('QTD EF.', margin + 124, y + 4.5, { align: 'right' });
+    doc.text('UNIT. (R$)', margin + 148, y + 4.5, { align: 'right' });
     doc.text('SUBTOTAL (R$)', margin + 174, y + 4.5, { align: 'right' });
     doc.text('ABC', margin + contentW - 2, y + 4.5, { align: 'right' });
     y += 6.5;
   };
   drawItemTableHeader();
 
-  for (const line of budget.lines) {
+  const stageOrderIndex = new Map(CONSTRUCTION_STAGE_ORDER.map((s, idx) => [s, idx]));
+  const sortedLines = [...budget.lines].sort((a, b) => {
+    const sa = detailByCode.get(a.code)?.stageName ?? '10. Louças, Metais, Bancadas e Paisagismo';
+    const sb = detailByCode.get(b.code)?.stageName ?? '10. Louças, Metais, Bancadas e Paisagismo';
+    const diff = (stageOrderIndex.get(sa) ?? 99) - (stageOrderIndex.get(sb) ?? 99);
+    return diff !== 0 ? diff : a.code.localeCompare(b.code);
+  });
+
+  for (const line of sortedLines) {
     if (y > 272) {
       doc.addPage('a4', 'portrait');
-      drawHeader('Planilha Analítica (Continuação)');
+      drawHeader('Planilha Orçamentária (Continuação)');
       y = 32;
       drawItemTableHeader();
     }
@@ -1058,8 +1098,8 @@ export function generateAnalyticalBudgetAndSchedulePDFBlob(
     doc.setTextColor(15, 23, 42);
     doc.text(`${line.code} / ${line.sinapiCode || '—'}`, margin + 2, y + 4.3);
     doc.text(line.description.slice(0, 48), margin + 25, y + 4.3);
-    doc.text(line.unit, margin + 104, y + 4.3);
-    doc.text(String(line.effectiveQuantity), margin + 123, y + 4.3, { align: 'right' });
+    doc.text(line.unit, margin + 106, y + 4.3);
+    doc.text(String(line.effectiveQuantity), margin + 124, y + 4.3, { align: 'right' });
     doc.text(fmtBRL(line.unitPrice), margin + 148, y + 4.3, { align: 'right' });
     doc.text(fmtBRL(line.subtotal), margin + 174, y + 4.3, { align: 'right' });
     doc.text(
@@ -1918,7 +1958,7 @@ export async function generateCompleteProjectZIPBlob(project: Project): Promise<
 
   // 08 — Quantitativos
   const f08 = zip.folder('08 — Quantitativos')!;
-  f08.file('Quantitativos_Empreendimento.xlsx', generateProjectXLSXBuffer(project));
+  f08.file('Quantitativos_Empreendimento.xlsx', await generateProjectXLSXBuffer(project));
 
   // 09 — Orçamento
   const f09 = zip.folder('09 — Orçamento')!;

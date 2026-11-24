@@ -741,6 +741,11 @@ export interface BudgetSettings {
   indirectCostsPercent: number;
   discountPercent: number;
   criteriaNotes: string;
+  monthlyRentPerUnit?: number;
+  vacancyRatePercent?: number;
+  landCost?: number;
+  adminFeePercent?: number;
+  monthlyCondoCostPerUnit?: number;
 }
 
 export interface NormativeReference {
@@ -942,6 +947,7 @@ export interface RenderMaterialSettings {
   sunElevationDeg: number;
   artificialLightsOn: boolean;
   renderQuality?: 'arquitetonico' | 'tecnico';
+  uiTheme?: 'light' | 'dark';
 }
 
 export interface Project {
