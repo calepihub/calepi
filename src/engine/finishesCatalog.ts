@@ -154,7 +154,7 @@ export const WET_WALL_KITCHEN_OPTIONS: Array<
   {
     id: 'porcelanato_acetinado',
     label: 'Porcelanato Acetinado Grande Formato',
-    spec: 'Porcelanato 60×60 ou 60×120cm de fácil limpeza sobre bancada e tanque',
+    spec: 'Porcelanato 60×60 ou 60×120cm de fácil limpeza sobre bancada e área de serviço',
     swatchHex: '#D6D9DF',
   },
   {

@@ -13,6 +13,7 @@ interface FurnitureCadBlockProps {
   strokeWidth?: number;
   detailed?: boolean;
   stairSpec?: StairSpec;
+  rotationDeg?: number;
 }
 
 /**
@@ -22,8 +23,8 @@ interface FurnitureCadBlockProps {
  */
 export const FurnitureCadBlock: React.FC<FurnitureCadBlockProps> = ({
   category,
-  x,
-  y,
+  x: boxX,
+  y: boxY,
   width,
   depth,
   stroke,
@@ -32,14 +33,45 @@ export const FurnitureCadBlock: React.FC<FurnitureCadBlockProps> = ({
   strokeWidth = 0.8,
   detailed = true,
   stairSpec,
+  rotationDeg,
 }) => {
   const sw = strokeWidth;
   const swThin = sw * 0.65;
   const acc = accent ?? stroke;
-  const w = Math.max(0.01, width);
-  const d = Math.max(0.01, depth);
+  const boxW = Math.max(0.01, width);
+  const boxD = Math.max(0.01, depth);
 
-  switch (category) {
+  const normRot = rotationDeg !== undefined ? ((rotationDeg % 360) + 360) % 360 : 0;
+  const rotRad = (normRot * Math.PI) / 180;
+  const rotCos = Math.abs(Math.cos(rotRad));
+  const rotSin = Math.abs(Math.sin(rotRad));
+  const det = rotCos * rotCos - rotSin * rotSin;
+  // Recover canonical (unrotated) item width/depth from rotated AABB
+  const canonW =
+    normRot === 0 || normRot === 180
+      ? boxW
+      : normRot === 90 || normRot === 270
+        ? boxD
+        : Math.abs(det) > 0.08
+          ? Math.max(0.01, (boxW * rotCos - boxD * rotSin) / det)
+          : boxW;
+  const canonD =
+    normRot === 0 || normRot === 180
+      ? boxD
+      : normRot === 90 || normRot === 270
+        ? boxW
+        : Math.abs(det) > 0.08
+          ? Math.max(0.01, (boxD * rotCos - boxW * rotSin) / det)
+          : boxD;
+
+  const hasRotation = normRot !== 0;
+  const x = hasRotation ? 0 : boxX;
+  const y = hasRotation ? 0 : boxY;
+  const w = hasRotation ? canonW : boxW;
+  const d = hasRotation ? canonD : boxD;
+
+  const renderSymbol = () => {
+    switch (category) {
     case 'cama': {
       const verticalBed = d >= w;
       const isDouble = Math.min(w, d) >= 1.1;
@@ -442,9 +474,20 @@ export const FurnitureCadBlock: React.FC<FurnitureCadBlockProps> = ({
       );
     }
 
-    default:
-      return <rect x={x} y={y} width={w} height={d} fill={fill} stroke={stroke} strokeWidth={sw} />;
+      default:
+        return <rect x={x} y={y} width={w} height={d} fill={fill} stroke={stroke} strokeWidth={sw} />;
+    }
+  };
+
+  if (!hasRotation) {
+    return renderSymbol();
   }
+
+  return (
+    <g transform={`translate(${boxX + boxW / 2}, ${boxY + boxD / 2}) rotate(${normRot}) translate(${-w / 2}, ${-d / 2})`}>
+      {renderSymbol()}
+    </g>
+  );
 };
 
 interface ElectricalSymbolSvgProps {

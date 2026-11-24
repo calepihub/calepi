@@ -114,14 +114,19 @@ export const DocumentationAndExportModule: React.FC<DocumentationAndExportModule
     triggerBrowserDownload(blob, `${project.code}_Memorial_Descritivo.pdf`);
   };
 
-  const handleDownloadXLSX = () => {
-    const buf = generateProjectXLSXBuffer(project);
-    triggerBrowserDownload(
-      new Blob([new Uint8Array(buf)], {
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      }),
-      `${project.code}_Quantitativos_Orcamento.xlsx`,
-    );
+  const handleDownloadXLSX = async () => {
+    setBusyMessage('Gerando planilha orçamentária SINAPI-RJ (7 abas .xlsx)...');
+    try {
+      const buf = await generateProjectXLSXBuffer(project);
+      triggerBrowserDownload(
+        new Blob([new Uint8Array(buf)], {
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        }),
+        `${project.code}_Quantitativos_Orcamento.xlsx`,
+      );
+    } finally {
+      setBusyMessage(null);
+    }
   };
 
   const handleDownloadDXF = (floorIdx: number) => {

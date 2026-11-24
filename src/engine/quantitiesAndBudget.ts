@@ -149,7 +149,6 @@ export function calculateQuantities(project: Project): QuantitiesReport {
     op.subtype.toLowerCase().includes('basculante');
 
   const isOpeningBalconyDoor = (op: UnitType['openings'][number]): boolean =>
-    op.role === 'varanda' ||
     (op.type === 'porta' && op.openingKind === 'porta_correr') ||
     op.subtype.toLowerCase().includes('varanda') ||
     op.subtype.toLowerCase().includes('sacada');
@@ -306,7 +305,7 @@ export function calculateQuantities(project: Project): QuantitiesReport {
     totalWashbasins += Math.max(utLav, hasBathRoom ? 1 : 0) * count;
     totalShowers += Math.max(utShower, hasBathRoom ? 1 : 0) * count;
     totalKitchenSinks += Math.max(utKitchenSink, hasKitchenRoom ? 1 : 0) * count;
-    totalLaundryTubs += Math.max(utTanque, hasLaundryRoom ? 1 : 0) * count;
+    totalLaundryTubs += utTanque * count;
     totalDrainKits += (hasBathRoom ? 1 : 0) * count;
 
     const remainingFur = ut.furniture.filter(

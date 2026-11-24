@@ -1,14 +1,38 @@
-import React, { useState } from 'react';
-import { AlertTriangle, Plus, Trash2, Zap } from 'lucide-react';
+import React, { useRef, useState } from 'react';
+import { AlertTriangle, Move, Plus, Trash2, Zap } from 'lucide-react';
 import { calculateElectricalSizing } from '../engine/engineering';
+import { getOpeningWorldPosition, getWallAngleRad, round2 } from '../engine/geometry';
 import { nextId } from '../engine/parametricGenerator';
-import type { ElectricalCategory, ElectricalPoint, Project } from '../types/project';
+import { ElectricalSymbolSvg, FurnitureCadBlock } from './CadArchitecturalSymbols';
+import type { ElectricalCategory, ElectricalPoint, Project, UnitType } from '../types/project';
 
 interface MepElectricalModuleProps {
   project: Project;
   selectedUnitTypeId: string;
   onSelectUnitType: (id: string) => void;
   onUpdateProject: (updater: (prev: Project) => Project, revisionNote?: string) => void;
+}
+
+function findRoomIdAtPoint(
+  ut: UnitType,
+  x: number,
+  y: number,
+  preferMezzanine: boolean,
+  fallbackId: string,
+): string {
+  if (preferMezzanine) {
+    const mez = ut.rooms.find((r) => r.category === 'mezanino');
+    if (mez) return mez.id;
+  }
+  const hit = ut.rooms.find(
+    (r) =>
+      r.category !== 'mezanino' &&
+      x >= r.x - 0.02 &&
+      x <= r.x + r.width + 0.02 &&
+      y >= r.y - 0.02 &&
+      y <= r.y + r.depth + 0.02,
+  );
+  return hit?.id ?? fallbackId;
 }
 
 const CATEGORIES: Array<{ value: ElectricalCategory; label: string; defPower: number; defZKey: keyof Project['electricalHeights'] }> = [
@@ -59,6 +83,61 @@ export const MepElectricalModule: React.FC<MepElectricalModuleProps> = ({
   const [voltage, setVoltage] = useState<127 | 220>(127);
   const [circuitId, setCircuitId] = useState('C2-TUG');
   const [conductor, setConductor] = useState(2.5);
+
+  // Interactive 2D plan state (synced with Editor CAD 2D)
+  const svgRef = useRef<SVGSVGElement>(null);
+  const [selectedEpId, setSelectedEpId] = useState<string | null>(null);
+  const [floorFilter, setFloorFilter] = useState<'todos' | 'terreo' | 'mezanino'>('todos');
+  const [draggingEp, setDraggingEp] = useState<{
+    id: string;
+    offsetX: number;
+    offsetY: number;
+    isMezzanine: boolean;
+  } | null>(null);
+
+  const hasMezzanine = Boolean(
+    activeUt?.hasMezzanine && activeUt?.mezzanine?.enabled && (activeUt?.ceilingHeight ?? 0) >= 3.0,
+  );
+
+  const clientToUnitCoords = (clientX: number, clientY: number) => {
+    const svg = svgRef.current;
+    if (!svg) return { x: 0, y: 0 };
+    const ctm = svg.getScreenCTM();
+    if (!ctm) return { x: 0, y: 0 };
+    const pt = svg.createSVGPoint();
+    pt.x = clientX;
+    pt.y = clientY;
+    const world = pt.matrixTransform(ctm.inverse());
+    return { x: world.x, y: world.y };
+  };
+
+  const snapCoord = (v: number) => Math.round(v / 0.05) * 0.05;
+
+  const updateElectricalPoint = (
+    pointId: string,
+    patch: Partial<ElectricalPoint>,
+    autoDetectRoom = false,
+  ) => {
+    if (!activeUt) return;
+    onUpdateProject((prev) => ({
+      ...prev,
+      unitTypes: prev.unitTypes.map((u) => {
+        if (u.id !== activeUt.id) return u;
+        return {
+          ...u,
+          electricalPoints: u.electricalPoints.map((p) => {
+            if (p.id !== pointId) return p;
+            const nextPt = { ...p, ...patch };
+            if (autoDetectRoom) {
+              const isMez = p.roomId.endsWith('-rm-mez') || p.code.includes('MEZ');
+              nextPt.roomId = findRoomIdAtPoint(u, nextPt.x, nextPt.y, isMez, p.roomId);
+            }
+            return nextPt;
+          }),
+        };
+      }),
+    }));
+  };
 
   const handleCategoryChange = (nextCat: ElectricalCategory) => {
     setCat(nextCat);
@@ -354,6 +433,321 @@ export const MepElectricalModule: React.FC<MepElectricalModuleProps> = ({
         </form>
       )}
 
+      {/* Interactive 2D Electrical Plan (Bidirectional Sync with Editor CAD 2D) */}
+      {activeUt && (
+        <div className="rounded-lg border border-[#2A2F38] bg-[#1B1E24] p-4 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="text-sm font-semibold text-white flex items-center gap-2">
+                <Move className="w-4 h-4 text-amber-400" />
+                Planta Elétrica Interativa — {activeUt.code} (Sincronizada com Editor CAD 2D)
+              </h2>
+              <p className="text-[11px] text-[#949BA8] mt-0.5">
+                Arraste qualquer ponto elétrico/telecom na planta ou edite X/Y/Z na tabela abaixo — as alterações refletem instantaneamente no Editor 2D, Pranchas e Dimensionamento.
+              </p>
+            </div>
+            {hasMezzanine && (
+              <div className="flex items-center gap-1 p-0.5 rounded bg-[#14161A] border border-[#2A2F38]">
+                {(
+                  [
+                    ['todos', 'Térreo + Mez.'],
+                    ['terreo', 'Térreo'],
+                    ['mezanino', 'Mezanino'],
+                  ] as const
+                ).map(([k, lbl]) => (
+                  <button
+                    key={k}
+                    type="button"
+                    onClick={() => setFloorFilter(k)}
+                    className={`px-2 py-1 text-[11px] rounded ${
+                      floorFilter === k ? 'bg-[#2F7CF6] text-white' : 'text-[#949BA8] hover:text-white'
+                    }`}
+                  >
+                    {lbl}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+            <div className="lg:col-span-7 rounded border border-[#2A2F38] bg-[#111317] p-2">
+              <svg
+                ref={svgRef}
+                viewBox={`${-0.35} ${-0.35} ${activeUt.width + 0.7} ${activeUt.depth + 0.7}`}
+                className="w-full max-h-[380px] select-none touch-none"
+                onPointerMove={(e) => {
+                  if (!draggingEp) return;
+                  const pt = clientToUnitCoords(e.clientX, e.clientY);
+                  const nx = round2(Math.max(0.05, Math.min(activeUt.width - 0.05, snapCoord(pt.x - draggingEp.offsetX))));
+                  const ny = round2(Math.max(0.05, Math.min(activeUt.depth - 0.05, snapCoord(pt.y - draggingEp.offsetY))));
+                  updateElectricalPoint(draggingEp.id, { x: nx, y: ny }, true);
+                }}
+                onPointerUp={() => setDraggingEp(null)}
+                onPointerLeave={() => setDraggingEp(null)}
+              >
+                {/* Rooms */}
+                {activeUt.rooms.map((rm) => {
+                  const isMez = rm.category === 'mezanino';
+                  if (floorFilter === 'terreo' && isMez) return null;
+                  if (floorFilter === 'mezanino' && !isMez) return null;
+                  return (
+                    <g key={rm.id}>
+                      <rect
+                        x={rm.x}
+                        y={rm.y}
+                        width={rm.width}
+                        height={rm.depth}
+                        fill={isMez ? 'rgba(56, 189, 248, 0.08)' : '#171A21'}
+                        stroke={isMez ? '#38BDF8' : '#262B35'}
+                        strokeWidth={0.02}
+                        strokeDasharray={isMez ? '0.08 0.05' : undefined}
+                      />
+                      <text
+                        x={rm.x + rm.width / 2}
+                        y={rm.y + rm.depth / 2}
+                        textAnchor="middle"
+                        fill={isMez ? '#7DD3FC' : '#4B5563'}
+                        fontSize="0.18"
+                        fontWeight="bold"
+                      >
+                        {rm.code}
+                      </text>
+                    </g>
+                  );
+                })}
+
+                {/* Furniture silhouettes */}
+                {activeUt.furniture
+                  .filter((f) => f.category !== 'luminaria')
+                  .map((fur) => {
+                    const isMezFur = (fur.elevationM ?? 0) >= 0.8;
+                    if (floorFilter === 'terreo' && isMezFur) return null;
+                    if (floorFilter === 'mezanino' && !isMezFur) return null;
+                    return (
+                      <g key={fur.id} opacity={0.35} pointerEvents="none">
+                        <FurnitureCadBlock
+                          category={fur.category}
+                          x={fur.x}
+                          y={fur.y}
+                          width={fur.width}
+                          depth={fur.depth}
+                          stroke="#64748B"
+                          fill="rgba(30,41,59,0.2)"
+                          strokeWidth={0.015}
+                          detailed={false}
+                          stairSpec={fur.stairSpec}
+                          rotationDeg={fur.rotationDeg}
+                        />
+                      </g>
+                    );
+                  })}
+
+                {/* Walls */}
+                {activeUt.walls.map((w) => (
+                  <line
+                    key={w.id}
+                    x1={w.start.x}
+                    y1={w.start.y}
+                    x2={w.end.x}
+                    y2={w.end.y}
+                    stroke={w.isExternal ? '#E2E8F0' : '#94A3B8'}
+                    strokeWidth={w.thickness}
+                    strokeLinecap="square"
+                    opacity={floorFilter === 'mezanino' && !w.isExternal ? 0.35 : 0.9}
+                    pointerEvents="none"
+                  />
+                ))}
+
+                {/* Openings */}
+                {activeUt.openings.map((op) => {
+                  const wall = activeUt.walls.find((w) => w.id === op.wallId);
+                  if (!wall) return null;
+                  const { center } = getOpeningWorldPosition(wall, op);
+                  const deg = (getWallAngleRad(wall) * 180) / Math.PI;
+                  return (
+                    <g key={op.id} transform={`translate(${center.x}, ${center.y}) rotate(${deg})`} pointerEvents="none">
+                      <rect
+                        x={-op.width / 2}
+                        y={-wall.thickness * 0.58}
+                        width={op.width}
+                        height={wall.thickness * 1.16}
+                        fill="#111317"
+                      />
+                      <line
+                        x1={-op.width / 2}
+                        y1={0}
+                        x2={op.width / 2}
+                        y2={0}
+                        stroke={op.type === 'janela' ? '#38BDF8' : '#F59E0B'}
+                        strokeWidth={0.03}
+                      />
+                    </g>
+                  );
+                })}
+
+                {/* Draggable Electrical Points */}
+                {activeUt.electricalPoints.map((ep) => {
+                  const isMezEp = ep.roomId.endsWith('-rm-mez') || ep.code.includes('MEZ');
+                  if (floorFilter === 'terreo' && isMezEp) return null;
+                  if (floorFilter === 'mezanino' && !isMezEp) return null;
+                  const isSpec = ['dados', 'tv', 'antena_tv', 'wifi_ap', 'cftv', 'rack_ti', 'interfone'].includes(
+                    ep.category,
+                  );
+                  const isSel = selectedEpId === ep.id;
+                  const col = isSel ? '#FFFFFF' : isMezEp ? '#22D3EE' : isSpec ? '#C084FC' : '#F59E0B';
+                  return (
+                    <g
+                      key={ep.id}
+                      transform={`translate(${ep.x}, ${ep.y})`}
+                      className="cursor-move"
+                      onPointerDown={(e) => {
+                        e.stopPropagation();
+                        setSelectedEpId(ep.id);
+                        const pt = clientToUnitCoords(e.clientX, e.clientY);
+                        setDraggingEp({
+                          id: ep.id,
+                          offsetX: pt.x - ep.x,
+                          offsetY: pt.y - ep.y,
+                          isMezzanine: isMezEp,
+                        });
+                      }}
+                    >
+                      <circle
+                        r={isSel ? 0.17 : 0.14}
+                        fill={isSel ? 'rgba(245,158,11,0.28)' : 'transparent'}
+                        stroke={isSel ? '#60A5FA' : 'transparent'}
+                        strokeWidth={0.025}
+                      />
+                      <ElectricalSymbolSvg category={ep.category} cx={0} cy={0} r={0.09} color={col} bg="#111317" />
+                      <text
+                        x={0.12}
+                        y={0.04}
+                        fill={col}
+                        fontSize="0.11"
+                        fontWeight={isSel ? 'bold' : undefined}
+                        fontFamily="JetBrains Mono, monospace"
+                      >
+                        {ep.code}
+                      </text>
+                    </g>
+                  );
+                })}
+              </svg>
+            </div>
+
+            <div className="lg:col-span-5 space-y-3 text-xs">
+              <div className="rounded border border-[#2A2F38] bg-[#14161A] p-3 space-y-2">
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-amber-400">
+                  Ponto Selecionado na Planta
+                </div>
+                {(() => {
+                  const selEp = activeUt.electricalPoints.find((p) => p.id === selectedEpId);
+                  if (!selEp) {
+                    return (
+                      <p className="text-[#949BA8] text-[11px]">
+                        Clique ou arraste qualquer símbolo elétrico na planta ao lado (ou clique em uma linha da tabela) para editar suas coordenadas e ambiente.
+                      </p>
+                    );
+                  }
+                  return (
+                    <div className="space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <span className="font-mono font-semibold text-white">
+                          {selEp.code} — {selEp.label}
+                        </span>
+                        <span className="font-mono text-[11px] text-[#60A5FA]">{selEp.circuitId}</span>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] text-[#949BA8] mb-0.5">Ambiente</label>
+                        <select
+                          value={selEp.roomId}
+                          onChange={(e) => updateElectricalPoint(selEp.id, { roomId: e.target.value })}
+                          className="w-full px-2 py-1 text-xs rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                        >
+                          {activeUt.rooms.map((rm) => (
+                            <option key={rm.id} value={rm.id}>
+                              {rm.name} ({rm.code})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        <div>
+                          <label className="block text-[10px] text-[#949BA8] mb-0.5">X (m)</label>
+                          <input
+                            type="number"
+                            step="0.05"
+                            value={selEp.x}
+                            onChange={(e) => updateElectricalPoint(selEp.id, { x: round2(Number(e.target.value)) }, true)}
+                            className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] text-[#949BA8] mb-0.5">Y (m)</label>
+                          <input
+                            type="number"
+                            step="0.05"
+                            value={selEp.y}
+                            onChange={(e) => updateElectricalPoint(selEp.id, { y: round2(Number(e.target.value)) }, true)}
+                            className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] text-[#949BA8] mb-0.5">Altura Z (m)</label>
+                          <input
+                            type="number"
+                            step="0.05"
+                            value={selEp.z}
+                            onChange={(e) => updateElectricalPoint(selEp.id, { z: round2(Number(e.target.value)) })}
+                            className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                          />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-[10px] text-[#949BA8] mb-0.5">Potência (VA)</label>
+                          <input
+                            type="number"
+                            step="50"
+                            min={0}
+                            value={selEp.powerVA}
+                            onChange={(e) => updateElectricalPoint(selEp.id, { powerVA: Number(e.target.value) })}
+                            className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] text-[#949BA8] mb-0.5">Circuito</label>
+                          <input
+                            type="text"
+                            value={selEp.circuitId}
+                            onChange={(e) => updateElectricalPoint(selEp.id, { circuitId: e.target.value })}
+                            className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+              <div className="flex flex-wrap gap-3 text-[11px] text-[#949BA8] px-1">
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded-full bg-amber-400" /> Energia (TUG/TUE/Ilum.)
+                </span>
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded-full bg-purple-400" /> Telecom / CFTV / Wi-Fi
+                </span>
+                {hasMezzanine && (
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-cyan-400" /> Mezanino
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Points Table */}
       {activeUt && (
         <div className="rounded-lg border border-[#2A2F38] bg-[#1B1E24] overflow-x-auto">
@@ -378,38 +772,60 @@ export const MepElectricalModule: React.FC<MepElectricalModuleProps> = ({
             </thead>
             <tbody className="divide-y divide-[#252A33]">
               {activeUt.electricalPoints.map((ep) => {
-                const rm = activeUt.rooms.find((r) => r.id === ep.roomId);
+                const isSel = selectedEpId === ep.id;
                 return (
-                  <tr key={ep.id} className="hover:bg-[#22262E]/50">
+                  <tr
+                    key={ep.id}
+                    onClick={() => setSelectedEpId(ep.id)}
+                    className={`cursor-pointer ${isSel ? 'bg-[#2F7CF6]/15' : 'hover:bg-[#22262E]/50'}`}
+                  >
                     <td className="py-2 px-3 font-mono text-amber-400">{ep.code}</td>
                     <td className="py-2 px-3 text-white">{ep.label}</td>
-                    <td className="py-2 px-3 text-[#C4C9D4]">{rm?.name ?? 'N/I'}</td>
-                    <td className="py-2 px-3 font-mono tabular-nums text-[#C4C9D4]">
-                      ({ep.x.toFixed(2)}, {ep.y.toFixed(2)},{' '}
+                    <td className="py-2 px-3 text-[#C4C9D4]">
+                      <select
+                        value={ep.roomId}
+                        aria-label={`Ambiente de ${ep.code}`}
+                        onChange={(e) => updateElectricalPoint(ep.id, { roomId: e.target.value })}
+                        className="px-1.5 py-0.5 bg-[#14161A] border border-[#2A2F38] rounded text-white text-xs"
+                      >
+                        {activeUt.rooms.map((r) => (
+                          <option key={r.id} value={r.id}>
+                            {r.name}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="py-2 px-3 font-mono tabular-nums text-[#C4C9D4] whitespace-nowrap">
+                      <input
+                        type="number"
+                        step="0.05"
+                        value={ep.x}
+                        aria-label={`Coordenada X de ${ep.code}`}
+                        onChange={(e) =>
+                          updateElectricalPoint(ep.id, { x: round2(Number(e.target.value)) }, true)
+                        }
+                        className="w-14 px-1 py-0.5 bg-[#14161A] border border-[#2A2F38] rounded text-white inline-block mr-1"
+                      />
+                      <input
+                        type="number"
+                        step="0.05"
+                        value={ep.y}
+                        aria-label={`Coordenada Y de ${ep.code}`}
+                        onChange={(e) =>
+                          updateElectricalPoint(ep.id, { y: round2(Number(e.target.value)) }, true)
+                        }
+                        className="w-14 px-1 py-0.5 bg-[#14161A] border border-[#2A2F38] rounded text-white inline-block mr-1"
+                      />
                       <input
                         type="number"
                         step="0.05"
                         value={ep.z}
                         aria-label={`Altura Z de ${ep.code}`}
-                        onChange={(e) => {
-                          const val = Number(e.target.value);
-                          onUpdateProject((prev) => ({
-                            ...prev,
-                            unitTypes: prev.unitTypes.map((u) =>
-                              u.id === activeUt.id
-                                ? {
-                                    ...u,
-                                    electricalPoints: u.electricalPoints.map((p) =>
-                                      p.id === ep.id ? { ...p, z: val } : p,
-                                    ),
-                                  }
-                                : u,
-                            ),
-                          }));
-                        }}
+                        onChange={(e) =>
+                          updateElectricalPoint(ep.id, { z: round2(Number(e.target.value)) })
+                        }
                         className="w-14 px-1 py-0.5 bg-[#14161A] border border-[#2A2F38] rounded text-white inline-block"
                       />
-                      )
                     </td>
                     <td className="py-2 px-3 text-right font-mono tabular-nums">{ep.powerVA}</td>
                     <td className="py-2 px-3 font-mono">{ep.voltage}V</td>
@@ -418,7 +834,8 @@ export const MepElectricalModule: React.FC<MepElectricalModuleProps> = ({
                     <td className="py-2 px-3 text-right">
                       <button
                         type="button"
-                        onClick={() =>
+                        onClick={(e) => {
+                          e.stopPropagation();
                           onUpdateProject((prev) => ({
                             ...prev,
                             unitTypes: prev.unitTypes.map((u) =>
@@ -431,8 +848,8 @@ export const MepElectricalModule: React.FC<MepElectricalModuleProps> = ({
                                   }
                                 : u,
                             ),
-                          }))
-                        }
+                          }));
+                        }}
                         aria-label={`Remover ponto ${ep.code}`}
                         className="p-1 text-red-400 hover:text-red-300"
                       >

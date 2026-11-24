@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import JSZip from 'jszip';
 import {
   analyzeSiteGeometry,
@@ -31,6 +31,7 @@ import {
   buildConstructionSchedule,
   calculateAnalyticalBreakdown,
   calculateBudgetSummary,
+  calculateInvestorROI,
   calculateQuantities,
   compareConstructionMethodsForTypology,
   syncBudgetWithQuantities,
@@ -327,17 +328,21 @@ test('Blank project auto-prices with SINAPI-RJ after distributing units and gene
   assert.equal(schedule.months, 6);
   assert.ok(Math.abs(schedule.cumulativeTotals[5] - budget.grandTotalCost) < 0.1);
 
-  const xlsxBuf = generateProjectXLSXBuffer(withUnits, 6);
-  const wb = XLSX.read(xlsxBuf, { type: 'array' });
-  assert.deepEqual(wb.SheetNames, [
-    'Resumo Executivo',
-    'Quantitativos',
-    'Orçamento Analítico',
-    'Curva ABC',
-    'Cronograma Físico-Fin',
-    'Quadro de Cargas',
-    'Pontos MEP',
-  ]);
+  const xlsxBuf = await generateProjectXLSXBuffer(withUnits, 6);
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(Buffer.from(xlsxBuf) as unknown as ArrayBuffer);
+  assert.deepEqual(
+    wb.worksheets.map((ws) => ws.name),
+    [
+      'Resumo Executivo',
+      'Quantitativos',
+      'Orçamento Analítico',
+      'Curva ABC',
+      'Cronograma Físico-Fin',
+      'Quadro de Cargas',
+      'Pontos MEP',
+    ],
+  );
 
   const budgetPdf = generateAnalyticalBudgetAndSchedulePDFBlob(withUnits, 6);
   assert.ok(budgetPdf.size > 2000);
@@ -1126,10 +1131,12 @@ test('Finishes, Sanitary Ware, Metals, Showers, Drains & Roof specs sync to room
 
   const qty = calculateQuantities(syncedProj);
   const san01 = qty.items.find((i) => i.code === 'SAN-01');
-  const mob01 = qty.items.find((i) => i.code === 'MOB-01');
+  const lou01 = qty.items.find((i) => i.code === 'LOU-01');
+  const lou05 = qty.items.find((i) => i.code === 'LOU-05');
   assert.ok(san01 && san01.description.includes('Ralo Linear Inox Oculto'));
-  assert.ok(mob01 && mob01.description.includes('Preto Fosco'));
-  assert.ok(mob01 && mob01.description.includes('Válvula na Parede'));
+  assert.ok(lou01 && lou01.description.includes('Preto Fosco'));
+  assert.ok(lou01 && lou01.description.includes('Válvula na Parede'));
+  assert.ok(lou05 && lou05.description.includes('Ducha Parede AQ/AF'));
 
   const memorials = generateAllMemorials(syncedProj);
   const archMem = memorials.find((m) => m.key === 'arquitetonico');
@@ -1267,3 +1274,131 @@ test('Mezzanine Overhaul: 100% interior containment, 10/20/30/50% & dimension si
   assert.ok(violClashes.some((c) => c.id.startsWith('clash-mez-under-') && c.severity === 'CRITICO'));
 });
 
+test('10-Stage SINAPI-RJ EAP Budget & Investor ROI viability metrics', () => {
+  const proj = createDefaultDemoProject();
+  proj.budgetSettings.landCost = 180000;
+  proj.budgetSettings.monthlyRentPerUnit = 1600;
+  proj.budgetSettings.vacancyRatePercent = 5;
+  proj.budgetSettings.adminFeePercent = 8;
+  proj.budgetSettings.monthlyCondoCostPerUnit = 100;
+
+  const qty = calculateQuantities(proj);
+  const sinapi = applySinapiRJToBudget(proj, qty, 'desonerado');
+  const priced = { ...proj, ...sinapi };
+  const budget = calculateBudgetSummary(priced, qty);
+  const analytical = calculateAnalyticalBreakdown(budget, priced);
+
+  assert.ok(analytical.stageSummaries.length >= 8);
+  const roi = calculateInvestorROI(priced, budget.grandTotalCost);
+  assert.equal(roi.totalUnits, 12);
+  assert.equal(roi.totalInvestment, round2(180000 + budget.grandTotalCost));
+  assert.ok(roi.netMonthlyIncome > 0);
+  assert.ok(roi.annualYieldPercent > 0);
+  assert.ok(roi.paybackMonths !== null && roi.paybackMonths > 12);
+});
+
+test('2D/3D Furniture Rotation Sync: getFurnitureWorldRect swaps bounding dimensions at 90/270 deg and handles 45 deg', () => {
+  const baseItem = {
+    id: 'fur-rot-1',
+    roomId: 'room-1',
+    name: 'Cama Casal',
+    category: 'cama' as const,
+    x: 1.0,
+    y: 2.0,
+    width: 1.4,
+    depth: 1.9,
+    height: 0.55,
+    rotationDeg: 0,
+    elevationM: 0,
+  };
+
+  const r0 = getFurnitureWorldRect({ ...baseItem, rotationDeg: 0 });
+  assert.equal(r0.width, 1.4);
+  assert.equal(r0.depth, 1.9);
+
+  const r90 = getFurnitureWorldRect({ ...baseItem, rotationDeg: 90 });
+  assert.equal(r90.width, 1.9);
+  assert.equal(r90.depth, 1.4);
+
+  const r180 = getFurnitureWorldRect({ ...baseItem, rotationDeg: 180 });
+  assert.equal(r180.width, 1.4);
+  assert.equal(r180.depth, 1.9);
+
+  const r270 = getFurnitureWorldRect({ ...baseItem, rotationDeg: -90 });
+  assert.equal(r270.width, 1.9);
+  assert.equal(r270.depth, 1.4);
+
+  const r45 = getFurnitureWorldRect({ ...baseItem, rotationDeg: 45 });
+  assert.ok(r45.width > 2.3 && r45.depth > 2.3);
+});
+
+test('Área de Serviço without internal Tanque: Washing Machine only (AF-05, ES-MAQ, TUE-MAQ) and no LOU-04 in quantities', () => {
+  const ut = generateParametricUnitLayout({
+    code: 'AS-MAQ',
+    name: 'Kit A.S. Máquina Exclusiva',
+    width: 4.0,
+    depth: 5.5,
+    ceilingHeight: 2.8,
+    bedrooms: 0,
+    hasLaundry: true,
+    hasBalcony: false,
+    hasMezzanine: false,
+    accessible: false,
+    extWallThickness: 0.15,
+    intWallThickness: 0.1,
+    constructionSystem: 'alvenaria_convencional',
+    entrySide: 'frente',
+  });
+
+  // Zero tanque anywhere inside the unit
+  assert.equal(ut.furniture.filter((f) => f.category === 'tanque').length, 0);
+  assert.equal(ut.waterPoints.filter((w) => w.category === 'tanque').length, 0);
+  assert.equal(ut.drainagePoints.filter((d) => d.category === 'tanque').length, 0);
+
+  // Washing machine present with AF-05, ES-MAQ and TUE-MAQ aligned
+  const maq = ut.furniture.find((f) => f.category === 'maquina_lavar');
+  const wpMaq = ut.waterPoints.find((w) => w.code === 'AF-05');
+  const dpMaq = ut.drainagePoints.find((d) => d.code === 'ES-MAQ');
+  const epMaq = ut.electricalPoints.find((e) => e.code === 'TUE-MAQ');
+  assert.ok(maq && wpMaq && dpMaq && epMaq);
+  assert.equal(wpMaq.category, 'maquina_lavar');
+  assert.equal(dpMaq.category, 'maquina_lavar');
+
+  const blank = createBlankProject({
+    name: 'Residencial Sem Tanque',
+    client: '',
+    municipality: 'Rio de Janeiro',
+    state: 'RJ',
+    front: 12,
+    depth: 25,
+    floorsCount: 1,
+    methodId: 'alvenaria_convencional',
+  });
+  const proj = autoDistributeUnitsAcrossFloors({ ...blank, unitTypes: [ut] }, ut.id);
+
+  // Zero compatibility clashes and zero LOU-04 (Tanque) in quantities
+  const clashes = runCompatibilityAnalysis(proj);
+  assert.equal(clashes.filter((c) => c.severity === 'CRITICO').length, 0);
+  const qty = calculateQuantities(proj);
+  assert.equal(qty.items.some((i) => i.code === 'LOU-04'), false);
+
+  // Moving electrical/water/drainage points directly propagates to engineering reports and DXF
+  const salaRoom = ut.rooms.find((r) => r.category === 'sala_quarto' || r.category === 'sala');
+  assert.ok(salaRoom);
+  epMaq.x = round2(salaRoom.x + 0.4);
+  epMaq.y = round2(salaRoom.y + 0.4);
+  epMaq.powerVA = 1800;
+  wpMaq.x = round2(ut.width - 0.5);
+  dpMaq.x = round2(ut.width - 0.5);
+  dpMaq.slopePercent = 2.5;
+
+  const elecRep = calculateElectricalSizing(proj);
+  const hydRep = calculateHydraulicSizing(proj);
+  const drainRep = calculateDrainageSizing(proj);
+  assert.ok(elecRep.totalInstalledKVA > 0);
+  assert.ok(hydRep.byUnitType[0].sumWeightsCold > 0);
+  assert.ok(hydRep.byUnitType[0].probableFlowColdLs > 0);
+  assert.equal(drainRep[0].slopeIssues.length, 0);
+  const dxf = generateProjectDXF(proj, 0);
+  assert.ok(dxf.includes('TUE-MAQ'));
+});

@@ -1,9 +1,10 @@
 import 'dotenv/config';
 import fs from 'fs';
+import http from 'http';
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { createServer as createViteServer } from 'vite';
+import { createServer as createViteServer, type ViteDevServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
 import { getApp, getApps, initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
@@ -179,9 +180,15 @@ Regras obrigatórias:
     }
   });
 
+  const httpServer = http.createServer(app);
+  let vite: ViteDevServer | null = null;
+
   if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
+    vite = await createViteServer({
+      server: {
+        middlewareMode: true,
+        hmr: process.env.DISABLE_HMR === 'true' ? false : { server: httpServer },
+      },
       appType: 'spa',
     });
     app.use(vite.middlewares);
@@ -193,7 +200,31 @@ Regras obrigatórias:
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  let isShuttingDown = false;
+  const shutdown = async () => {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+    try {
+      if (vite) {
+        await vite.close();
+      }
+    } catch {
+      // ignore close errors during shutdown
+    }
+    httpServer.close(() => {
+      process.exit(0);
+    });
+    setTimeout(() => process.exit(0), 1500).unref();
+  };
+
+  process.on('SIGTERM', () => {
+    void shutdown();
+  });
+  process.on('SIGINT', () => {
+    void shutdown();
+  });
+
+  httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`KITNET PRO STUDIO running on http://localhost:${PORT}`);
   });
 }

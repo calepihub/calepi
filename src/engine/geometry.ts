@@ -208,12 +208,14 @@ export interface Rect2D {
 
 export function getFurnitureWorldRect(item: FurnitureItem): Rect2D {
   const rot = ((item.rotationDeg % 360) + 360) % 360;
-  const swapped = rot === 90 || rot === 270;
+  const rad = (rot * Math.PI) / 180;
+  const cos = Math.abs(Math.cos(rad));
+  const sin = Math.abs(Math.sin(rad));
   return {
     x: item.x,
     y: item.y,
-    width: swapped ? item.depth : item.width,
-    depth: swapped ? item.width : item.depth,
+    width: round3(item.width * cos + item.depth * sin),
+    depth: round3(item.width * sin + item.depth * cos),
   };
 }
 

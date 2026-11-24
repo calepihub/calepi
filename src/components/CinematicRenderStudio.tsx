@@ -1112,11 +1112,17 @@ export const CinematicRenderStudio: React.FC<CinematicRenderStudioProps> = ({
           ) {
             continue;
           }
-          const fc = mapUnitPt(inst, ut.width, f.x + f.width / 2, f.y + f.depth / 2);
+          const fRot = ((f.rotationDeg % 360) + 360) % 360;
+          const fRad = (fRot * Math.PI) / 180;
+          const fw = f.width * Math.abs(Math.cos(fRad)) + f.depth * Math.abs(Math.sin(fRad));
+          const fd = f.width * Math.abs(Math.sin(fRad)) + f.depth * Math.abs(Math.cos(fRad));
+          const fc = mapUnitPt(inst, ut.width, f.x + fw / 2, f.y + fd / 2);
+          const effectiveFurnRot = inst.mirrored ? -f.rotationDeg : f.rotationDeg;
+          const rotY = -((inst.rotationDeg + effectiveFurnRot) * Math.PI) / 180;
           if (f.category === 'escada') {
             const sg = new THREE.Group();
             sg.position.set(fc.x, baseY + floor.slabThickness, fc.z);
-            sg.rotation.y = -((inst.rotationDeg + f.rotationDeg) * Math.PI) / 180;
+            sg.rotation.y = rotY;
             const steps = Math.max(5, f.stairSpec?.steps ?? 9);
             const totalRise = Math.max(1.8, f.height);
             const riser = totalRise / steps;
@@ -1148,7 +1154,7 @@ export const CinematicRenderStudio: React.FC<CinematicRenderStudioProps> = ({
               : matWood,
           );
           fMesh.position.set(fc.x, baseY + floor.slabThickness + (f.elevationM ?? 0) + f.height * 0.35, fc.z);
-          fMesh.rotation.y = -((inst.rotationDeg + f.rotationDeg) * Math.PI) / 180;
+          fMesh.rotation.y = rotY;
           fMesh.castShadow = !isSoftwareGl;
           fMesh.receiveShadow = !isSoftwareGl;
           group.add(fMesh);

@@ -13,6 +13,7 @@ import {
   buildConstructionSchedule,
   calculateAnalyticalBreakdown,
   calculateBudgetSummary,
+  calculateInvestorROI,
   calculateQuantities,
   syncBudgetWithQuantities,
 } from '../engine/quantitiesAndBudget';
@@ -24,7 +25,10 @@ import {
 import { nextId } from '../engine/parametricGenerator';
 import {
   applySinapiRJToBudget,
+  CONSTRUCTION_STAGE_ORDER,
+  getDynamicSinapiRJItem,
   SINAPI_RJ_METADATA,
+  type ConstructionStageName,
   type SinapiRJRegime,
 } from '../engine/sinapiRJ';
 import type { BudgetEntry, Project } from '../types/project';
@@ -64,6 +68,35 @@ export const QuantitiesAndBudgetModule: React.FC<QuantitiesAndBudgetModuleProps>
     () => calculateAnalyticalBreakdown(budget, project),
     [budget, project],
   );
+  const roi = useMemo(
+    () => calculateInvestorROI(project, budget.grandTotalCost),
+    [project, budget.grandTotalCost],
+  );
+
+  const groupedBudgetStages = useMemo(() => {
+    const groups = new Map<
+      ConstructionStageName,
+      {
+        stageName: ConstructionStageName;
+        lines: typeof budget.lines;
+        directSubtotal: number;
+      }
+    >();
+    for (const stage of CONSTRUCTION_STAGE_ORDER) {
+      groups.set(stage, { stageName: stage, lines: [], directSubtotal: 0 });
+    }
+    for (const line of budget.lines) {
+      const ref = getDynamicSinapiRJItem(line.code, project);
+      const stageName: ConstructionStageName =
+        ref?.stageGroup ?? '10. Louças, Metais, Bancadas e Paisagismo';
+      const bucket = groups.get(stageName)!;
+      bucket.lines.push(line);
+      if (line.subtotal !== null) {
+        bucket.directSubtotal = Math.round((bucket.directSubtotal + line.subtotal) * 100) / 100;
+      }
+    }
+    return CONSTRUCTION_STAGE_ORDER.map((s) => groups.get(s)!).filter((g) => g.lines.length > 0);
+  }, [budget.lines, project]);
 
   const filteredQuantities = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -166,10 +199,10 @@ export const QuantitiesAndBudgetModule: React.FC<QuantitiesAndBudgetModuleProps>
     [budget.grandTotalCost, scheduleMonths],
   );
 
-  const handleExportXLSX = () => {
-    const buffer = generateProjectXLSXBuffer(project, scheduleMonths);
+  const handleExportXLSX = async () => {
+    const buffer = await generateProjectXLSXBuffer(project, scheduleMonths);
     triggerBrowserDownload(
-      new Blob([buffer.slice().buffer], {
+      new Blob([new Uint8Array(buffer)], {
         type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       }),
       `${project.code}_Quantitativos_Orcamento.xlsx`,
@@ -302,8 +335,17 @@ export const QuantitiesAndBudgetModule: React.FC<QuantitiesAndBudgetModuleProps>
           <div className="space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-800 bg-[#1B1E24] p-3.5">
               <div className="flex flex-wrap items-center gap-1.5">
-                {['TODAS', 'Arquitetura', 'Estrutura', 'Elétrica', 'Hidráulica', 'Sanitária', 'Mobiliário', 'Paisagismo'].map(
-                  (d) => (
+                {[
+                  'TODAS',
+                  'Arquitetura',
+                  'Estrutura',
+                  'Elétrica',
+                  'Hidráulica',
+                  'Sanitária',
+                  'Louças e Metais',
+                  'Mobiliário',
+                  'Paisagismo',
+                ].map((d) => (
                     <button
                       key={d}
                       type="button"
@@ -553,63 +595,32 @@ export const QuantitiesAndBudgetModule: React.FC<QuantitiesAndBudgetModuleProps>
               </div>
             </div>
 
-            {/* Analytical Breakdown: Material vs Mão de Obra + Encargos RJ + WBS */}
+            {/* EAP 10-Stage Summary & Investor ROI Panel (Zero unit composition splits) */}
             <div className="grid gap-4 lg:grid-cols-12">
-              <div className="rounded-lg border border-slate-800 bg-[#1B1E24] p-4 space-y-2.5 lg:col-span-4">
-                <div className="text-xs font-semibold uppercase tracking-wider text-slate-300">
-                  Composição Analítica Direta
-                </div>
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-slate-400">Materiais e Equipamentos</span>
-                  <span className="font-mono font-semibold tabular-nums text-white">
-                    {brl(analytical.totalMaterialCost)}
+              <div className="overflow-hidden rounded-lg border border-slate-800 bg-[#1B1E24] lg:col-span-7">
+                <div className="flex items-center justify-between border-b border-slate-800 bg-[#14161A] px-3.5 py-2 text-xs font-semibold text-slate-300">
+                  <span>Resumo Orçamentário por Etapa da Obra (EAP SINAPI-RJ)</span>
+                  <span className="font-mono text-[11px] text-slate-400">
+                    {analytical.stageSummaries.length} etapas ativas
                   </span>
-                </div>
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-slate-400">Mão de Obra + Encargos RJ</span>
-                  <span className="font-mono font-semibold tabular-nums text-white">
-                    {brl(analytical.totalLaborCost)}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between text-[11px] text-slate-400 border-t border-slate-800 pt-2">
-                  <span>Encargos Sociais RJ ({analytical.socialChargesRatePercent}%)</span>
-                  <span className="font-mono tabular-nums text-sky-300">
-                    {brl(analytical.socialChargesImpliedValue)}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between text-xs border-t border-slate-800 pt-2">
-                  <span className="font-medium text-slate-200">Custo Direto Total</span>
-                  <span className="font-mono font-semibold tabular-nums text-emerald-400">
-                    {brl(budget.directTotalCost)}
-                  </span>
-                </div>
-              </div>
-
-              <div className="overflow-hidden rounded-lg border border-slate-800 bg-[#1B1E24] lg:col-span-8">
-                <div className="border-b border-slate-800 bg-[#14161A] px-3.5 py-2 text-xs font-semibold text-slate-300">
-                  Resumo Orçamentário por Etapa Construtiva (WBS SINAPI-RJ)
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-[11.5px]">
                     <thead className="border-b border-slate-800 text-slate-400">
                       <tr>
-                        <th className="px-3 py-2 font-medium">Etapa</th>
-                        <th className="px-3 py-2 text-right font-medium">Material</th>
-                        <th className="px-3 py-2 text-right font-medium">M.O. + Enc.</th>
+                        <th className="px-3 py-2 font-medium">Etapa Construtiva (EAP)</th>
+                        <th className="px-3 py-2 text-right font-medium">Itens</th>
                         <th className="px-3 py-2 text-right font-medium">Custo Direto</th>
-                        <th className="px-3 py-2 text-right font-medium">Com BDI</th>
-                        <th className="px-3 py-2 text-right font-medium">% Part.</th>
+                        <th className="px-3 py-2 text-right font-medium">Com Indireto + BDI</th>
+                        <th className="px-3 py-2 text-right font-medium">% Obra</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800/70">
                       {analytical.stageSummaries.map((st) => (
-                        <tr key={st.stageName}>
+                        <tr key={st.stageName} className="hover:bg-slate-800/20">
                           <td className="px-3 py-1.5 text-slate-200">{st.stageName}</td>
-                          <td className="px-3 py-1.5 text-right font-mono tabular-nums text-slate-300">
-                            {brl(st.materialTotal)}
-                          </td>
-                          <td className="px-3 py-1.5 text-right font-mono tabular-nums text-slate-300">
-                            {brl(st.laborTotal)}
+                          <td className="px-3 py-1.5 text-right font-mono tabular-nums text-slate-400">
+                            {st.itemsCount}
                           </td>
                           <td className="px-3 py-1.5 text-right font-mono tabular-nums text-white">
                             {brl(st.directTotal)}
@@ -624,7 +635,7 @@ export const QuantitiesAndBudgetModule: React.FC<QuantitiesAndBudgetModuleProps>
                       ))}
                       {analytical.stageSummaries.length === 0 && (
                         <tr>
-                          <td colSpan={6} className="px-3 py-3 text-center text-slate-500">
+                          <td colSpan={5} className="px-3 py-3 text-center text-slate-500">
                             Posicione unidades nos pavimentos para detalhar as etapas construtivas.
                           </td>
                         </tr>
@@ -633,121 +644,335 @@ export const QuantitiesAndBudgetModule: React.FC<QuantitiesAndBudgetModuleProps>
                   </table>
                 </div>
               </div>
+
+              <div className="rounded-lg border border-slate-800 bg-[#1B1E24] p-4 space-y-3 lg:col-span-5">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-slate-200">
+                    Viabilidade Financeira &amp; Retorno (ROI)
+                  </span>
+                  <span className="font-mono text-[11px] text-sky-400">
+                    {roi.totalUnits} kitnet(s)
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2.5 text-[11px]">
+                  <label className="space-y-1">
+                    <span className="text-slate-400">Valor do Terreno (R$)</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1000"
+                      value={project.budgetSettings.landCost ?? 0}
+                      onChange={(e) =>
+                        onUpdateProject((prev) => ({
+                          ...prev,
+                          budgetSettings: {
+                            ...prev.budgetSettings,
+                            landCost: Math.max(0, Number(e.target.value) || 0),
+                          },
+                        }))
+                      }
+                      className="w-full rounded border border-slate-700 bg-[#14161A] px-2 py-1 font-mono text-xs tabular-nums text-white"
+                    />
+                  </label>
+                  <label className="space-y-1">
+                    <span className="text-slate-400">Aluguel Médio / Unidade (R$)</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="50"
+                      value={project.budgetSettings.monthlyRentPerUnit ?? 1450}
+                      onChange={(e) =>
+                        onUpdateProject((prev) => ({
+                          ...prev,
+                          budgetSettings: {
+                            ...prev.budgetSettings,
+                            monthlyRentPerUnit: Math.max(0, Number(e.target.value) || 0),
+                          },
+                        }))
+                      }
+                      className="w-full rounded border border-slate-700 bg-[#14161A] px-2 py-1 font-mono text-xs tabular-nums text-white"
+                    />
+                  </label>
+                  <label className="space-y-1">
+                    <span className="text-slate-400">Vacância (%)</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="80"
+                      step="1"
+                      value={project.budgetSettings.vacancyRatePercent ?? 5}
+                      onChange={(e) =>
+                        onUpdateProject((prev) => ({
+                          ...prev,
+                          budgetSettings: {
+                            ...prev.budgetSettings,
+                            vacancyRatePercent: Math.min(80, Math.max(0, Number(e.target.value) || 0)),
+                          },
+                        }))
+                      }
+                      className="w-full rounded border border-slate-700 bg-[#14161A] px-2 py-1 font-mono text-xs tabular-nums text-white"
+                    />
+                  </label>
+                  <label className="space-y-1">
+                    <span className="text-slate-400">Taxa Adm. (%) · Desp./un</span>
+                    <div className="flex gap-1.5">
+                      <input
+                        type="number"
+                        min="0"
+                        max="35"
+                        step="1"
+                        title="Taxa de administração (%)"
+                        value={project.budgetSettings.adminFeePercent ?? 8}
+                        onChange={(e) =>
+                          onUpdateProject((prev) => ({
+                            ...prev,
+                            budgetSettings: {
+                              ...prev.budgetSettings,
+                              adminFeePercent: Math.min(35, Math.max(0, Number(e.target.value) || 0)),
+                            },
+                          }))
+                        }
+                        className="w-1/2 rounded border border-slate-700 bg-[#14161A] px-2 py-1 font-mono text-xs tabular-nums text-white"
+                      />
+                      <input
+                        type="number"
+                        min="0"
+                        step="10"
+                        title="Custo operacional / condomínio por unidade (R$/mês)"
+                        value={project.budgetSettings.monthlyCondoCostPerUnit ?? 95}
+                        onChange={(e) =>
+                          onUpdateProject((prev) => ({
+                            ...prev,
+                            budgetSettings: {
+                              ...prev.budgetSettings,
+                              monthlyCondoCostPerUnit: Math.max(0, Number(e.target.value) || 0),
+                            },
+                          }))
+                        }
+                        className="w-1/2 rounded border border-slate-700 bg-[#14161A] px-2 py-1 font-mono text-xs tabular-nums text-white"
+                      />
+                    </div>
+                  </label>
+                </div>
+
+                <div className="space-y-1.5 border-t border-slate-800 pt-2.5 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Investimento Total (Obra + Terreno)</span>
+                    <span className="font-mono font-semibold tabular-nums text-white">
+                      {brl(roi.totalInvestment)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Receita Líquida Mensal / Anual</span>
+                    <span className="font-mono font-semibold tabular-nums text-emerald-300">
+                      {brl(roi.netMonthlyIncome)}/mês · {brl(roi.netAnnualIncome)}/ano
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Yield Líquido (Mensal / Anual)</span>
+                    <span className="font-mono font-semibold tabular-nums text-sky-300">
+                      {roi.monthlyYieldPercent.toFixed(2)}% a.m. · {roi.annualYieldPercent.toFixed(2)}% a.a.
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Payback Estimado</span>
+                    <span className="font-mono font-semibold tabular-nums text-amber-300">
+                      {roi.paybackMonths !== null
+                        ? `${roi.paybackMonths} meses (${roi.paybackYears?.toFixed(1)} anos)`
+                        : '—'}
+                    </span>
+                  </div>
+                </div>
+              </div>
             </div>
 
+            {/* Complete 10-Stage EAP Budget Spreadsheet */}
             <div className="overflow-hidden rounded-lg border border-slate-800 bg-[#1B1E24]">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 bg-[#14161A] px-4 py-2.5">
+                <span className="text-xs font-semibold text-white">
+                  Planilha Orçamentária Completa (SINAPI-RJ) — Organizada por Etapas Construtivas
+                </span>
+                <span className="font-mono text-[11px] text-slate-400">
+                  {budget.lines.length} itens · Regime:{' '}
+                  {project.budgetSettings.sinapiRegime === 'desonerado'
+                    ? 'Com Desoneração'
+                    : project.budgetSettings.sinapiRegime === 'nao_desonerado'
+                      ? 'Sem Desoneração'
+                      : 'Manual'}
+                </span>
+              </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs">
                   <thead className="border-b border-slate-800 bg-[#14161A] text-slate-400">
                     <tr>
                       <th className="px-3 py-2.5 font-medium">Código</th>
                       <th className="px-3 py-2.5 font-medium">SINAPI-RJ</th>
-                      <th className="px-3 py-2.5 font-medium">Descrição</th>
+                      <th className="px-3 py-2.5 font-medium">Descrição &amp; Especificação</th>
                       <th className="px-3 py-2.5 font-medium">Unid.</th>
                       <th className="px-3 py-2.5 text-right font-medium">Qtd. Efetiva</th>
                       <th className="px-3 py-2.5 text-right font-medium">Perda (%)</th>
                       <th className="px-3 py-2.5 text-right font-medium">Preço Unit. (R$)</th>
-                      <th className="px-3 py-2.5 text-right font-medium">Subtotal</th>
+                      <th className="px-3 py-2.5 text-right font-medium">Total Direto (R$)</th>
                       <th className="px-3 py-2.5 font-medium">ABC</th>
                       <th className="px-3 py-2.5 font-medium">Base / Fornecedor</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/70">
-                    {budget.lines.map((line) => {
-                      const isCustom = !autoCodes.has(line.code);
+                    {groupedBudgetStages.map((stageGroup) => {
+                      const stagePct =
+                        budget.directTotalCost > 0
+                          ? ((stageGroup.directSubtotal / budget.directTotalCost) * 100).toFixed(1)
+                          : '0.0';
                       return (
-                        <tr key={line.id} className="hover:bg-slate-800/30">
-                          <td className="px-3 py-2 font-mono text-slate-300">{line.code}</td>
-                          <td className="px-3 py-2 font-mono text-[11px] text-sky-400 whitespace-nowrap">
-                            {line.sinapiCode || '—'}
-                          </td>
-                          <td className="px-3 py-2 text-white">
-                            <div className="flex items-center justify-between gap-2">
-                              <span>{line.description}</span>
-                              {isCustom && (
-                                <button
-                                  type="button"
-                                  onClick={() => removeCustomEntry(line.code)}
-                                  className="text-slate-500 hover:text-red-400"
-                                  title="Remover item manual"
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </button>
-                              )}
-                            </div>
-                          </td>
-                          <td className="px-3 py-2 font-mono text-slate-400">{line.unit}</td>
-                          <td className="px-3 py-2 text-right font-mono tabular-nums text-slate-200">
-                            {line.effectiveQuantity}
-                          </td>
-                          <td className="px-3 py-2 text-right">
-                            <input
-                              type="number"
-                              min="0"
-                              max="100"
-                              step="1"
-                              value={line.lossFactorPercent}
-                              onChange={(e) =>
-                                updateBudgetLine(line.code, {
-                                  lossFactorPercent: Math.max(0, Number(e.target.value) || 0),
-                                })
-                              }
-                              className="w-16 rounded border border-slate-700 bg-[#14161A] px-1.5 py-1 text-right font-mono text-xs tabular-nums text-white"
-                            />
-                          </td>
-                          <td className="px-3 py-2 text-right">
-                            <input
-                              type="number"
-                              min="0"
-                              step="0.01"
-                              placeholder="SEM COTAÇÃO"
-                              value={line.unitPrice ?? ''}
-                              onChange={(e) =>
-                                updateBudgetLine(line.code, {
-                                  unitPrice:
-                                    e.target.value === '' ? null : Math.max(0, Number(e.target.value)),
-                                })
-                              }
-                              className="w-28 rounded border border-slate-700 bg-[#14161A] px-2 py-1 text-right font-mono text-xs tabular-nums text-white placeholder:text-amber-400/70"
-                            />
-                          </td>
-                          <td className="px-3 py-2 text-right font-mono font-semibold tabular-nums">
-                            <span
-                              className={line.subtotal === null ? 'text-amber-400' : 'text-emerald-300'}
-                            >
-                              {brl(line.subtotal)}
-                            </span>
-                          </td>
-                          <td className="px-3 py-2 font-mono">
-                            <span
-                              className={
-                                line.abcClass === 'A'
-                                  ? 'font-bold text-red-400'
-                                  : line.abcClass === 'B'
-                                    ? 'text-amber-400'
-                                    : line.abcClass === 'C'
-                                      ? 'text-slate-300'
-                                      : 'text-slate-500'
-                              }
-                            >
-                              {line.abcClass === 'SEM_COTACAO' ? '—' : line.abcClass}
-                            </span>
-                          </td>
-                          <td className="px-3 py-2">
-                            <input
-                              type="text"
-                              placeholder="Fornecedor / Base"
-                              value={line.supplier}
-                              onChange={(e) =>
-                                updateBudgetLine(line.code, { supplier: e.target.value })
-                              }
-                              className="w-32 rounded border border-slate-700 bg-[#14161A] px-2 py-1 text-xs text-white"
-                            />
-                          </td>
-                        </tr>
+                        <React.Fragment key={stageGroup.stageName}>
+                          <tr className="bg-[#182130]/75 border-y border-slate-700/80">
+                            <td colSpan={7} className="px-3 py-2 font-semibold text-sky-200">
+                              {stageGroup.stageName}
+                            </td>
+                            <td className="px-3 py-2 text-right font-mono font-semibold tabular-nums text-emerald-300">
+                              {brl(stageGroup.directSubtotal)}
+                            </td>
+                            <td className="px-3 py-2 font-mono text-[11px] text-slate-300">
+                              {stagePct}%
+                            </td>
+                            <td className="px-3 py-2 text-[11px] text-slate-400">
+                              {stageGroup.lines.length} {stageGroup.lines.length === 1 ? 'item' : 'itens'}
+                            </td>
+                          </tr>
+                          {stageGroup.lines.map((line) => {
+                            const isCustom = !autoCodes.has(line.code);
+                            return (
+                              <tr key={line.id} className="hover:bg-slate-800/30">
+                                <td className="px-3 py-2 font-mono text-slate-300">{line.code}</td>
+                                <td className="px-3 py-2 font-mono text-[11px] text-sky-400 whitespace-nowrap">
+                                  {line.sinapiCode || '—'}
+                                </td>
+                                <td className="px-3 py-2 text-white">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span>{line.description}</span>
+                                    {isCustom && (
+                                      <button
+                                        type="button"
+                                        onClick={() => removeCustomEntry(line.code)}
+                                        className="text-slate-500 hover:text-red-400"
+                                        title="Remover item manual"
+                                      >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                      </button>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="px-3 py-2 font-mono text-slate-400">{line.unit}</td>
+                                <td className="px-3 py-2 text-right font-mono tabular-nums text-slate-200">
+                                  {line.effectiveQuantity}
+                                </td>
+                                <td className="px-3 py-2 text-right">
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    max="100"
+                                    step="1"
+                                    value={line.lossFactorPercent}
+                                    onChange={(e) =>
+                                      updateBudgetLine(line.code, {
+                                        lossFactorPercent: Math.max(0, Number(e.target.value) || 0),
+                                      })
+                                    }
+                                    className="w-16 rounded border border-slate-700 bg-[#14161A] px-1.5 py-1 text-right font-mono text-xs tabular-nums text-white"
+                                  />
+                                </td>
+                                <td className="px-3 py-2 text-right">
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    placeholder="SEM COTAÇÃO"
+                                    value={line.unitPrice ?? ''}
+                                    onChange={(e) =>
+                                      updateBudgetLine(line.code, {
+                                        unitPrice:
+                                          e.target.value === ''
+                                            ? null
+                                            : Math.max(0, Number(e.target.value)),
+                                      })
+                                    }
+                                    className="w-28 rounded border border-slate-700 bg-[#14161A] px-2 py-1 text-right font-mono text-xs tabular-nums text-white placeholder:text-amber-400/70"
+                                  />
+                                </td>
+                                <td className="px-3 py-2 text-right font-mono font-semibold tabular-nums">
+                                  <span
+                                    className={
+                                      line.subtotal === null ? 'text-amber-400' : 'text-emerald-300'
+                                    }
+                                  >
+                                    {brl(line.subtotal)}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-2 font-mono">
+                                  <span
+                                    className={
+                                      line.abcClass === 'A'
+                                        ? 'font-bold text-red-400'
+                                        : line.abcClass === 'B'
+                                          ? 'text-amber-400'
+                                          : line.abcClass === 'C'
+                                            ? 'text-slate-300'
+                                            : 'text-slate-500'
+                                    }
+                                  >
+                                    {line.abcClass === 'SEM_COTACAO' ? '—' : line.abcClass}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-2">
+                                  <input
+                                    type="text"
+                                    placeholder="Fornecedor / Base"
+                                    value={line.supplier}
+                                    onChange={(e) =>
+                                      updateBudgetLine(line.code, { supplier: e.target.value })
+                                    }
+                                    className="w-32 rounded border border-slate-700 bg-[#14161A] px-2 py-1 text-xs text-white"
+                                  />
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </React.Fragment>
                       );
                     })}
                   </tbody>
+                  <tfoot className="border-t-2 border-slate-700 bg-[#14161A] text-xs">
+                    <tr>
+                      <td colSpan={7} className="px-3 py-2 text-right text-slate-400">
+                        Subtotal Custo Direto (Soma das 10 Etapas):
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono font-semibold tabular-nums text-white">
+                        {brl(budget.directTotalCost)}
+                      </td>
+                      <td colSpan={2} />
+                    </tr>
+                    <tr>
+                      <td colSpan={7} className="px-3 py-1.5 text-right text-slate-400">
+                        Custos Indiretos ({project.budgetSettings.indirectCostsPercent}%) + BDI ({project.budgetSettings.bdiPercent}%) − Desconto ({project.budgetSettings.discountPercent}%):
+                      </td>
+                      <td className="px-3 py-1.5 text-right font-mono tabular-nums text-sky-300">
+                        {brl(Math.round((budget.grandTotalCost - budget.directTotalCost) * 100) / 100)}
+                      </td>
+                      <td colSpan={2} />
+                    </tr>
+                    <tr className="border-t border-slate-700">
+                      <td colSpan={7} className="px-3 py-2.5 text-right font-semibold text-white">
+                        TOTAL GERAL DA OBRA (COM BDI):
+                      </td>
+                      <td className="px-3 py-2.5 text-right font-mono text-sm font-bold tabular-nums text-emerald-400">
+                        {brl(budget.grandTotalCost)}
+                      </td>
+                      <td colSpan={2} className="px-3 py-2.5 font-mono text-[11px] text-slate-300">
+                        {budget.costPerM2 !== null ? `${brl(budget.costPerM2)}/m²` : ''}
+                      </td>
+                    </tr>
+                  </tfoot>
                 </table>
               </div>
             </div>

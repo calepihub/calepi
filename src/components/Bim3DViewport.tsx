@@ -1687,8 +1687,13 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
             ) {
               continue;
             }
-            const fc = mapUnitPt(inst, ut.width, f.x + f.width / 2, f.y + f.depth / 2);
-            const rotY = -((inst.rotationDeg + f.rotationDeg) * Math.PI) / 180;
+            const fRot = ((f.rotationDeg % 360) + 360) % 360;
+            const fRad = (fRot * Math.PI) / 180;
+            const fw = f.width * Math.abs(Math.cos(fRad)) + f.depth * Math.abs(Math.sin(fRad));
+            const fd = f.width * Math.abs(Math.sin(fRad)) + f.depth * Math.abs(Math.cos(fRad));
+            const fc = mapUnitPt(inst, ut.width, f.x + fw / 2, f.y + fd / 2);
+            const effectiveFurnRot = inst.mirrored ? -f.rotationDeg : f.rotationDeg;
+            const rotY = -((inst.rotationDeg + effectiveFurnRot) * Math.PI) / 180;
             const fy0 = baseY + floor.slabThickness + (f.elevationM ?? 0);
             const furGroup = new THREE.Group();
             furGroup.position.set(fc.x, fy0, fc.z);
@@ -1788,8 +1793,8 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
                 furGroup.add(railPostA, railPostB, handRail);
               }
             } else if (isArchRender && f.category === 'cama') {
-              // Orient headboard toward the wall end (+d/2 if positioned in lower half of unit)
-              const dir = f.y + f.depth > ut.depth * 0.55 ? 1 : -1;
+              // Orient headboard toward wall end only if user kept rotation at 0° in lower studio zone; otherwise strictly honor rotationDeg
+              const dir = fRot === 0 && f.y + f.depth > ut.depth * 0.55 ? 1 : -1;
               addPart(f.width, 0.16, f.depth, 0.1, matWoodDark, 0, 0, true);
               addPart(f.width - 0.08, 0.22, f.depth - 0.08, 0.29, matBedding);
               addPart(f.width - 0.04, 0.05, f.depth * 0.62, 0.41, matDuvet, 0, -dir * f.depth * 0.17);

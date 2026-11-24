@@ -840,41 +840,26 @@ export function generateParametricUnitLayout(
     },
   );
 
+  let maqCenterY = 1.45;
   if (input.hasLaundry) {
-    // Aparelhos alinhados à parede direita (voltados para Oeste), preservando corredor reto >= 0,85m junto à parede do BWC
-    const tanqueY = 0.76;
-    const maqY = 1.32;
-    furniture.push(
-      {
-        id: `${id}-fur-tanque`,
-        name: 'Tanque Inox / Louça c/ Torneira',
-        category: 'tanque',
-        roomId: laundryRoomId,
-        x: round2(W - 0.56),
-        y: tanqueY,
-        width: 0.48,
-        depth: 0.48,
-        height: 0.85,
-        rotationDeg: 270,
-        requiresWater: true,
-        requiresDrain: true,
-      },
-      {
-        id: `${id}-fur-maq`,
-        name: 'Máquina de Lavar Roupas',
-        category: 'maquina_lavar',
-        roomId: laundryRoomId,
-        x: round2(W - 0.62),
-        y: maqY,
-        width: 0.54,
-        depth: 0.54,
-        height: 0.88,
-        rotationDeg: 270,
-        requiresPower: true,
-        requiresWater: true,
-        requiresDrain: true,
-      },
-    );
+    // Área de Serviço contém exclusivamente a Máquina de Lavar (sem tanque interno), preservando corredor livre >= 0,85m
+    const maqY = round2(Math.max(cozDepth + 0.06, 1.22));
+    maqCenterY = round2(maqY + 0.27);
+    furniture.push({
+      id: `${id}-fur-maq`,
+      name: 'Máquina de Lavar Roupas',
+      category: 'maquina_lavar',
+      roomId: laundryRoomId,
+      x: round2(W - 0.62),
+      y: maqY,
+      width: 0.54,
+      depth: 0.54,
+      height: 0.88,
+      rotationDeg: 270,
+      requiresPower: true,
+      requiresWater: true,
+      requiresDrain: true,
+    });
   }
 
   // 4C. Mezanino Condicional — reserva a caixa da escada ANTES do mobiliário térreo para nunca sobrepor nada
@@ -2163,10 +2148,10 @@ export function generateParametricUnitLayout(
       label: 'Tomada Máquina de Lavar',
       roomId: laundryRoomId,
       x: round2(W - 0.14),
-      y: 1.54,
+      y: maqCenterY,
       z: 0.9,
       referenceWall: 'P-EXT-L',
-      referenceDistance: 1.54,
+      referenceDistance: maqCenterY,
       powerVA: 1000,
       voltage: 127,
       powerFactor: 0.85,
@@ -2174,7 +2159,7 @@ export function generateParametricUnitLayout(
       conductorSectionMm2: 2.5,
       conduitDiameterMm: 20,
       protection: 'Disjuntor 20A + DR 30mA',
-      notes: 'Ponto área de serviço',
+      notes: 'Ponto área de serviço (exclusivo máquina de lavar)',
     });
   }
 
@@ -2348,44 +2333,24 @@ export function generateParametricUnitLayout(
   );
 
   if (input.hasLaundry) {
-    waterPoints.push(
-      {
-        id: `${id}-af-maq`,
-        code: 'AF-05',
-        category: 'maquina_lavar',
-        equipment: 'Máquina de Lavar',
-        roomId: laundryRoomId,
-        x: round2(W - 0.14),
-        y: 1.54,
-        z: 0.9,
-        waterType: 'fria',
-        diameterMm: 20,
-        material: 'PVC Soldável',
-        availablePressureMca: 5.7,
-        supplySource: 'Coluna AF-02',
-        branchName: 'Ramal A.S.',
-        weightHunter: 1.0,
-        notes: '',
-      },
-      {
-        id: `${id}-af-tq`,
-        code: 'AF-06',
-        category: 'tanque',
-        equipment: 'Tanque Área de Serviço',
-        roomId: laundryRoomId,
-        x: round2(W - 0.14),
-        y: 0.98,
-        z: 1.05,
-        waterType: 'fria',
-        diameterMm: 20,
-        material: 'PVC Soldável',
-        availablePressureMca: 5.7,
-        supplySource: 'Coluna AF-02',
-        branchName: 'Ramal A.S.',
-        weightHunter: 0.7,
-        notes: '',
-      },
-    );
+    waterPoints.push({
+      id: `${id}-af-maq`,
+      code: 'AF-05',
+      category: 'maquina_lavar',
+      equipment: 'Máquina de Lavar',
+      roomId: laundryRoomId,
+      x: round2(W - 0.14),
+      y: maqCenterY,
+      z: 0.9,
+      waterType: 'fria',
+      diameterMm: 20,
+      material: 'PVC Soldável',
+      availablePressureMca: 5.7,
+      supplySource: 'Coluna AF-02',
+      branchName: 'Ramal A.S.',
+      weightHunter: 1.0,
+      notes: 'Ponto exclusivo máquina de lavar (sem tanque interno)',
+    });
   }
 
   // 7. Drainage Points (Connected Sanitary Network + Floor Drains)
@@ -2523,36 +2488,20 @@ export function generateParametricUnitLayout(
   );
 
   if (input.hasLaundry) {
-    drainagePoints.push(
-      {
-        id: `${id}-esg-tq-as`,
-        code: 'ES-TQ',
-        category: 'tanque',
-        roomId: laundryRoomId,
-        x: round2(W - 0.18),
-        y: 0.98,
-        diameterMm: 40,
-        material: 'PVC Esgoto SN',
-        slopePercent: 2.0,
-        uhc: 3,
-        connectedToId: csId,
-        notes: 'Saída tanque A.S. Ø40mm → CS-01',
-      },
-      {
-        id: `${id}-esg-maq`,
-        code: 'ES-MAQ',
-        category: 'maquina_lavar',
-        roomId: laundryRoomId,
-        x: round2(W - 0.18),
-        y: 1.54,
-        diameterMm: 50,
-        material: 'PVC Esgoto SN',
-        slopePercent: 2.0,
-        uhc: 3,
-        connectedToId: csId,
-        notes: 'Saída máquina de lavar Ø50mm → CS-01',
-      },
-    );
+    drainagePoints.push({
+      id: `${id}-esg-maq`,
+      code: 'ES-MAQ',
+      category: 'maquina_lavar',
+      roomId: laundryRoomId,
+      x: round2(W - 0.18),
+      y: maqCenterY,
+      diameterMm: 50,
+      material: 'PVC Esgoto SN',
+      slopePercent: 2.0,
+      uhc: 3,
+      connectedToId: csId,
+      notes: 'Saída máquina de lavar Ø50mm → CS-01',
+    });
   }
 
   return {

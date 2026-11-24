@@ -21,7 +21,6 @@ import {
   INTERIOR_DOOR_OPTIONS,
   KITCHEN_FAUCET_OPTIONS,
   KITCHEN_SINK_OPTIONS,
-  LAUNDRY_TUB_OPTIONS,
   METALS_FINISH_OPTIONS,
   ROOF_MATERIAL_OPTIONS,
   ROOF_SHAPE_OPTIONS,
@@ -678,7 +677,7 @@ export const FinishesAndFixturesModule: React.FC<FinishesAndFixturesModuleProps>
               />
 
               <OptionCardGrid
-                title="Cor das Louças Sanitárias (Bacia, Cuba & Tanque)"
+                title="Cor das Louças Sanitárias (Bacia & Cuba)"
                 options={SANITARY_COLOR_OPTIONS}
                 value={fx.sanitaryWareColor}
                 onSelect={(val) =>
@@ -764,14 +763,9 @@ export const FinishesAndFixturesModule: React.FC<FinishesAndFixturesModuleProps>
               />
             </div>
 
-            <OptionCardGrid
-              title="Tanque da Área de Serviço / Lavanderia"
-              options={LAUNDRY_TUB_OPTIONS}
-              value={fx.laundryTubType}
-              onSelect={(val) =>
-                updateSanitary({ laundryTubType: val }, `Tanque lavanderia: ${val.replace(/_/g, ' ')}`)
-              }
-            />
+            <div className="rounded-lg border border-[#2A2F38] bg-[#14161A] px-4 py-3 text-xs text-[#C4C9D4]">
+              <strong className="text-white">Área de Serviço (A.S.):</strong> Configurada exclusivamente com ponto hidráulico (AF Ø20mm), esgoto (ES Ø50mm) e elétrica (TUE 20A) para <strong className="text-sky-300">Máquina de Lavar</strong> (sem tanque interno na unidade).
+            </div>
 
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-sky-500/30 bg-sky-950/20 px-4 py-3 text-xs text-sky-100">
               <span className="inline-flex items-center gap-2">

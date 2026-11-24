@@ -22,7 +22,6 @@ import {
   INTERIOR_DOOR_OPTIONS,
   KITCHEN_FAUCET_OPTIONS,
   KITCHEN_SINK_OPTIONS,
-  LAUNDRY_TUB_OPTIONS,
   METALS_FINISH_OPTIONS,
   ROOF_MATERIAL_OPTIONS,
   ROOF_SHAPE_OPTIONS,
@@ -152,7 +151,7 @@ Vidros: ${findLabel(GLASS_TYPE_OPTIONS, rs.glassType)}
 - Ralos e Drenagem BWC: ${findLabel(DRAIN_OPTIONS, fx.drainType)}
 - Lavatório & Torneira BWC: ${findLabel(WASHBASIN_OPTIONS, fx.washbasinType)} | ${findLabel(WASHBASIN_FAUCET_OPTIONS, fx.washbasinFaucet)}
 - Pia Cozinha & Torneira: ${findLabel(KITCHEN_SINK_OPTIONS, fx.kitchenSinkType)} | ${findLabel(KITCHEN_FAUCET_OPTIONS, fx.kitchenFaucet)}
-- Tanque Lavanderia: ${findLabel(LAUNDRY_TUB_OPTIONS, fx.laundryTubType)}
+- Área de Serviço (A.S.): Ponto exclusivo para Máquina de Lavar (AF Ø20mm, ES Ø50mm e TUE 20A — sem tanque interno)
 - Acabamento dos Metais: ${findLabel(METALS_FINISH_OPTIONS, fx.metalsFinish)}
 - Paisagismo & Áreas Externas: Piso base ${(project.landscaping?.defaultGroundSurface ?? 'grama_esmeralda').replace(/_/g, ' ')} | ${project.landscaping?.surfaceZones?.length ?? 0} zonas externas | ${project.landscaping?.pools?.length ?? 0} piscina(s) | ${project.landscaping?.gourmetAreas?.length ?? 0} área(s) gourmet | ${project.landscaping?.plants?.length ?? 0} espécimes botânicos.
 

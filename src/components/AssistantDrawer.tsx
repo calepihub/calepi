@@ -10,7 +10,7 @@ import {
 import { auth } from '../firebase';
 import { round2 } from '../engine/geometry';
 import { generateParametricUnitLayout, nextId } from '../engine/parametricGenerator';
-import type { Project, UnitType } from '../types/project';
+import type { EntrySide, InternalPartitionType, Project, UnitType } from '../types/project';
 
 interface AssistantDrawerProps {
   open: boolean;
@@ -116,19 +116,21 @@ export const AssistantDrawer: React.FC<AssistantDrawerProps> = ({
   const buildUnitFromProposal = (prop: AssistantProposal): UnitType => {
     const code = `TIPO-${String.fromCharCode(65 + project.unitTypes.length)}`;
     const hasMezzanine = Boolean(prop.hasMezzanine);
-    const validEntry =
-      prop.entrySide === 'frente' ||
-      prop.entrySide === 'fundo' ||
-      prop.entrySide === 'esquerda' ||
-      prop.entrySide === 'direita'
-        ? prop.entrySide
-        : 'frente';
-    const validPartition =
-      prop.internalPartitionType === 'aberta_studio' ||
-      prop.internalPartitionType === 'divisoria_parcial' ||
-      prop.internalPartitionType === 'quarto_fechado'
-        ? prop.internalPartitionType
-        : undefined;
+    const rawEntry = String(prop.entrySide ?? '').toLowerCase();
+    const validEntry: EntrySide =
+      rawEntry === 'lateral_direita' || rawEntry === 'direita'
+        ? 'lateral_direita'
+        : rawEntry === 'lateral_esquerda' || rawEntry === 'esquerda'
+          ? 'lateral_esquerda'
+          : 'frente';
+
+    const rawPartition = String(prop.internalPartitionType ?? '').toLowerCase();
+    const validPartition: InternalPartitionType | undefined =
+      rawPartition === 'drywall' || rawPartition === 'divisoria_parcial'
+        ? 'drywall'
+        : rawPartition === 'alvenaria' || rawPartition === 'quarto_fechado'
+          ? 'alvenaria'
+          : undefined;
 
     return generateParametricUnitLayout({
       id: nextId('ut'),
