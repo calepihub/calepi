@@ -10,6 +10,7 @@ import {
   Layers,
   Minus,
   Move,
+  Pencil,
   PenTool,
   Plus,
   Ruler,
@@ -21,12 +22,15 @@ import {
   analyzeSiteGeometry,
   buildSiteVerticesFromDimensions,
   getBoundingBox,
+  getOpeningWorldPosition,
   getUnitWorldRect,
   round2,
   topLeftToUnitOrigin,
 } from '../engine/geometry';
+import { unitLocalToWorld } from '../engine/cadDrawings';
 import {
   createDefaultImplantationConfig,
+  deleteUnitTypeFromProject,
   formatLengthInUnit,
   generateImplantationUnits,
   getGateWorldPosition,
@@ -35,6 +39,7 @@ import {
   recalculateFloorElevations,
   replicateGroundFloorToAllFloors,
   setProjectFloorCount,
+  updateUnitTypeInProject,
   validateImplantation,
 } from '../engine/implantation';
 import {
@@ -42,6 +47,7 @@ import {
   generateParametricUnitLayout,
   nextId,
 } from '../engine/parametricGenerator';
+import { NumericInput } from './NumericInput';
 import type {
   AccessGateType,
   BoundaryCondition,
@@ -58,7 +64,10 @@ import type {
   LotFrontSide,
   LotSideKey,
   MeasurementUnit,
+  MezzanineStairLayout,
   MezzanineStructureType,
+  MezzanineUsage,
+  MezzanineZone,
   Point2D,
   Project,
   SiteAccessGate,
@@ -72,6 +81,7 @@ interface SiteModuleProps {
   project: Project;
   onUpdateProject: (updater: (prev: Project) => Project, revisionNote?: string) => void;
   onNavigateModule?: (moduleId: string) => void;
+  onSelectUnitType?: (unitTypeId: string) => void;
 }
 
 type SiteStage = 1 | 2 | 3 | 4;
@@ -88,6 +98,7 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
   project,
   onUpdateProject,
   onNavigateModule,
+  onSelectUnitType,
 }) => {
   const [activeStage, setActiveStage] = useState<SiteStage>(
     project.floors.some((f) => f.units.length > 0) ? 2 : 1,
@@ -101,10 +112,12 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
   const [importMsg, setImportMsg] = useState<string | null>(null);
   const [applyToAllFloors, setApplyToAllFloors] = useState<boolean>(true);
 
-  // Quick inline typology creation state (inside Etapa 2 when user wants a model right away)
+  // Quick inline typology creation & editing state (inside Etapa 2)
   const [showQuickTypeForm, setShowQuickTypeForm] = useState<boolean>(
     project.unitTypes.length === 0,
   );
+  const [editingUnitTypeId, setEditingUnitTypeId] = useState<string | null>(null);
+  const [confirmDeleteUtId, setConfirmDeleteUtId] = useState<string | null>(null);
   const [qtCode, setQtCode] = useState('TIPO-A');
   const [qtName, setQtName] = useState('Kitnet Padrão');
   const [qtWidth, setQtWidth] = useState(4.0);
@@ -114,6 +127,9 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
   const [qtEntrySide, setQtEntrySide] = useState<EntrySide>('lateral_direita');
   const [qtPartition, setQtPartition] = useState<InternalPartitionType>('alvenaria');
   const [qtLaundry, setQtLaundry] = useState(true);
+  const [qtBalcony, setQtBalcony] = useState(false);
+  const [qtAccessible, setQtAccessible] = useState(false);
+  const [qtMepProfile, setQtMepProfile] = useState<'simples' | 'completo'>('simples');
   const [qtMezzanine, setQtMezzanine] = useState(false);
   const [qtMezzElev, setQtMezzElev] = useState(2.15);
   const [qtMezzSizingMode, setQtMezzSizingMode] = useState<'percent' | 'dimensions'>('percent');
@@ -121,6 +137,10 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
   const [qtMezzCustomW, setQtMezzCustomW] = useState(3.8);
   const [qtMezzCustomD, setQtMezzCustomD] = useState(2.0);
   const [qtMezzStruct, setQtMezzStruct] = useState<MezzanineStructureType>('metalica_madeira');
+  const [qtMezzZone, setQtMezzZone] = useState<MezzanineZone>('sobre_banho_cozinha');
+  const [qtMezzUsage, setQtMezzUsage] = useState<MezzanineUsage>('dormitorio');
+  const [qtMezzStairLayout, setQtMezzStairLayout] = useState<MezzanineStairLayout>('reta');
+  const [qtMezzStairSide, setQtMezzStairSide] = useState<'esquerda' | 'direita'>('direita');
 
   // Per-unit quick dimension customization modal/panel state
   const [customizingUnitId, setCustomizingUnitId] = useState<string | null>(null);
@@ -278,45 +298,172 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
     setDraggingUnitId(null);
   };
 
-  const handleQuickCreateTypology = (e: React.FormEvent) => {
-    e.preventDefault();
-    const allowMezz = qtCeiling >= 3.0 && qtMezzanine;
-    const ut = generateParametricUnitLayout({
-      code: qtCode.trim() || `TIPO-${project.unitTypes.length + 1}`,
-      name: qtName.trim() || 'Kitnet Padrão',
-      width: Math.max(2.8, qtWidth),
-      depth: Math.max(3.6, qtDepth),
-      ceilingHeight: Math.max(2.4, qtCeiling),
-      bedrooms: qtBedrooms,
-      hasLaundry: qtLaundry,
-      hasBalcony: false,
-      hasMezzanine: allowMezz,
-      accessible: false,
-      extWallThickness: project.constructionMethod.externalWallThickness,
-      intWallThickness: qtPartition === 'drywall' ? 0.095 : project.constructionMethod.internalWallThickness,
-      constructionSystem: project.constructionMethod.methodId,
-      entrySide: qtEntrySide,
-      internalPartitionType: qtPartition,
-      mezzanineElevationM: allowMezz ? qtMezzElev : undefined,
-      mezzanineSizingMode: allowMezz ? qtMezzSizingMode : undefined,
-      mezzanineCoverageRatio: allowMezz ? qtMezzPct / 100 : undefined,
-      mezzanineCustomWidthM: allowMezz && qtMezzSizingMode === 'dimensions' ? qtMezzCustomW : undefined,
-      mezzanineCustomDepthM: allowMezz && qtMezzSizingMode === 'dimensions' ? qtMezzCustomD : undefined,
-      mezzanineStructureType: allowMezz ? qtMezzStruct : undefined,
-      mezzanineUsage: allowMezz ? 'dormitorio' : undefined,
-    });
+  const openNewQuickTypeForm = () => {
+    setEditingUnitTypeId(null);
+    setConfirmDeleteUtId(null);
+    const letter = String.fromCharCode(65 + Math.min(25, project.unitTypes.length));
+    setQtCode(`TIPO-${letter}`);
+    setQtName(project.unitTypes.length === 0 ? 'Kitnet Padrão' : `Kitnet Modelo ${letter}`);
+    setQtWidth(4.0);
+    setQtDepth(5.0);
+    setQtCeiling(2.8);
+    setQtBedrooms(0);
+    setQtEntrySide('lateral_direita');
+    setQtPartition(project.constructionMethod.internalPartitionType ?? 'alvenaria');
+    setQtLaundry(true);
+    setQtBalcony(false);
+    setQtAccessible(false);
+    setQtMepProfile('simples');
+    setQtMezzanine(false);
+    setQtMezzElev(2.15);
+    setQtMezzSizingMode('percent');
+    setQtMezzPct(30);
+    setQtMezzCustomW(3.8);
+    setQtMezzCustomD(2.0);
+    setQtMezzStruct('metalica_madeira');
+    setQtMezzZone('sobre_banho_cozinha');
+    setQtMezzUsage('dormitorio');
+    setQtMezzStairLayout('reta');
+    setQtMezzStairSide('direita');
+    setShowQuickTypeForm(true);
+  };
 
-    onUpdateProject((prev) => {
-      const baseCfg = prev.implantation ?? createDefaultImplantationConfig(prev);
-      return {
-        ...prev,
-        unitTypes: [...prev.unitTypes, ut],
-        implantation: {
-          ...baseCfg,
-          primaryUnitTypeId: baseCfg.primaryUnitTypeId || ut.id,
-        },
-      };
-    }, `Criação da tipologia ${ut.code} (${ut.width}×${ut.depth}m) na implantação`);
+  const openEditQuickTypeForm = (ut: UnitType) => {
+    setEditingUnitTypeId(ut.id);
+    setConfirmDeleteUtId(null);
+    setQtCode(ut.code);
+    setQtName(ut.name);
+    setQtWidth(ut.width);
+    setQtDepth(ut.depth);
+    setQtCeiling(ut.ceilingHeight);
+    setQtBedrooms(ut.bedrooms);
+    setQtEntrySide(ut.entrySide ?? 'lateral_direita');
+    setQtPartition(
+      ut.internalPartitionType ?? project.constructionMethod.internalPartitionType ?? 'alvenaria',
+    );
+    setQtLaundry(ut.hasLaundry);
+    setQtBalcony(ut.hasBalcony);
+    setQtAccessible(ut.accessible);
+    setQtMepProfile(ut.mepProfile ?? 'simples');
+    setQtMezzanine(Boolean(ut.hasMezzanine && ut.ceilingHeight >= 3.0));
+    setQtMezzElev(ut.mezzanine?.elevationM ?? 2.15);
+    setQtMezzSizingMode(ut.mezzanine?.sizingMode ?? 'percent');
+    setQtMezzPct(Math.round((ut.mezzanine?.coverageRatio ?? 0.3) * 100));
+    setQtMezzCustomW(ut.mezzanine?.customWidthM ?? ut.mezzanine?.width ?? round2(Math.max(1.2, ut.width - 0.3)));
+    setQtMezzCustomD(ut.mezzanine?.customDepthM ?? ut.mezzanine?.depth ?? 2.0);
+    setQtMezzStruct(ut.mezzanine?.structureType ?? 'metalica_madeira');
+    setQtMezzZone(ut.mezzanine?.zone ?? 'sobre_banho_cozinha');
+    setQtMezzUsage(ut.mezzanine?.usage ?? 'dormitorio');
+    setQtMezzStairLayout(ut.mezzanine?.stairLayout ?? 'reta');
+    setQtMezzStairSide(ut.mezzanine?.stairSide ?? 'direita');
+    setShowQuickTypeForm(true);
+  };
+
+  const handleQuickSaveTypology = (e: React.FormEvent) => {
+    e.preventDefault();
+    const safeWidth = Math.max(2.8, round2(qtWidth));
+    const safeDepth = Math.max(3.6, round2(qtDepth));
+    const safeCeiling = Math.max(2.4, round2(qtCeiling));
+    const allowMezz = safeCeiling >= 3.0 && qtMezzanine;
+    const existingUt = editingUnitTypeId
+      ? project.unitTypes.find((t) => t.id === editingUnitTypeId)
+      : undefined;
+
+    const cleanCode =
+      qtCode.trim() || existingUt?.code || `TIPO-${project.unitTypes.length + 1}`;
+    const cleanName = qtName.trim() || existingUt?.name || 'Kitnet Padrão';
+
+    // Se apenas código/nome mudaram na edição, preserva quaisquer ajustes manuais feitos no Editor 2D
+    const onlyMetadataChanged =
+      Boolean(existingUt) &&
+      existingUt!.width === safeWidth &&
+      existingUt!.depth === safeDepth &&
+      existingUt!.ceilingHeight === safeCeiling &&
+      existingUt!.bedrooms === qtBedrooms &&
+      existingUt!.hasLaundry === qtLaundry &&
+      existingUt!.hasBalcony === qtBalcony &&
+      existingUt!.accessible === qtAccessible &&
+      (existingUt!.entrySide ?? 'lateral_direita') === qtEntrySide &&
+      (existingUt!.internalPartitionType ??
+        project.constructionMethod.internalPartitionType ??
+        'alvenaria') === qtPartition &&
+      (existingUt!.mepProfile ?? 'simples') === qtMepProfile &&
+      Boolean(existingUt!.hasMezzanine) === allowMezz &&
+      (!allowMezz ||
+        ((existingUt!.mezzanine?.elevationM ?? 2.15) === round2(qtMezzElev) &&
+          (existingUt!.mezzanine?.sizingMode ?? 'percent') === qtMezzSizingMode &&
+          Math.round((existingUt!.mezzanine?.coverageRatio ?? 0.3) * 100) === qtMezzPct &&
+          (existingUt!.mezzanine?.customWidthM ?? existingUt!.mezzanine?.width) === round2(qtMezzCustomW) &&
+          (existingUt!.mezzanine?.customDepthM ?? existingUt!.mezzanine?.depth) === round2(qtMezzCustomD) &&
+          (existingUt!.mezzanine?.structureType ?? 'metalica_madeira') === qtMezzStruct &&
+          (existingUt!.mezzanine?.zone ?? 'sobre_banho_cozinha') === qtMezzZone &&
+          (existingUt!.mezzanine?.usage ?? 'dormitorio') === qtMezzUsage &&
+          (existingUt!.mezzanine?.stairLayout ?? 'reta') === qtMezzStairLayout &&
+          (existingUt!.mezzanine?.stairSide ?? 'direita') === qtMezzStairSide));
+
+    const savedUt: UnitType = onlyMetadataChanged
+      ? {
+          ...existingUt!,
+          code: cleanCode,
+          name: cleanName,
+        }
+      : generateParametricUnitLayout({
+          id: existingUt?.id,
+          code: cleanCode,
+          name: cleanName,
+          basePreset: existingUt?.basePreset,
+          finishStandard: existingUt?.finishStandard,
+          width: safeWidth,
+          depth: safeDepth,
+          ceilingHeight: safeCeiling,
+          bedrooms: qtBedrooms,
+          hasLaundry: qtLaundry,
+          hasBalcony: qtBalcony,
+          hasMezzanine: allowMezz,
+          accessible: qtAccessible,
+          extWallThickness: project.constructionMethod.externalWallThickness,
+          intWallThickness:
+            qtPartition === 'drywall'
+              ? 0.095
+              : project.constructionMethod.internalWallThickness,
+          constructionSystem: project.constructionMethod.methodId,
+          entrySide: qtEntrySide,
+          internalPartitionType: qtPartition,
+          mepProfile: qtMepProfile,
+          mezzanineZone: allowMezz ? qtMezzZone : undefined,
+          mezzanineElevationM: allowMezz ? qtMezzElev : undefined,
+          mezzanineSizingMode: allowMezz ? qtMezzSizingMode : undefined,
+          mezzanineCoverageRatio: allowMezz ? qtMezzPct / 100 : undefined,
+          mezzanineCustomWidthM:
+            allowMezz && qtMezzSizingMode === 'dimensions' ? qtMezzCustomW : undefined,
+          mezzanineCustomDepthM:
+            allowMezz && qtMezzSizingMode === 'dimensions' ? qtMezzCustomD : undefined,
+          mezzanineStructureType: allowMezz ? qtMezzStruct : undefined,
+          mezzanineUsage: allowMezz ? qtMezzUsage : undefined,
+          mezzanineStairLayout: allowMezz ? qtMezzStairLayout : undefined,
+          mezzanineStairSide: allowMezz ? qtMezzStairSide : undefined,
+        });
+
+    onUpdateProject(
+      (prev) => {
+        const nextProj = updateUnitTypeInProject(prev, savedUt);
+        if (!existingUt && nextProj.implantation) {
+          return {
+            ...nextProj,
+            implantation: {
+              ...nextProj.implantation,
+              primaryUnitTypeId: nextProj.implantation.primaryUnitTypeId || savedUt.id,
+            },
+          };
+        }
+        return nextProj;
+      },
+      existingUt
+        ? `Edição da tipologia ${savedUt.code} (${savedUt.width}×${savedUt.depth}m)`
+        : `Criação da tipologia ${savedUt.code} (${savedUt.width}×${savedUt.depth}m) na implantação`,
+    );
+    onSelectUnitType?.(savedUt.id);
+    setEditingUnitTypeId(null);
     setShowQuickTypeForm(false);
   };
 
@@ -758,14 +905,12 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
                     <label className="block text-[11px] text-[#949BA8] mb-1">
                       Frente ({unit})
                     </label>
-                    <input
-                      type="number"
-                      step={unit === 'cm' ? 10 : 0.1}
+                    <NumericInput
                       min={unit === 'cm' ? 200 : 2}
                       value={toDisplay(site.front)}
-                      onChange={(e) =>
+                      onCommit={(val) =>
                         updateSite(
-                          (s) => ({ ...s, front: Math.max(2, fromDisplay(Number(e.target.value))) }),
+                          (s) => ({ ...s, front: Math.max(2, fromDisplay(val)) }),
                           true,
                         )
                       }
@@ -776,15 +921,13 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
                     <label className="block text-[11px] text-[#949BA8] mb-1">
                       Fundos ({unit})
                     </label>
-                    <input
-                      type="number"
-                      step={unit === 'cm' ? 10 : 0.1}
+                    <NumericInput
                       min={unit === 'cm' ? 200 : 2}
                       disabled={site.shapeType === 'retangular' || site.shapeType === 'quadrado'}
                       value={toDisplay(site.back)}
-                      onChange={(e) =>
+                      onCommit={(val) =>
                         updateSite(
-                          (s) => ({ ...s, back: Math.max(2, fromDisplay(Number(e.target.value))) }),
+                          (s) => ({ ...s, back: Math.max(2, fromDisplay(val)) }),
                           true,
                         )
                       }
@@ -795,17 +938,15 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
                     <label className="block text-[11px] text-[#949BA8] mb-1">
                       Prof. Esq. ({unit})
                     </label>
-                    <input
-                      type="number"
-                      step={unit === 'cm' ? 10 : 0.1}
+                    <NumericInput
                       min={unit === 'cm' ? 200 : 2}
                       disabled={site.shapeType === 'quadrado'}
                       value={toDisplay(site.leftDepth)}
-                      onChange={(e) =>
+                      onCommit={(val) =>
                         updateSite(
                           (s) => ({
                             ...s,
-                            leftDepth: Math.max(2, fromDisplay(Number(e.target.value))),
+                            leftDepth: Math.max(2, fromDisplay(val)),
                           }),
                           true,
                         )
@@ -817,17 +958,15 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
                     <label className="block text-[11px] text-[#949BA8] mb-1">
                       Prof. Dir. ({unit})
                     </label>
-                    <input
-                      type="number"
-                      step={unit === 'cm' ? 10 : 0.1}
+                    <NumericInput
                       min={unit === 'cm' ? 200 : 2}
                       disabled={site.shapeType === 'retangular' || site.shapeType === 'quadrado'}
                       value={toDisplay(site.rightDepth)}
-                      onChange={(e) =>
+                      onCommit={(val) =>
                         updateSite(
                           (s) => ({
                             ...s,
-                            rightDepth: Math.max(2, fromDisplay(Number(e.target.value))),
+                            rightDepth: Math.max(2, fromDisplay(val)),
                           }),
                           true,
                         )
@@ -1157,7 +1296,7 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
           {/* ==================== ETAPA 2 ==================== */}
           {activeStage === 2 && (
             <div className="space-y-4">
-              {/* Inline Quick Typology Creator (if 0 typologies or toggled) */}
+              {/* Inline Typology Creator & Editor */}
               <div className="rounded-lg border border-[#2A2F38] bg-[#1B1E24] p-4 space-y-3">
                 <div className="flex items-center justify-between gap-2">
                   <div>
@@ -1165,12 +1304,19 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
                       Modelos / Tipologias de Kitnet ({project.unitTypes.length})
                     </h2>
                     <p className="text-[11px] text-[#949BA8]">
-                      Crie ou selecione os modelos que serão implantados no lote.
+                      Crie, edite ou selecione os modelos que serão implantados no lote.
                     </p>
                   </div>
                   <button
                     type="button"
-                    onClick={() => setShowQuickTypeForm((v) => !v)}
+                    onClick={() => {
+                      if (showQuickTypeForm) {
+                        setShowQuickTypeForm(false);
+                        setEditingUnitTypeId(null);
+                      } else {
+                        openNewQuickTypeForm();
+                      }
+                    }}
                     className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded border border-[#323844] bg-[#14161A] text-white hover:border-[#2F7CF6]"
                   >
                     <Plus className="w-3.5 h-3.5 text-[#2F7CF6]" />
@@ -1180,9 +1326,29 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
 
                 {showQuickTypeForm && (
                   <form
-                    onSubmit={handleQuickCreateTypology}
+                    onSubmit={handleQuickSaveTypology}
                     className="rounded border border-[#2F7CF6]/40 bg-[#14161A] p-3 space-y-3"
                   >
+                    <div className="flex items-center justify-between gap-2 pb-1.5 border-b border-[#2A2F38]">
+                      <span className="text-xs font-semibold text-sky-300">
+                        {editingUnitTypeId
+                          ? `Editando Modelo Salvo (${qtCode})`
+                          : 'Novo Modelo de Kitnet'}
+                      </span>
+                      {editingUnitTypeId && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingUnitTypeId(null);
+                            setShowQuickTypeForm(false);
+                          }}
+                          className="text-[11px] text-[#949BA8] hover:text-white"
+                        >
+                          Cancelar edição
+                        </button>
+                      )}
+                    </div>
+
                     <div className="grid grid-cols-2 gap-2.5">
                       <div>
                         <label className="block text-[10px] text-[#949BA8] mb-0.5">Código</label>
@@ -1206,41 +1372,47 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
 
                     <div className="grid grid-cols-3 gap-2.5">
                       <div>
-                        <label className="block text-[10px] text-[#949BA8] mb-0.5">Largura (m)</label>
-                        <input
-                          type="number"
-                          step="0.1"
+                        <label className="block text-[10px] text-[#949BA8] mb-0.5">
+                          Largura (m) <span className="text-[#64748B]">(mín 2,8)</span>
+                        </label>
+                        <NumericInput
                           min={2.8}
+                          max={20}
                           value={qtWidth}
-                          onChange={(e) => setQtWidth(Number(e.target.value))}
+                          onCommit={setQtWidth}
                           className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
                         />
                       </div>
                       <div>
-                        <label className="block text-[10px] text-[#949BA8] mb-0.5">Profundidade (m)</label>
-                        <input
-                          type="number"
-                          step="0.1"
+                        <label className="block text-[10px] text-[#949BA8] mb-0.5">
+                          Profundidade (m) <span className="text-[#64748B]">(mín 3,6)</span>
+                        </label>
+                        <NumericInput
                           min={3.6}
+                          max={25}
                           value={qtDepth}
-                          onChange={(e) => setQtDepth(Number(e.target.value))}
+                          onCommit={setQtDepth}
                           className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
                         />
                       </div>
                       <div>
-                        <label className="block text-[10px] text-[#949BA8] mb-0.5">Pé-Direito (m)</label>
-                        <input
-                          type="number"
-                          step="0.1"
+                        <label className="block text-[10px] text-[#949BA8] mb-0.5">
+                          Pé-Direito (m) <span className="text-[#64748B]">(mín 2,4)</span>
+                        </label>
+                        <NumericInput
                           min={2.4}
+                          max={6.0}
                           value={qtCeiling}
-                          onChange={(e) => setQtCeiling(Number(e.target.value))}
+                          onCommit={(v) => {
+                            setQtCeiling(v);
+                            if (v < 3.0) setQtMezzanine(false);
+                          }}
                           className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
                         />
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-3 gap-2.5">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                       <div>
                         <label className="block text-[10px] text-[#949BA8] mb-0.5">Quartos</label>
                         <select
@@ -1253,7 +1425,7 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
                         </select>
                       </div>
                       <div>
-                        <label className="block text-[10px] text-[#949BA8] mb-0.5">Entrada</label>
+                        <label className="block text-[10px] text-[#949BA8] mb-0.5">Entrada (P1)</label>
                         <select
                           value={qtEntrySide}
                           onChange={(e) => setQtEntrySide(e.target.value as EntrySide)}
@@ -1277,7 +1449,26 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
                           <option value="drywall">Drywall (9,5cm)</option>
                         </select>
                       </div>
+                      <div>
+                        <label className="block text-[10px] text-[#949BA8] mb-0.5">Instalações</label>
+                        <select
+                          value={qtMepProfile}
+                          onChange={(e) =>
+                            setQtMepProfile(e.target.value as 'simples' | 'completo')
+                          }
+                          className="w-full px-2 py-1 text-xs rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                        >
+                          <option value="simples">Simples (Enxuto)</option>
+                          <option value="completo">Completo (AQ/AC)</option>
+                        </select>
+                      </div>
                     </div>
+
+                    {qtBedrooms >= 1 && (qtWidth < 3.6 || qtDepth < 4.5) && (
+                      <div className="rounded border border-amber-500/40 bg-amber-950/25 px-2.5 py-1.5 text-[11px] text-amber-200">
+                        Para separar 1 Quarto com parede e porta de 70cm, recomenda-se largura ≥ 3,60 m e profundidade ≥ 4,50 m.
+                      </div>
+                    )}
 
                     <div className="flex flex-wrap items-center gap-4 text-xs text-[#C4C9D4]">
                       <label className="inline-flex items-center gap-1.5 cursor-pointer">
@@ -1286,7 +1477,23 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
                           checked={qtLaundry}
                           onChange={(e) => setQtLaundry(e.target.checked)}
                         />
-                        Incluir Área de Serviço
+                        Área de Serviço (Máq. Lavar)
+                      </label>
+                      <label className="inline-flex items-center gap-1.5 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={qtBalcony}
+                          onChange={(e) => setQtBalcony(e.target.checked)}
+                        />
+                        Varanda
+                      </label>
+                      <label className="inline-flex items-center gap-1.5 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={qtAccessible}
+                          onChange={(e) => setQtAccessible(e.target.checked)}
+                        />
+                        Acessível NBR 9050
                       </label>
                       {qtCeiling >= 3.0 && (
                         <label className="inline-flex items-center gap-2 text-xs text-sky-300 cursor-pointer font-medium">
@@ -1295,7 +1502,7 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
                             checked={qtMezzanine}
                             onChange={(e) => setQtMezzanine(e.target.checked)}
                           />
-                          Incluir Mezanino 100% Interno (Dormitório acima · Sala/Coz/BWC embaixo)
+                          Incluir Mezanino 100% Interno
                         </label>
                       )}
                     </div>
@@ -1305,23 +1512,21 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
                         qtWidth,
                         qtDepth,
                         project.constructionMethod.externalWallThickness,
-                        false,
+                        qtBalcony,
                       );
                       return (
                         <div className="rounded border border-sky-500/40 bg-[#1B1E24] p-3 space-y-2.5">
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                             <div>
                               <label className="block text-[10px] font-semibold text-sky-200 mb-0.5">
-                                A quantos metros do chão fica o mezanino? (m)
+                                Altura do chão até o mezanino (m)
                               </label>
                               <div className="flex items-center gap-2">
-                                <input
-                                  type="number"
-                                  step="0.05"
+                                <NumericInput
                                   min={2.0}
                                   max={round2(Math.max(2.05, qtCeiling - 1.05))}
                                   value={qtMezzElev}
-                                  onChange={(e) => setQtMezzElev(Number(e.target.value))}
+                                  onCommit={setQtMezzElev}
                                   className="w-20 px-2 py-1 text-xs font-mono rounded bg-[#14161A] border border-[#2F7CF6] text-white"
                                 />
                                 <span className="text-[10px] font-mono text-[#949BA8]">
@@ -1342,6 +1547,58 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
                                 <option value="madeira_estrutural">Estrutura de Madeira Maciça</option>
                                 <option value="steel_deck">Metálica Steel Deck</option>
                                 <option value="concreto_armado">Concreto Armado</option>
+                              </select>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                            <div>
+                              <label className="block text-[10px] text-[#949BA8] mb-0.5">Localização</label>
+                              <select
+                                value={qtMezzZone}
+                                onChange={(e) => setQtMezzZone(e.target.value as MezzanineZone)}
+                                className="w-full px-1.5 py-1 text-[11px] rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                              >
+                                <option value="sobre_banho_cozinha">Sobre BWC + Coz.</option>
+                                <option value="fundos">Fundos</option>
+                                <option value="lateral_esquerda">Lat. Esquerda</option>
+                                <option value="lateral_direita">Lat. Direita</option>
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-[10px] text-[#949BA8] mb-0.5">Uso Superior</label>
+                              <select
+                                value={qtMezzUsage}
+                                onChange={(e) => setQtMezzUsage(e.target.value as MezzanineUsage)}
+                                className="w-full px-1.5 py-1 text-[11px] rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                              >
+                                <option value="dormitorio">Dormitório</option>
+                                <option value="dormitorio_home_office">Dorm. + Office</option>
+                                <option value="home_office">Home Office</option>
+                                <option value="deposito_estar">Depósito / Estar</option>
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-[10px] text-[#949BA8] mb-0.5">Escada</label>
+                              <select
+                                value={qtMezzStairLayout}
+                                onChange={(e) => setQtMezzStairLayout(e.target.value as MezzanineStairLayout)}
+                                className="w-full px-1.5 py-1 text-[11px] rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                              >
+                                <option value="reta">Lance Reto</option>
+                                <option value="em_l">Em L</option>
+                                <option value="caracol_compacta">Helicoidal</option>
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-[10px] text-[#949BA8] mb-0.5">Lado Escada</label>
+                              <select
+                                value={qtMezzStairSide}
+                                onChange={(e) => setQtMezzStairSide(e.target.value as 'esquerda' | 'direita')}
+                                className="w-full px-1.5 py-1 text-[11px] rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                              >
+                                <option value="direita">Direita</option>
+                                <option value="esquerda">Esquerda</option>
                               </select>
                             </div>
                           </div>
@@ -1391,23 +1648,19 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
                               </div>
                             ) : (
                               <div className="grid grid-cols-2 gap-2">
-                                <input
-                                  type="number"
-                                  step="0.1"
+                                <NumericInput
                                   min={1.0}
                                   max={qb.innerW}
                                   value={qtMezzCustomW}
-                                  onChange={(e) => setQtMezzCustomW(Number(e.target.value))}
+                                  onCommit={setQtMezzCustomW}
                                   aria-label="Largura mezanino"
                                   className="px-2 py-1 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
                                 />
-                                <input
-                                  type="number"
-                                  step="0.1"
+                                <NumericInput
                                   min={1.0}
                                   max={qb.innerD}
                                   value={qtMezzCustomD}
-                                  onChange={(e) => setQtMezzCustomD(Number(e.target.value))}
+                                  onCommit={setQtMezzCustomD}
                                   aria-label="Profundidade mezanino"
                                   className="px-2 py-1 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
                                 />
@@ -1418,35 +1671,158 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
                       );
                     })()}
 
-                    <div className="flex justify-end">
+                    <div className="flex items-center justify-between gap-2 pt-1">
+                      <span className="text-[11px] font-mono text-[#949BA8]">
+                        Área bruta: {round2(Math.max(2.8, qtWidth) * Math.max(3.6, qtDepth))} m²
+                      </span>
                       <button
                         type="submit"
                         className="px-3.5 py-1.5 text-xs font-semibold rounded bg-[#2F7CF6] text-white hover:bg-[#2567d4]"
                       >
-                        Salvar Tipologia e Usar na Implantação
+                        {editingUnitTypeId
+                          ? 'Salvar Alterações no Modelo'
+                          : 'Salvar Tipologia e Usar na Implantação'}
                       </button>
                     </div>
                   </form>
                 )}
 
                 {project.unitTypes.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5">
-                    {project.unitTypes.map((ut) => (
-                      <button
-                        key={ut.id}
-                        type="button"
-                        onClick={() =>
-                          updateImplantation((c) => ({ ...c, primaryUnitTypeId: ut.id }))
-                        }
-                        className={`px-2.5 py-1 text-xs rounded border font-mono transition ${
-                          (impConfig.primaryUnitTypeId || project.unitTypes[0]?.id) === ut.id
-                            ? 'border-[#2F7CF6] bg-[#2F7CF6]/20 text-white'
-                            : 'border-[#2A2F38] bg-[#14161A] text-[#C4C9D4]'
-                        }`}
-                      >
-                        {ut.code}: {ut.width}×{ut.depth}m ({round2(ut.width * ut.depth)}m²)
-                      </button>
-                    ))}
+                  <div className="space-y-2">
+                    {project.unitTypes.map((ut) => {
+                      const isPrimary =
+                        (impConfig.primaryUnitTypeId || project.unitTypes[0]?.id) === ut.id;
+                      const isEditing = editingUnitTypeId === ut.id && showQuickTypeForm;
+                      const placedCount = project.floors.reduce(
+                        (s, f) => s + f.units.filter((u) => u.unitTypeId === ut.id).length,
+                        0,
+                      );
+                      const entryLabel =
+                        ut.entrySide === 'frente'
+                          ? 'Frente'
+                          : ut.entrySide === 'lateral_esquerda'
+                            ? 'Lat. Esq.'
+                            : 'Lat. Dir.';
+                      return (
+                        <div
+                          key={ut.id}
+                          className={`rounded border p-2.5 transition ${
+                            isEditing
+                              ? 'border-sky-400 bg-sky-500/10'
+                              : isPrimary
+                                ? 'border-[#2F7CF6] bg-[#2F7CF6]/15'
+                                : 'border-[#2A2F38] bg-[#14161A]'
+                          }`}
+                        >
+                          <div className="flex flex-wrap items-start justify-between gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                updateImplantation((c) => ({ ...c, primaryUnitTypeId: ut.id }));
+                                onSelectUnitType?.(ut.id);
+                              }}
+                              className="text-left min-w-0 flex-1"
+                            >
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className="text-xs font-mono font-semibold text-white">
+                                  {ut.code}
+                                </span>
+                                <span className="text-xs text-[#C4C9D4] truncate">
+                                  — {ut.name}
+                                </span>
+                                {isPrimary && (
+                                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[#2F7CF6]/30 text-sky-200 border border-[#2F7CF6]/50">
+                                    Principal
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-[11px] font-mono text-[#949BA8] mt-1">
+                                {ut.width}×{ut.depth}m ({round2(ut.width * ut.depth)}m²) · PD{' '}
+                                {ut.ceilingHeight}m · Entrada: {entryLabel} ·{' '}
+                                {ut.bedrooms > 0 ? `${ut.bedrooms}Q` : 'Studio'}
+                                {ut.hasLaundry ? ' · A.S.' : ''}
+                                {ut.hasMezzanine ? ' · Mezanino' : ''} · {placedCount} unid.
+                              </div>
+                            </button>
+
+                            <div className="flex items-center gap-1 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => openEditQuickTypeForm(ut)}
+                                className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded border border-[#323844] bg-[#1B1E24] text-sky-200 hover:border-[#2F7CF6] hover:text-white"
+                              >
+                                <Pencil className="w-3 h-3" />
+                                Editar
+                              </button>
+                              {onNavigateModule && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    onSelectUnitType?.(ut.id);
+                                    onNavigateModule('planta2d');
+                                  }}
+                                  className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded border border-[#323844] bg-[#1B1E24] text-[#C4C9D4] hover:border-[#2F7CF6] hover:text-white"
+                                >
+                                  <PenTool className="w-3 h-3 text-[#2F7CF6]" />
+                                  Planta 2D
+                                </button>
+                              )}
+                              {confirmDeleteUtId === ut.id ? (
+                                <div className="inline-flex items-center gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (editingUnitTypeId === ut.id) {
+                                        setEditingUnitTypeId(null);
+                                        setShowQuickTypeForm(false);
+                                      }
+                                      onUpdateProject(
+                                        (prev) => deleteUnitTypeFromProject(prev, ut.id),
+                                        `Exclusão do modelo ${ut.code}`,
+                                      );
+                                      setConfirmDeleteUtId(null);
+                                    }}
+                                    className="px-2 py-1 text-[10px] font-semibold rounded bg-red-600 text-white hover:bg-red-500"
+                                  >
+                                    Confirmar
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmDeleteUtId(null)}
+                                    className="px-1.5 py-1 text-[10px] rounded border border-[#323844] text-[#949BA8]"
+                                  >
+                                    Não
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  aria-label={`Excluir modelo ${ut.code}`}
+                                  onClick={() => {
+                                    if (placedCount > 0) {
+                                      setConfirmDeleteUtId(ut.id);
+                                    } else {
+                                      if (editingUnitTypeId === ut.id) {
+                                        setEditingUnitTypeId(null);
+                                        setShowQuickTypeForm(false);
+                                      }
+                                      onUpdateProject(
+                                        (prev) => deleteUnitTypeFromProject(prev, ut.id),
+                                        `Exclusão do modelo ${ut.code}`,
+                                      );
+                                    }
+                                  }}
+                                  className="p-1 text-red-400 hover:text-red-300"
+                                  title="Excluir modelo"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -2387,23 +2763,21 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
                   <div className="grid grid-cols-3 gap-2">
                     <div>
                       <label className="block text-[10px] text-[#949BA8]">Largura (m)</label>
-                      <input
-                        type="number"
-                        step="0.1"
+                      <NumericInput
                         min={2.8}
+                        max={20}
                         value={customW}
-                        onChange={(e) => setCustomW(Number(e.target.value))}
+                        onCommit={setCustomW}
                         className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
                       />
                     </div>
                     <div>
                       <label className="block text-[10px] text-[#949BA8]">Profund. (m)</label>
-                      <input
-                        type="number"
-                        step="0.1"
+                      <NumericInput
                         min={3.6}
+                        max={25}
                         value={customD}
-                        onChange={(e) => setCustomD(Number(e.target.value))}
+                        onCommit={setCustomD}
                         className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
                       />
                     </div>
@@ -2842,6 +3216,44 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
                         strokeOpacity="0.4"
                         strokeWidth="0.04"
                       />
+
+                      {/* Entry door (P1) visual indicator on unit perimeter */}
+                      {(() => {
+                        const entryOp =
+                          ut.openings.find((o) => o.role === 'entrada') ??
+                          ut.openings.find((o) => o.type === 'porta');
+                        const entryWall = entryOp
+                          ? ut.walls.find((w) => w.id === entryOp.wallId)
+                          : undefined;
+                        if (!entryOp || !entryWall) return null;
+                        const localPos = getOpeningWorldPosition(entryWall, entryOp);
+                        const halfW = entryOp.width / 2;
+                        const dx = Math.cos(localPos.angleRad) * halfW;
+                        const dy = Math.sin(localPos.angleRad) * halfW;
+                        const wp1 = unitLocalToWorld(
+                          inst,
+                          ut,
+                          localPos.center.x - dx,
+                          localPos.center.y - dy,
+                        );
+                        const wp2 = unitLocalToWorld(
+                          inst,
+                          ut,
+                          localPos.center.x + dx,
+                          localPos.center.y + dy,
+                        );
+                        return (
+                          <line
+                            x1={wp1.x}
+                            y1={wp1.y}
+                            x2={wp2.x}
+                            y2={wp2.y}
+                            stroke="#34D399"
+                            strokeWidth="0.2"
+                            strokeLinecap="round"
+                          />
+                        );
+                      })()}
 
                       <text
                         x={rect.x + rect.width / 2}

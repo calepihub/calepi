@@ -547,12 +547,14 @@ test('Fixed door widths (80/60/70cm), all 3 entrySide orientations, Drywall SINA
 
 import {
   createDefaultImplantationConfig,
+  deleteUnitTypeFromProject,
   detectSharedWallsAndGaps,
   generateImplantationUnits,
   getLotBoundarySegments,
   normalizeSiteData,
   replicateGroundFloorToAllFloors,
   setProjectFloorCount,
+  updateUnitTypeInProject,
   validateImplantation,
 } from './implantation';
 import { generateTechnicalSheetPDFBlob } from './exporters';
@@ -1666,6 +1668,93 @@ test('Floor count scaling and ground-floor unit replication work accurately acro
   const qty = calculateQuantities(p2);
   assert.equal(qty.summary.totalUnits, 8);
 });
+
+test('Typology edit & delete helpers preserve UnitInstance linkage across floors and clean up orphaned references', () => {
+  const utA = makeQuickUnitType('TIPO-A', 4.0, 5.0, 'frente');
+  const utB = makeQuickUnitType('TIPO-B', 3.8, 4.8, 'lateral_direita');
+  const blank = createBlankProject({
+    name: 'Residencial Edição Tipologia',
+    client: '',
+    municipality: 'Rio de Janeiro',
+    state: 'RJ',
+    front: 14,
+    depth: 26,
+    floorsCount: 2,
+    methodId: 'alvenaria_convencional',
+  });
+
+  const cfg: ImplantationConfig = {
+    ...createDefaultImplantationConfig({ ...blank, unitTypes: [utA, utB] }),
+    primaryUnitTypeId: utA.id,
+    primaryZone: 'lado_esquerdo',
+    layoutPattern: 'sequencia',
+    totalUnitsTarget: 3,
+    couplingMode: 'geminadas',
+  };
+  const baseWithUnits = autoDistributeUnitsAcrossFloors(
+    { ...blank, unitTypes: [utA, utB], implantation: cfg },
+    utA.id,
+  );
+
+  // Also place one utB instance manually on ground floor
+  const extraBInstance = {
+    id: 'inst-b-1',
+    unitNumber: '199',
+    unitTypeId: utB.id,
+    floorId: baseWithUnits.floors[0].id,
+    x: 8.5,
+    y: 3.0,
+    rotationDeg: 0,
+    mirrored: false,
+  };
+  const projWithBoth: Project = {
+    ...baseWithUnits,
+    floors: baseWithUnits.floors.map((fl, i) =>
+      i === 0 ? { ...fl, units: [...fl.units, extraBInstance] } : fl,
+    ),
+  };
+
+  // Edit utA preserving id -> all floors stay linked and quantities update
+  const regeneratedUtA = generateParametricUnitLayout({
+    id: utA.id,
+    code: 'TIPO-A1',
+    name: 'Kitnet Ampliada',
+    width: 4.5,
+    depth: 5.5,
+    ceilingHeight: 2.9,
+    bedrooms: 0,
+    hasLaundry: true,
+    hasBalcony: false,
+    hasMezzanine: false,
+    accessible: false,
+    extWallThickness: 0.15,
+    intWallThickness: 0.1,
+    constructionSystem: 'alvenaria_convencional',
+    entrySide: 'lateral_esquerda',
+    internalPartitionType: 'alvenaria',
+  });
+  const afterUpdate = updateUnitTypeInProject(projWithBoth, regeneratedUtA);
+  assert.equal(afterUpdate.unitTypes.length, 2);
+  const updatedA = afterUpdate.unitTypes.find((u) => u.id === utA.id)!;
+  assert.equal(updatedA.code, 'TIPO-A1');
+  assert.equal(updatedA.width, 4.5);
+  assert.equal(updatedA.depth, 5.5);
+  assert.equal(updatedA.entrySide, 'lateral_esquerda');
+  assert.equal(afterUpdate.implantation?.primaryUnitTypeId, utA.id);
+  const qtyAfterUpdate = calculateQuantities(afterUpdate);
+  assert.ok(qtyAfterUpdate.summary.totalPrivateAreaM2 > calculateQuantities(projWithBoth).summary.totalPrivateAreaM2);
+
+  // Delete utA -> removes utA, removes floor instances pointing to utA, keeps utB instance, falls back primaryUnitTypeId to utB
+  const afterDelete = deleteUnitTypeFromProject(afterUpdate, utA.id);
+  assert.equal(afterDelete.unitTypes.length, 1);
+  assert.equal(afterDelete.unitTypes[0].id, utB.id);
+  assert.equal(afterDelete.implantation?.primaryUnitTypeId, utB.id);
+  const remainingUnits = afterDelete.floors.flatMap((f) => f.units);
+  assert.equal(remainingUnits.length, 1);
+  assert.equal(remainingUnits[0].id, 'inst-b-1');
+  assert.equal(remainingUnits[0].unitTypeId, utB.id);
+});
+
 
 
 

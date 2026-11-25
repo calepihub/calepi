@@ -1257,6 +1257,7 @@ export function App() {
                     project={activeProject}
                     onUpdateProject={handleUpdateProject}
                     onNavigateModule={navigateFromModule}
+                    onSelectUnitType={setSelectedUnitTypeId}
                   />
                 </div>
               )}

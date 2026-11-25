@@ -1513,3 +1513,64 @@ export function replicateGroundFloorToAllFloors(project: Project): Project {
   };
 }
 
+/**
+ * Updates an existing UnitType in place (preserving its id so all implanted floor units
+ * stay linked and update across 2D, 3D, MEP, and quantities).
+ */
+export function updateUnitTypeInProject(
+  project: Project,
+  updatedUt: UnitType,
+): Project {
+  const exists = project.unitTypes.some((u) => u.id === updatedUt.id);
+  const nextUnitTypes = exists
+    ? project.unitTypes.map((u) => (u.id === updatedUt.id ? updatedUt : u))
+    : [...project.unitTypes, updatedUt];
+
+  const baseCfg = project.implantation ?? createDefaultImplantationConfig(project);
+  return {
+    ...project,
+    unitTypes: nextUnitTypes,
+    implantation: {
+      ...baseCfg,
+      primaryUnitTypeId: baseCfg.primaryUnitTypeId || updatedUt.id,
+    },
+  };
+}
+
+/**
+ * Removes a UnitType and cleans up any floor instances and implantation references
+ * pointing to it so no broken references remain.
+ */
+export function deleteUnitTypeFromProject(
+  project: Project,
+  unitTypeId: string,
+): Project {
+  const nextUnitTypes = project.unitTypes.filter((u) => u.id !== unitTypeId);
+  const fallbackUtId = nextUnitTypes[0]?.id;
+
+  const nextFloors = project.floors.map((fl) => ({
+    ...fl,
+    units: fl.units.filter((u) => u.unitTypeId !== unitTypeId),
+  }));
+
+  const baseCfg = project.implantation;
+  const nextImplantation = baseCfg
+    ? {
+        ...baseCfg,
+        primaryUnitTypeId:
+          baseCfg.primaryUnitTypeId === unitTypeId ? fallbackUtId : baseCfg.primaryUnitTypeId,
+        groups: baseCfg.groups.map((g) =>
+          g.unitTypeId === unitTypeId
+            ? { ...g, unitTypeId: fallbackUtId ?? '' }
+            : g,
+        ),
+      }
+    : undefined;
+
+  return {
+    ...project,
+    unitTypes: nextUnitTypes,
+    floors: nextFloors,
+    ...(nextImplantation ? { implantation: nextImplantation } : {}),
+  };
+}

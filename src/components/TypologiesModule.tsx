@@ -1,7 +1,12 @@
 import React, { useState } from 'react';
 import { ArrowRight, Copy, FlipHorizontal2, Layers, LayoutGrid, Minus, Plus, Trash2, Wand2 } from 'lucide-react';
 import { getRoomArea, getRoomPerimeter, getUnitUsefulArea, round2 } from '../engine/geometry';
-import { replicateGroundFloorToAllFloors, setProjectFloorCount } from '../engine/implantation';
+import {
+  deleteUnitTypeFromProject,
+  replicateGroundFloorToAllFloors,
+  setProjectFloorCount,
+  updateUnitTypeInProject,
+} from '../engine/implantation';
 import {
   autoDistributeUnitsAcrossFloors,
   computeBlondelStairSpec,
@@ -9,6 +14,7 @@ import {
   generateParametricUnitLayout,
   nextId,
 } from '../engine/parametricGenerator';
+import { NumericInput } from './NumericInput';
 import type {
   EntrySide,
   InternalPartitionType,
@@ -80,6 +86,7 @@ export const TypologiesModule: React.FC<TypologiesModuleProps> = ({
   const [newMezzStairSide, setNewMezzStairSide] = useState<'esquerda' | 'direita'>('direita');
 
   const [distNotice, setDistNotice] = useState<string | null>(null);
+  const [confirmDeleteActiveUtId, setConfirmDeleteActiveUtId] = useState<string | null>(null);
 
   const canNewMezzanine = newCeilingHeight >= 3.0;
   const newInteriorBounds = computeMezzanineInteriorBounds(
@@ -487,36 +494,31 @@ export const TypologiesModule: React.FC<TypologiesModuleProps> = ({
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               <div>
                 <label className="block text-[11px] text-[#949BA8] mb-1">Largura (m)</label>
-                <input
-                  type="number"
-                  step="0.1"
+                <NumericInput
                   min={2.8}
+                  max={20}
                   value={newWidth}
-                  onChange={(e) => setNewWidth(Number(e.target.value))}
+                  onCommit={setNewWidth}
                   className="w-full px-2 py-1.5 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
                 />
               </div>
               <div>
                 <label className="block text-[11px] text-[#949BA8] mb-1">Comp. (m)</label>
-                <input
-                  type="number"
-                  step="0.1"
+                <NumericInput
                   min={3.6}
+                  max={25}
                   value={newDepth}
-                  onChange={(e) => setNewDepth(Number(e.target.value))}
+                  onCommit={setNewDepth}
                   className="w-full px-2 py-1.5 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
                 />
               </div>
               <div>
                 <label className="block text-[11px] text-[#949BA8] mb-1">Pé-direito (m)</label>
-                <input
-                  type="number"
-                  step="0.05"
+                <NumericInput
                   min={2.4}
                   max={6.0}
                   value={newCeilingHeight}
-                  onChange={(e) => {
-                    const val = Number(e.target.value);
+                  onCommit={(val) => {
                     setNewCeilingHeight(val);
                     if (val < 3.0) {
                       setNewMezzEnabled(false);
@@ -527,12 +529,12 @@ export const TypologiesModule: React.FC<TypologiesModuleProps> = ({
               </div>
               <div>
                 <label className="block text-[11px] text-[#949BA8] mb-1">Quartos</label>
-                <input
-                  type="number"
+                <NumericInput
                   min={0}
                   max={3}
+                  integerOnly
                   value={newBedrooms}
-                  onChange={(e) => setNewBedrooms(Number(e.target.value))}
+                  onCommit={setNewBedrooms}
                   className="w-full px-2 py-1.5 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
                 />
               </div>
@@ -908,10 +910,35 @@ export const TypologiesModule: React.FC<TypologiesModuleProps> = ({
           {activeUt && (
             <>
               <div className="rounded-lg border border-[#2A2F38] bg-[#1B1E24] p-4 space-y-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <h2 className="text-base font-semibold text-white">{activeUt.name}</h2>
-                    <div className="text-xs text-[#949BA8] font-mono mt-0.5 tabular-nums">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <input
+                        type="text"
+                        aria-label="Código da tipologia"
+                        value={activeUt.code}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          onUpdateProject((prev) =>
+                            updateUnitTypeInProject(prev, { ...activeUt, code: val }),
+                          );
+                        }}
+                        className="w-28 px-2 py-1 text-xs font-mono font-semibold rounded bg-[#14161A] border border-[#2A2F38] text-[#60A5FA]"
+                      />
+                      <input
+                        type="text"
+                        aria-label="Nome da tipologia"
+                        value={activeUt.name}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          onUpdateProject((prev) =>
+                            updateUnitTypeInProject(prev, { ...activeUt, name: val }),
+                          );
+                        }}
+                        className="min-w-[200px] flex-1 px-2.5 py-1 text-sm font-semibold rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                      />
+                    </div>
+                    <div className="text-xs text-[#949BA8] font-mono tabular-nums">
                       Área Bruta: {round2(activeUt.width * activeUt.depth)} m² · Área Útil Ambientes:{' '}
                       {getUnitUsefulArea(activeUt)} m² · Pé-direito: {activeUt.ceilingHeight} m
                     </div>
@@ -941,20 +968,56 @@ export const TypologiesModule: React.FC<TypologiesModuleProps> = ({
                       <Copy className="w-3.5 h-3.5" />
                       Duplicar
                     </button>
+                    {confirmDeleteActiveUtId === activeUt.id ? (
+                      <div className="inline-flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const nextIdAfter =
+                              project.unitTypes.find((u) => u.id !== activeUt.id)?.id ?? '';
+                            onUpdateProject(
+                              (prev) => deleteUnitTypeFromProject(prev, activeUt.id),
+                              `Exclusão da tipologia ${activeUt.code}`,
+                            );
+                            onSelectUnitType(nextIdAfter);
+                            setConfirmDeleteActiveUtId(null);
+                          }}
+                          className="px-2.5 py-1.5 text-xs font-semibold rounded bg-red-600 text-white hover:bg-red-500"
+                        >
+                          Confirmar Exclusão
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDeleteActiveUtId(null)}
+                          className="px-2 py-1.5 text-xs rounded border border-[#323844] text-[#949BA8]"
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDeleteActiveUtId(activeUt.id)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs rounded border border-red-500/40 bg-red-950/20 text-red-300 hover:bg-red-950/40"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        Excluir
+                      </button>
+                    )}
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
                   <div>
-                    <label className="block text-[11px] text-[#949BA8] mb-1">Largura (m)</label>
-                    <input
-                      type="number"
-                      step="0.1"
+                    <label className="block text-[11px] text-[#949BA8] mb-1">
+                      Largura (m) <span className="text-[#64748B]">(mín 2,8)</span>
+                    </label>
+                    <NumericInput
                       min={2.8}
+                      max={20}
                       value={activeUt.width}
-                      onChange={(e) => {
-                        const val = Number(e.target.value);
-                        if (Number.isFinite(val) && val >= 2.8) {
+                      onCommit={(val) => {
+                        if (val !== activeUt.width) {
                           handleRegenerateCurrent({
                             ...activeUt,
                             width: val,
@@ -966,15 +1029,15 @@ export const TypologiesModule: React.FC<TypologiesModuleProps> = ({
                     />
                   </div>
                   <div>
-                    <label className="block text-[11px] text-[#949BA8] mb-1">Comprimento (m)</label>
-                    <input
-                      type="number"
-                      step="0.1"
+                    <label className="block text-[11px] text-[#949BA8] mb-1">
+                      Comprimento (m) <span className="text-[#64748B]">(mín 3,6)</span>
+                    </label>
+                    <NumericInput
                       min={3.6}
+                      max={25}
                       value={activeUt.depth}
-                      onChange={(e) => {
-                        const val = Number(e.target.value);
-                        if (Number.isFinite(val) && val >= 3.6) {
+                      onCommit={(val) => {
+                        if (val !== activeUt.depth) {
                           handleRegenerateCurrent({
                             ...activeUt,
                             depth: val,
@@ -987,15 +1050,12 @@ export const TypologiesModule: React.FC<TypologiesModuleProps> = ({
                   </div>
                   <div>
                     <label className="block text-[11px] text-[#949BA8] mb-1">Pé-direito (m)</label>
-                    <input
-                      type="number"
-                      step="0.05"
+                    <NumericInput
                       min={2.4}
                       max={6.0}
                       value={activeUt.ceilingHeight}
-                      onChange={(e) => {
-                        const val = Number(e.target.value);
-                        if (Number.isFinite(val) && val >= 2.4 && val <= 6.0) {
+                      onCommit={(val) => {
+                        if (val !== activeUt.ceilingHeight) {
                           handleRegenerateCurrent({
                             ...activeUt,
                             ceilingHeight: val,
@@ -1006,6 +1066,23 @@ export const TypologiesModule: React.FC<TypologiesModuleProps> = ({
                       }}
                       className="w-full px-2 py-1.5 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
                     />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-[#949BA8] mb-1">Quartos</label>
+                    <select
+                      value={activeUt.bedrooms}
+                      onChange={(e) => {
+                        const val = Number(e.target.value);
+                        handleRegenerateCurrent({
+                          ...activeUt,
+                          bedrooms: val,
+                        });
+                      }}
+                      className="w-full px-2 py-1.5 text-xs rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                    >
+                      <option value={0}>Studio (Integrado)</option>
+                      <option value={1}>1 Quarto (Porta 70cm)</option>
+                    </select>
                   </div>
                   <div>
                     <label className="block text-[11px] text-[#949BA8] mb-1">Padrão Acabamento</label>
@@ -1028,24 +1105,48 @@ export const TypologiesModule: React.FC<TypologiesModuleProps> = ({
                       <option value="personalizado">Personalizado</option>
                     </select>
                   </div>
-                  <div className="flex items-end">
-                    <label className="inline-flex items-center gap-1.5 text-xs text-[#E6E9EF] pb-1.5">
-                      <input
-                        type="checkbox"
-                        checked={activeUt.accessible}
-                        onChange={(e) => {
-                          const checked = e.target.checked;
-                          onUpdateProject((prev) => ({
-                            ...prev,
-                            unitTypes: prev.unitTypes.map((t) =>
-                              t.id === activeUt.id ? { ...t, accessible: checked } : t,
-                            ),
-                          }));
-                        }}
-                      />
-                      Acessível
-                    </label>
-                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-5 text-xs text-[#E6E9EF]">
+                  <label className="inline-flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={activeUt.hasLaundry}
+                      onChange={(e) =>
+                        handleRegenerateCurrent({
+                          ...activeUt,
+                          hasLaundry: e.target.checked,
+                        })
+                      }
+                    />
+                    Área de Serviço (Máq. Lavar)
+                  </label>
+                  <label className="inline-flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={activeUt.hasBalcony}
+                      onChange={(e) =>
+                        handleRegenerateCurrent({
+                          ...activeUt,
+                          hasBalcony: e.target.checked,
+                        })
+                      }
+                    />
+                    Varanda
+                  </label>
+                  <label className="inline-flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={activeUt.accessible}
+                      onChange={(e) =>
+                        handleRegenerateCurrent({
+                          ...activeUt,
+                          accessible: e.target.checked,
+                        })
+                      }
+                    />
+                    Acessível NBR 9050
+                  </label>
                 </div>
 
                 {/* Entrada Principal, Divisórias Internas & Perfil MEP da Tipologia Ativa */}
@@ -1182,18 +1283,16 @@ export const TypologiesModule: React.FC<TypologiesModuleProps> = ({
                                   A quantos metros do chão fica o mezanino?
                                 </label>
                                 <div className="flex items-center gap-2">
-                                  <input
-                                    type="number"
-                                    step="0.05"
+                                  <NumericInput
                                     min={2.0}
                                     max={round2(Math.max(2.05, activeUt.ceilingHeight - 1.05))}
                                     value={activeUt.mezzanine.elevationM}
-                                    onChange={(e) =>
+                                    onCommit={(val) =>
                                       handleRegenerateCurrent({
                                         ...activeUt,
                                         mezzanine: {
                                           ...activeUt.mezzanine!,
-                                          elevationM: Number(e.target.value),
+                                          elevationM: val,
                                         },
                                       })
                                     }
@@ -1272,77 +1371,73 @@ export const TypologiesModule: React.FC<TypologiesModuleProps> = ({
                                         {pct}%
                                       </button>
                                     ))}
-                                    <input
-                                      type="number"
-                                      min={10}
-                                      max={65}
-                                      value={Math.round(activeUt.mezzanine.coverageRatio * 100)}
-                                      onChange={(e) =>
-                                        handleRegenerateCurrent({
-                                          ...activeUt,
-                                          mezzanine: {
-                                            ...activeUt.mezzanine!,
-                                            sizingMode: 'percent',
-                                            coverageRatio: Math.min(
-                                              0.65,
-                                              Math.max(0.1, Number(e.target.value) / 100),
-                                            ),
-                                          },
-                                        })
-                                      }
-                                      className="w-16 px-2 py-1 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                                    />
-                                  </div>
-                                ) : (
-                                  <div className="grid grid-cols-2 gap-2">
-                                    <div>
-                                      <label className="block text-[9.5px] text-[#949BA8]">
-                                        Largura (máx {activeBounds.innerW.toFixed(2)}m)
-                                      </label>
-                                      <input
-                                        type="number"
-                                        step="0.1"
-                                        min={0.9}
-                                        max={activeBounds.innerW}
-                                        value={activeUt.mezzanine.customWidthM ?? activeUt.mezzanine.width}
-                                        onChange={(e) =>
+                                      <NumericInput
+                                        min={10}
+                                        max={65}
+                                        integerOnly
+                                        value={Math.round(activeUt.mezzanine.coverageRatio * 100)}
+                                        onCommit={(val) =>
                                           handleRegenerateCurrent({
                                             ...activeUt,
                                             mezzanine: {
                                               ...activeUt.mezzanine!,
-                                              sizingMode: 'dimensions',
-                                              customWidthM: Number(e.target.value),
+                                              sizingMode: 'percent',
+                                              coverageRatio: Math.min(
+                                                0.65,
+                                                Math.max(0.1, val / 100),
+                                              ),
                                             },
                                           })
                                         }
-                                        className="w-full px-2 py-1 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                                        className="w-16 px-2 py-1 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
                                       />
                                     </div>
-                                    <div>
-                                      <label className="block text-[9.5px] text-[#949BA8]">
-                                        Profundidade (máx {activeBounds.innerD.toFixed(2)}m)
-                                      </label>
-                                      <input
-                                        type="number"
-                                        step="0.1"
-                                        min={0.9}
-                                        max={activeBounds.innerD}
-                                        value={activeUt.mezzanine.customDepthM ?? activeUt.mezzanine.depth}
-                                        onChange={(e) =>
-                                          handleRegenerateCurrent({
-                                            ...activeUt,
-                                            mezzanine: {
-                                              ...activeUt.mezzanine!,
-                                              sizingMode: 'dimensions',
-                                              customDepthM: Number(e.target.value),
-                                            },
-                                          })
-                                        }
-                                        className="w-full px-2 py-1 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                                      />
+                                  ) : (
+                                    <div className="grid grid-cols-2 gap-2">
+                                      <div>
+                                        <label className="block text-[9.5px] text-[#949BA8]">
+                                          Largura (máx {activeBounds.innerW.toFixed(2)}m)
+                                        </label>
+                                        <NumericInput
+                                          min={0.9}
+                                          max={activeBounds.innerW}
+                                          value={activeUt.mezzanine.customWidthM ?? activeUt.mezzanine.width}
+                                          onCommit={(val) =>
+                                            handleRegenerateCurrent({
+                                              ...activeUt,
+                                              mezzanine: {
+                                                ...activeUt.mezzanine!,
+                                                sizingMode: 'dimensions',
+                                                customWidthM: val,
+                                              },
+                                            })
+                                          }
+                                          className="w-full px-2 py-1 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="block text-[9.5px] text-[#949BA8]">
+                                          Profundidade (máx {activeBounds.innerD.toFixed(2)}m)
+                                        </label>
+                                        <NumericInput
+                                          min={0.9}
+                                          max={activeBounds.innerD}
+                                          value={activeUt.mezzanine.customDepthM ?? activeUt.mezzanine.depth}
+                                          onCommit={(val) =>
+                                            handleRegenerateCurrent({
+                                              ...activeUt,
+                                              mezzanine: {
+                                                ...activeUt.mezzanine!,
+                                                sizingMode: 'dimensions',
+                                                customDepthM: val,
+                                              },
+                                            })
+                                          }
+                                          className="w-full px-2 py-1 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                                        />
+                                      </div>
                                     </div>
-                                  </div>
-                                )}
+                                  )}
                               </div>
                             </div>
 
@@ -1631,13 +1726,11 @@ export const TypologiesModule: React.FC<TypologiesModuleProps> = ({
                       <div className="grid grid-cols-2 sm:grid-cols-6 gap-2">
                         <div>
                           <label className="block text-[10px] text-[#949BA8]">Largura (m)</label>
-                          <input
-                            type="number"
-                            step="0.05"
+                          <NumericInput
                             min={0.6}
+                            max={20}
                             value={rm.width}
-                            onChange={(e) => {
-                              const val = Number(e.target.value);
+                            onCommit={(val) => {
                               onUpdateProject((prev) => ({
                                 ...prev,
                                 unitTypes: prev.unitTypes.map((t) =>
@@ -1657,13 +1750,11 @@ export const TypologiesModule: React.FC<TypologiesModuleProps> = ({
                         </div>
                         <div>
                           <label className="block text-[10px] text-[#949BA8]">Comp. (m)</label>
-                          <input
-                            type="number"
-                            step="0.05"
+                          <NumericInput
                             min={0.6}
+                            max={25}
                             value={rm.depth}
-                            onChange={(e) => {
-                              const val = Number(e.target.value);
+                            onCommit={(val) => {
                               onUpdateProject((prev) => ({
                                 ...prev,
                                 unitTypes: prev.unitTypes.map((t) =>
