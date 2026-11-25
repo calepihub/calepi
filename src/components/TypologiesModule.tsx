@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Copy, FlipHorizontal2, LayoutGrid, Plus, Trash2, Wand2 } from 'lucide-react';
+import { ArrowRight, Copy, FlipHorizontal2, Layers, LayoutGrid, Minus, Plus, Trash2, Wand2 } from 'lucide-react';
 import { getRoomArea, getRoomPerimeter, getUnitUsefulArea, round2 } from '../engine/geometry';
+import { replicateGroundFloorToAllFloors, setProjectFloorCount } from '../engine/implantation';
 import {
   autoDistributeUnitsAcrossFloors,
   computeBlondelStairSpec,
@@ -27,6 +28,7 @@ interface TypologiesModuleProps {
   onSelectUnitType: (id: string) => void;
   onUpdateProject: (updater: (prev: Project) => Project, revisionNote?: string) => void;
   onOpen2DEditor: () => void;
+  onOpenImplantation?: () => void;
 }
 
 const PRESETS = [
@@ -44,6 +46,7 @@ export const TypologiesModule: React.FC<TypologiesModuleProps> = ({
   onSelectUnitType,
   onUpdateProject,
   onOpen2DEditor,
+  onOpenImplantation,
 }) => {
   const activeUt =
     project.unitTypes.find((u) => u.id === selectedUnitTypeId) ?? project.unitTypes[0];
@@ -302,6 +305,95 @@ export const TypologiesModule: React.FC<TypologiesModuleProps> = ({
           {distNotice}
         </div>
       )}
+
+      {/* Andares (Pavimentos) & Repetições Quick Bar */}
+      <div className="rounded-lg border border-[#2A2F38] bg-[#1B1E24] px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-white">
+            <Layers className="w-4 h-4 text-[#2F7CF6]" />
+            <span>Andares (Pavimentos):</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              disabled={project.floors.length <= 1}
+              onClick={() =>
+                onUpdateProject(
+                  (prev) => setProjectFloorCount(prev, prev.floors.length - 1, true),
+                  'Redução da quantidade de pavimentos',
+                )
+              }
+              aria-label="Diminuir andares"
+              className="p-1.5 rounded border border-[#2A2F38] bg-[#14161A] text-slate-200 hover:border-[#2F7CF6] disabled:opacity-35"
+            >
+              <Minus className="w-3.5 h-3.5" />
+            </button>
+            <input
+              type="number"
+              min={1}
+              max={20}
+              value={project.floors.length}
+              aria-label="Quantidade de andares no projeto"
+              onChange={(e) => {
+                const n = Number(e.target.value);
+                if (Number.isFinite(n) && n >= 1) {
+                  onUpdateProject(
+                    (prev) => setProjectFloorCount(prev, n, true),
+                    `Ajuste de pavimentos para ${Math.min(20, Math.max(1, Math.round(n)))}`,
+                  );
+                }
+              }}
+              className="w-14 px-2 py-1 text-center text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
+            />
+            <button
+              type="button"
+              disabled={project.floors.length >= 20}
+              onClick={() =>
+                onUpdateProject(
+                  (prev) => setProjectFloorCount(prev, prev.floors.length + 1, true),
+                  'Adição de pavimento com replicação',
+                )
+              }
+              aria-label="Aumentar andares"
+              className="p-1.5 rounded border border-[#2A2F38] bg-[#14161A] text-slate-200 hover:border-[#2F7CF6] disabled:opacity-35"
+            >
+              <Plus className="w-3.5 h-3.5" />
+            </button>
+          </div>
+          <span className="text-xs font-mono text-sky-300">
+            {project.floors.reduce((s, f) => s + f.units.length, 0)} kitnet(s) implantada(s) em{' '}
+            {project.floors.length} pavimento(s)
+          </span>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          {project.floors.length > 1 && (project.floors[0]?.units.length ?? 0) > 0 && (
+            <button
+              type="button"
+              onClick={() =>
+                onUpdateProject(
+                  (prev) => replicateGroundFloorToAllFloors(prev),
+                  'Replicação do Térreo nos andares superiores',
+                )
+              }
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded border border-emerald-500/40 bg-emerald-600/15 text-emerald-200 hover:bg-emerald-600/30"
+            >
+              <Copy className="w-3.5 h-3.5" />
+              Replicar Térreo nos {project.floors.length - 1} andares
+            </button>
+          )}
+          {onOpenImplantation && (
+            <button
+              type="button"
+              onClick={onOpenImplantation}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded border border-[#2F7CF6]/50 bg-[#2F7CF6]/15 text-sky-200 hover:bg-[#2F7CF6]/30"
+            >
+              Repetições &amp; Implantação no Lote
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+      </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Left: Typologies list & Generator */}

@@ -551,6 +551,8 @@ import {
   generateImplantationUnits,
   getLotBoundarySegments,
   normalizeSiteData,
+  replicateGroundFloorToAllFloors,
+  setProjectFloorCount,
   validateImplantation,
 } from './implantation';
 import { generateTechnicalSheetPDFBlob } from './exporters';
@@ -1601,5 +1603,69 @@ test('Any door or window can be dragged/repositioned onto any external or intern
   const dxf = generateProjectDXF(proj, 0);
   assert.ok(dxf.includes('P1') && dxf.includes('J1'));
 });
+
+test('Floor count scaling and ground-floor unit replication work accurately across pavimentos', () => {
+  const ut = makeQuickUnitType('KIT-REP', 4.0, 5.5, 'frente');
+  const blank = createBlankProject({
+    name: 'Residencial Multi-Andares',
+    client: '',
+    municipality: 'Rio de Janeiro',
+    state: 'RJ',
+    front: 14,
+    depth: 25,
+    floorsCount: 1,
+    methodId: 'alvenaria_convencional',
+  });
+  const baseProj: Project = { ...blank, unitTypes: [ut] };
+  const cfg: ImplantationConfig = {
+    ...createDefaultImplantationConfig(baseProj),
+    primaryZone: 'lado_esquerdo',
+    layoutPattern: 'sequencia',
+    totalUnitsTarget: 3,
+    couplingMode: 'geminadas',
+  };
+  const groundUnits = generateImplantationUnits(baseProj, cfg, baseProj.floors[0].id);
+  const p1: Project = {
+    ...baseProj,
+    implantation: cfg,
+    floors: [{ ...baseProj.floors[0], units: groundUnits }],
+  };
+  assert.equal(p1.floors.length, 1);
+  assert.equal(p1.floors[0].units.length, 3);
+
+  // Scale up to 3 floors with automatic ground-floor replication
+  const p3 = setProjectFloorCount(p1, 3, true);
+  assert.equal(p3.floors.length, 3);
+  assert.equal(p3.floors[0].name, 'Térreo');
+  assert.equal(p3.floors[1].name, '1º Pavimento');
+  assert.equal(p3.floors[2].name, '2º Pavimento');
+  assert.equal(p3.floors[0].elevation, 0);
+  assert.ok(p3.floors[1].elevation > 0 && p3.floors[2].elevation > p3.floors[1].elevation);
+  assert.equal(p3.floors[1].units.length, 3);
+  assert.equal(p3.floors[2].units.length, 3);
+  assert.equal(p3.floors[1].units[0].floorId, p3.floors[1].id);
+  assert.equal(p3.floors[1].units[0].unitNumber, '201');
+  assert.equal(p3.floors[2].units[2].unitNumber, '303');
+
+  // Modify ground floor to 4 units and replicate explicitly to upper floors
+  const cfg4 = { ...cfg, totalUnitsTarget: 4 };
+  const ground4 = generateImplantationUnits(p3, cfg4, p3.floors[0].id);
+  const p3ModifiedGround: Project = {
+    ...p3,
+    floors: p3.floors.map((fl, i) => (i === 0 ? { ...fl, units: ground4 } : fl)),
+  };
+  const p3Synced = replicateGroundFloorToAllFloors(p3ModifiedGround);
+  assert.equal(p3Synced.floors[1].units.length, 4);
+  assert.equal(p3Synced.floors[2].units.length, 4);
+
+  // Scale down to 2 floors
+  const p2 = setProjectFloorCount(p3Synced, 2, true);
+  assert.equal(p2.floors.length, 2);
+  assert.equal(p2.floors.reduce((s, f) => s + f.units.length, 0), 8);
+
+  const qty = calculateQuantities(p2);
+  assert.equal(qty.summary.totalUnits, 8);
+});
+
 
 

@@ -5,8 +5,10 @@ import {
   Box,
   CheckCircle2,
   Compass,
+  Copy,
   DoorOpen,
   Layers,
+  Minus,
   Move,
   PenTool,
   Plus,
@@ -30,6 +32,9 @@ import {
   getGateWorldPosition,
   getLotBoundarySegments,
   normalizeSiteData,
+  recalculateFloorElevations,
+  replicateGroundFloorToAllFloors,
+  setProjectFloorCount,
   validateImplantation,
 } from '../engine/implantation';
 import {
@@ -346,24 +351,45 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
 
   const handleAddFloor = () => {
     onUpdateProject((prev) => {
-      const idx = prev.floors.length;
-      const prevTop = prev.floors.reduce((acc, f) => acc + f.floorToFloorHeight, 0);
-      const newFloor: Floor = {
-        id: nextId('fl'),
-        levelIndex: idx,
-        name: `${idx}º Pavimento`,
-        elevation: round2(prevTop),
-        floorToFloorHeight: 2.95,
-        slabThickness: 0.15,
-        corridorWidth: prev.floors[0]?.corridorWidth ?? 1.5,
-        commonAreaM2: prev.floors[0]?.commonAreaM2 ?? 0,
-        units: [],
-        extraWalls: [],
-        extraOpenings: [],
-      };
-      setSelectedFloorId(newFloor.id);
-      return { ...prev, floors: [...prev.floors, newFloor] };
+      const next = setProjectFloorCount(prev, prev.floors.length + 1, applyToAllFloors);
+      const last = next.floors[next.floors.length - 1];
+      if (last) setSelectedFloorId(last.id);
+      return next;
     }, 'Adição de novo pavimento');
+  };
+
+  const handleSetFloorCount = (count: number) => {
+    const clamped = Math.max(1, Math.min(20, Math.round(count || 1)));
+    onUpdateProject((prev) => {
+      const next = setProjectFloorCount(prev, clamped, applyToAllFloors);
+      if (!next.floors.some((f) => f.id === selectedFloorId)) {
+        setSelectedFloorId(next.floors[next.floors.length - 1]?.id ?? next.floors[0]?.id ?? '');
+      }
+      return next;
+    }, `Ajuste da quantidade de andares para ${clamped} pavimento(s)`);
+  };
+
+  const handleReplicateGroundToUpper = () => {
+    onUpdateProject(
+      (prev) => replicateGroundFloorToAllFloors(prev),
+      'Replicação do pavimento térreo para todos os andares superiores',
+    );
+  };
+
+  const handleActiveFloorHeightChange = (heightM: number) => {
+    if (!activeFloor) return;
+    const clamped = Math.max(2.3, Math.min(6.0, round2(heightM || 2.95)));
+    onUpdateProject(
+      (prev) => ({
+        ...prev,
+        floors: recalculateFloorElevations(
+          prev.floors.map((f) =>
+            f.id === activeFloor.id ? { ...f, floorToFloorHeight: clamped } : f,
+          ),
+        ),
+      }),
+      `Ajuste de altura piso-a-piso do ${activeFloor.name} (${clamped}m)`,
+    );
   };
 
   const handleAddUnitManual = (unitTypeId: string) => {
@@ -1428,8 +1454,71 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
               {/* 2A–D Implantation Strategy */}
               <div className="rounded-lg border border-[#2A2F38] bg-[#1B1E24] p-4 space-y-3.5">
                 <h2 className="text-sm font-semibold text-white">
-                  2A–2D. Posição, Quantidade, Repetição e Geminação
+                  2A–2D. Posição, Quantidade, Repetição e Andares
                 </h2>
+
+                {/* Quantidade de Andares (Pavimentos) & Resumo Total */}
+                <div className="rounded border border-[#2F7CF6]/40 bg-[#14161A] p-3 space-y-2.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-xs font-semibold text-white">
+                      Quantidade de Andares (Pavimentos)
+                    </span>
+                    <span className="text-[11px] font-mono text-sky-300">
+                      {activeFloor?.units.length ?? 0} kitnets neste andar ·{' '}
+                      {project.floors.reduce((s, f) => s + f.units.length, 0)} no total
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[10px] text-[#949BA8] mb-1">
+                        Total de Pavimentos (1 a 20)
+                      </label>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => handleSetFloorCount(project.floors.length - 1)}
+                          disabled={project.floors.length <= 1}
+                          aria-label="Diminuir quantidade de andares"
+                          className="p-1.5 rounded border border-[#2A2F38] bg-[#1B1E24] text-slate-200 hover:border-[#2F7CF6] disabled:opacity-35"
+                        >
+                          <Minus className="w-3.5 h-3.5" />
+                        </button>
+                        <input
+                          type="number"
+                          min={1}
+                          max={20}
+                          value={project.floors.length}
+                          aria-label="Quantidade de andares"
+                          onChange={(e) => handleSetFloorCount(Number(e.target.value))}
+                          className="w-full px-2 py-1 text-center text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleSetFloorCount(project.floors.length + 1)}
+                          disabled={project.floors.length >= 20}
+                          aria-label="Aumentar quantidade de andares"
+                          className="p-1.5 rounded border border-[#2A2F38] bg-[#1B1E24] text-slate-200 hover:border-[#2F7CF6] disabled:opacity-35"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-[#949BA8] mb-1">
+                        Altura piso-a-piso ({activeFloor?.name ?? 'Térreo'})
+                      </label>
+                      <input
+                        type="number"
+                        step="0.05"
+                        min={2.3}
+                        max={6.0}
+                        value={activeFloor?.floorToFloorHeight ?? 2.95}
+                        onChange={(e) => handleActiveFloorHeightChange(Number(e.target.value))}
+                        className="w-full px-2.5 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                      />
+                    </div>
+                  </div>
+                </div>
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
@@ -1504,83 +1593,104 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
                 {(impConfig.primaryZone === 'ambos_lados' ||
                   impConfig.layoutPattern === 'ambos_lados' ||
                   impConfig.layoutPattern === 'duas_fileiras') ? (
-                  <div className="rounded border border-[#2A2F38] bg-[#14161A] p-3 space-y-2">
-                    <div className="text-[11px] text-slate-300 font-medium">
-                      Distribuição por Setor (informe 0 onde não houver unidades — nunca é obrigatório simetria)
+                  <div className="space-y-2.5">
+                    <div className="rounded border border-[#2A2F38] bg-[#14161A] p-3 space-y-2">
+                      <div className="text-[11px] text-slate-300 font-medium">
+                        Distribuição por Setor (informe 0 onde não houver unidades — nunca é obrigatório simetria)
+                      </div>
+                      <div className="grid grid-cols-4 gap-2">
+                        <div>
+                          <label className="block text-[10px] text-[#949BA8] mb-0.5">Lado Esq.</label>
+                          <input
+                            type="number"
+                            min={0}
+                            max={30}
+                            value={impConfig.leftCount}
+                            onChange={(e) => {
+                              const v = Math.max(0, Number(e.target.value));
+                              updateImplantation((c) => ({
+                                ...c,
+                                leftCount: v,
+                                totalUnitsTarget: v + c.rightCount + c.frontCount + c.backCount,
+                              }));
+                            }}
+                            className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] text-[#949BA8] mb-0.5">Lado Dir.</label>
+                          <input
+                            type="number"
+                            min={0}
+                            max={30}
+                            value={impConfig.rightCount}
+                            onChange={(e) => {
+                              const v = Math.max(0, Number(e.target.value));
+                              updateImplantation((c) => ({
+                                ...c,
+                                rightCount: v,
+                                totalUnitsTarget: c.leftCount + v + c.frontCount + c.backCount,
+                              }));
+                            }}
+                            className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] text-[#949BA8] mb-0.5">Frente</label>
+                          <input
+                            type="number"
+                            min={0}
+                            max={30}
+                            value={impConfig.frontCount}
+                            onChange={(e) => {
+                              const v = Math.max(0, Number(e.target.value));
+                              updateImplantation((c) => ({
+                                ...c,
+                                frontCount: v,
+                                totalUnitsTarget: c.leftCount + c.rightCount + v + c.backCount,
+                              }));
+                            }}
+                            className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] text-[#949BA8] mb-0.5">Fundos</label>
+                          <input
+                            type="number"
+                            min={0}
+                            max={30}
+                            value={impConfig.backCount}
+                            onChange={(e) => {
+                              const v = Math.max(0, Number(e.target.value));
+                              updateImplantation((c) => ({
+                                ...c,
+                                backCount: v,
+                                totalUnitsTarget: c.leftCount + c.rightCount + c.frontCount + v,
+                              }));
+                            }}
+                            className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                          />
+                        </div>
+                      </div>
                     </div>
-                    <div className="grid grid-cols-4 gap-2">
-                      <div>
-                        <label className="block text-[10px] text-[#949BA8] mb-0.5">Lado Esq.</label>
-                        <input
-                          type="number"
-                          min={0}
-                          max={30}
-                          value={impConfig.leftCount}
-                          onChange={(e) => {
-                            const v = Math.max(0, Number(e.target.value));
-                            updateImplantation((c) => ({
-                              ...c,
-                              leftCount: v,
-                              totalUnitsTarget: v + c.rightCount + c.frontCount + c.backCount,
-                            }));
-                          }}
-                          className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] text-[#949BA8] mb-0.5">Lado Dir.</label>
-                        <input
-                          type="number"
-                          min={0}
-                          max={30}
-                          value={impConfig.rightCount}
-                          onChange={(e) => {
-                            const v = Math.max(0, Number(e.target.value));
-                            updateImplantation((c) => ({
-                              ...c,
-                              rightCount: v,
-                              totalUnitsTarget: c.leftCount + v + c.frontCount + c.backCount,
-                            }));
-                          }}
-                          className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] text-[#949BA8] mb-0.5">Frente</label>
-                        <input
-                          type="number"
-                          min={0}
-                          max={30}
-                          value={impConfig.frontCount}
-                          onChange={(e) => {
-                            const v = Math.max(0, Number(e.target.value));
-                            updateImplantation((c) => ({
-                              ...c,
-                              frontCount: v,
-                              totalUnitsTarget: c.leftCount + c.rightCount + v + c.backCount,
-                            }));
-                          }}
-                          className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] text-[#949BA8] mb-0.5">Fundos</label>
-                        <input
-                          type="number"
-                          min={0}
-                          max={30}
-                          value={impConfig.backCount}
-                          onChange={(e) => {
-                            const v = Math.max(0, Number(e.target.value));
-                            updateImplantation((c) => ({
-                              ...c,
-                              backCount: v,
-                              totalUnitsTarget: c.leftCount + c.rightCount + c.frontCount + v,
-                            }));
-                          }}
-                          className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
-                        />
-                      </div>
+                    <div>
+                      <label className="block text-[11px] text-[#949BA8] mb-1">
+                        Repetição das Unidades
+                      </label>
+                      <select
+                        value={impConfig.modelMode}
+                        onChange={(e) =>
+                          updateImplantation((c) => ({
+                            ...c,
+                            modelMode: e.target.value as ImplantationModelMode,
+                          }))
+                        }
+                        className="w-full px-2.5 py-1.5 text-xs rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                      >
+                        <option value="todas_iguais">Sim, todas iguais (mesmo modelo)</option>
+                        <option value="modelos_diferentes">Não, modelos diferentes (alternar tipologias)</option>
+                        <option value="misto_repeticao">Misto (grupos + distintas)</option>
+                      </select>
                     </div>
                   </div>
                 ) : (
@@ -2862,11 +2972,34 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
                 <button
                   type="button"
                   onClick={handleAddFloor}
-                  className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs rounded border border-[#323844] text-[#C4C9D4] hover:text-white"
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs rounded border border-[#323844] text-[#C4C9D4] hover:text-white hover:border-[#2F7CF6]"
                 >
                   <Plus className="w-3.5 h-3.5" />
-                  Pavimento
+                  Andar
                 </button>
+                {project.floors.length > 1 && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => handleSetFloorCount(project.floors.length - 1)}
+                      title="Remover último pavimento"
+                      className="inline-flex items-center gap-1 px-2 py-1.5 text-xs rounded border border-[#323844] text-red-300 hover:border-red-500/60"
+                    >
+                      <Minus className="w-3.5 h-3.5" />
+                      Andar
+                    </button>
+                    {(project.floors[0]?.units.length ?? 0) > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleReplicateGroundToUpper}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs rounded border border-emerald-500/40 bg-emerald-600/15 text-emerald-200 hover:bg-emerald-600/30"
+                      >
+                        <Copy className="w-3 h-3" />
+                        Replicar Térreo nos {project.floors.length - 1} andares
+                      </button>
+                    )}
+                  </>
+                )}
               </div>
 
               <div className="flex flex-wrap items-center gap-1.5">

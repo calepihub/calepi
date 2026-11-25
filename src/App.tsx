@@ -944,6 +944,16 @@ export function App() {
             <FolderKanban className="h-3.5 w-3.5 text-[#2F7CF6]" />
             Projetos ({projects.length})
           </button>
+
+          <button
+            type="button"
+            onClick={() => navigateFromModule('terreno')}
+            title="Configurar quantidade de andares, repetições e implantação no lote"
+            className="hidden md:inline-flex items-center gap-1.5 rounded border border-slate-700/80 bg-[#14161A] px-2.5 py-1 text-[11px] font-mono text-sky-300 hover:border-[#2F7CF6] hover:text-white whitespace-nowrap shrink-0 transition"
+          >
+            {activeProject.floors.length} {activeProject.floors.length === 1 ? 'andar' : 'andares'} ·{' '}
+            {activeProject.floors.reduce((s, f) => s + f.units.length, 0)} kitnets
+          </button>
         </div>
 
         <div className="flex items-center gap-2">
@@ -1073,7 +1083,7 @@ export function App() {
                   <div className="hidden space-y-0.5 pl-6 lg:block">
                     {(
                       [
-                        ['terreno', 'Implantação (4 Etapas)'],
+                        ['terreno', 'Implantação, Repetições & Andares'],
                         ['urbanismo', 'Leis Urbanísticas'],
                       ] as const
                     ).map(([id, label]) => (
@@ -1155,7 +1165,7 @@ export function App() {
               {activeStep === 'terreno' &&
                 (
                   [
-                    ['terreno', 'Implantação (4 Etapas)'],
+                    ['terreno', 'Implantação, Repetições & Andares'],
                     ['urbanismo', 'Leis Urbanísticas'],
                   ] as const
                 ).map(([id, label]) => (
@@ -1275,6 +1285,7 @@ export function App() {
                     onSelectUnitType={setSelectedUnitTypeId}
                     onUpdateProject={handleUpdateProject}
                     onOpen2DEditor={() => setPlantaSubTab('editor2d')}
+                    onOpenImplantation={() => navigateFromModule('terreno')}
                   />
                 </div>
               )}
@@ -1289,6 +1300,7 @@ export function App() {
                   onRedo={handleRedo}
                   canUndo={undoStack.length > 0}
                   canRedo={redoStack.length > 0}
+                  onOpenImplantation={() => navigateFromModule('terreno')}
                 />
               )}
 

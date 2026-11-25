@@ -12,6 +12,7 @@ import {
 } from './geometry';
 import { unitLocalToWorld } from './cadDrawings';
 import type {
+  Floor,
   ImplantationConfig,
   ImplantationZone,
   LotFrontSide,
@@ -1406,3 +1407,109 @@ export function validateImplantation(
     municipalValidationNote,
   };
 }
+
+/**
+ * Recalculates sequential levelIndex, floor name, and cumulative elevation for all floors.
+ */
+export function recalculateFloorElevations(floors: Floor[]): Floor[] {
+  let elev = 0;
+  return floors.map((fl, idx) => {
+    const updated: Floor = {
+      ...fl,
+      levelIndex: idx,
+      name: idx === 0 ? 'Térreo' : `${idx}º Pavimento`,
+      elevation: round2(elev),
+    };
+    elev += fl.floorToFloorHeight || 2.95;
+    return updated;
+  });
+}
+
+/**
+ * Clones unit instances onto a target floor with unique IDs and floor-prefixed unit numbers (201, 202, 301...).
+ */
+export function cloneFloorUnitsToTargetFloor(
+  sourceUnits: UnitInstance[],
+  targetFloor: Floor,
+): UnitInstance[] {
+  const stamp = Date.now().toString(36).slice(-4);
+  return sourceUnits.map((u, idx) => ({
+    ...u,
+    id: `inst-${targetFloor.levelIndex + 1}-${idx + 1}-${stamp}-${Math.random().toString(36).slice(2, 5)}`,
+    floorId: targetFloor.id,
+    unitNumber: `${targetFloor.levelIndex + 1}${String(idx + 1).padStart(2, '0')}`,
+  }));
+}
+
+/**
+ * Scales project.floors cleanly to targetCount (1..20).
+ * When adding floors, replicates ground-floor units if replicateGroundFloor=true and ground floor has units.
+ */
+export function setProjectFloorCount(
+  project: Project,
+  targetCount: number,
+  replicateGroundFloor = true,
+): Project {
+  const clamped = Math.max(1, Math.min(20, Math.round(targetCount || 1)));
+  const current = project.floors.length;
+  if (clamped === current) return project;
+
+  let nextFloors = [...project.floors];
+  const ground = nextFloors[0];
+
+  if (clamped < current) {
+    nextFloors = nextFloors.slice(0, clamped);
+  } else {
+    for (let idx = current; idx < clamped; idx++) {
+      const flId = `fl-${idx}-${Date.now().toString(36).slice(-4)}-${Math.random().toString(36).slice(2, 5)}`;
+      const baseHeight = ground?.floorToFloorHeight ?? 2.95;
+      const draftFloor: Floor = {
+        id: flId,
+        levelIndex: idx,
+        name: `${idx}º Pavimento`,
+        elevation: 0,
+        floorToFloorHeight: baseHeight,
+        slabThickness: ground?.slabThickness ?? 0.15,
+        corridorWidth: ground?.corridorWidth ?? 1.5,
+        commonAreaM2: ground?.commonAreaM2 ?? 0,
+        units: [],
+        extraWalls: [],
+        extraOpenings: [],
+      };
+      if (replicateGroundFloor && ground && ground.units.length > 0) {
+        draftFloor.units = cloneFloorUnitsToTargetFloor(ground.units, draftFloor);
+      }
+      nextFloors.push(draftFloor);
+    }
+  }
+
+  return {
+    ...project,
+    floors: recalculateFloorElevations(nextFloors),
+  };
+}
+
+/**
+ * Copies ground floor (Térreo) unit layout and circulation onto all upper floors (1º Pavimento, 2º Pavimento...).
+ */
+export function replicateGroundFloorToAllFloors(project: Project): Project {
+  if (project.floors.length <= 1) return project;
+  const ground = project.floors[0];
+  if (!ground) return project;
+
+  const updated = project.floors.map((fl, idx) => {
+    if (idx === 0) return fl;
+    return {
+      ...fl,
+      corridorWidth: ground.corridorWidth,
+      commonAreaM2: ground.commonAreaM2,
+      units: cloneFloorUnitsToTargetFloor(ground.units, fl),
+    };
+  });
+
+  return {
+    ...project,
+    floors: recalculateFloorElevations(updated),
+  };
+}
+
