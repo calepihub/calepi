@@ -48,6 +48,7 @@ import {
 } from '../engine/implantation';
 import {
   computeMezzanineInteriorBounds,
+  generateMultiStoryHouseBundle,
   generateParametricUnitLayout,
   nextId,
 } from '../engine/parametricGenerator';
@@ -55,6 +56,7 @@ import { NumericInput } from './NumericInput';
 import type {
   AccessGateType,
   BoundaryCondition,
+  BuildingKind,
   EntrySide,
   Floor,
   ImplantationAccessMode,
@@ -122,6 +124,9 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
   );
   const [editingUnitTypeId, setEditingUnitTypeId] = useState<string | null>(null);
   const [confirmDeleteUtId, setConfirmDeleteUtId] = useState<string | null>(null);
+  const [qtBuildingKind, setQtBuildingKind] = useState<BuildingKind>('kitnet');
+  const [qtSuites, setQtSuites] = useState(0);
+  const [qtTotalStories, setQtTotalStories] = useState(2);
   const [qtCode, setQtCode] = useState('TIPO-A');
   const [qtName, setQtName] = useState('Kitnet Padrão');
   const [qtWidth, setQtWidth] = useState(4.0);
@@ -302,22 +307,49 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
     setDraggingUnitId(null);
   };
 
-  const openNewQuickTypeForm = () => {
+  const openNewQuickTypeForm = (kind: BuildingKind = 'kitnet') => {
     setEditingUnitTypeId(null);
     setConfirmDeleteUtId(null);
+    setQtBuildingKind(kind);
     const letter = String.fromCharCode(65 + Math.min(25, project.unitTypes.length));
-    setQtCode(`TIPO-${letter}`);
-    setQtName(project.unitTypes.length === 0 ? 'Kitnet Padrão' : `Kitnet Modelo ${letter}`);
-    setQtWidth(4.0);
-    setQtDepth(5.0);
-    setQtCeiling(2.8);
-    setQtBedrooms(0);
-    setQtEntrySide('lateral_direita');
+    if (kind === 'casa_terrea') {
+      setQtCode(`CASA-${letter}`);
+      setQtName('Casa Térrea Padrão');
+      setQtWidth(7.0);
+      setQtDepth(9.0);
+      setQtCeiling(2.85);
+      setQtBedrooms(2);
+      setQtSuites(1);
+      setQtTotalStories(1);
+      setQtEntrySide('frente');
+      setQtMepProfile('completo');
+    } else if (kind === 'casa_sobrado') {
+      setQtCode(`SOB-${letter}`);
+      setQtName('Sobrado Residencial');
+      setQtWidth(6.8);
+      setQtDepth(8.8);
+      setQtCeiling(2.85);
+      setQtBedrooms(3);
+      setQtSuites(1);
+      setQtTotalStories(2);
+      setQtEntrySide('frente');
+      setQtMepProfile('completo');
+    } else {
+      setQtCode(`TIPO-${letter}`);
+      setQtName(project.unitTypes.length === 0 ? 'Kitnet Padrão' : `Kitnet Modelo ${letter}`);
+      setQtWidth(4.0);
+      setQtDepth(5.0);
+      setQtCeiling(2.8);
+      setQtBedrooms(0);
+      setQtSuites(0);
+      setQtTotalStories(1);
+      setQtEntrySide('lateral_direita');
+      setQtMepProfile('simples');
+    }
     setQtPartition(project.constructionMethod.internalPartitionType ?? 'alvenaria');
     setQtLaundry(true);
     setQtBalcony(false);
     setQtAccessible(false);
-    setQtMepProfile('simples');
     setQtMezzanine(false);
     setQtMezzElev(2.15);
     setQtMezzSizingMode('percent');
@@ -335,6 +367,9 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
   const openEditQuickTypeForm = (ut: UnitType) => {
     setEditingUnitTypeId(ut.id);
     setConfirmDeleteUtId(null);
+    setQtBuildingKind(ut.buildingKind ?? 'kitnet');
+    setQtSuites(ut.suites ?? 0);
+    setQtTotalStories(ut.totalStories ?? 2);
     setQtCode(ut.code);
     setQtName(ut.name);
     setQtWidth(ut.width);
@@ -368,10 +403,59 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
     const safeWidth = Math.max(2.8, round2(qtWidth));
     const safeDepth = Math.max(3.6, round2(qtDepth));
     const safeCeiling = Math.max(2.4, round2(qtCeiling));
-    const allowMezz = safeCeiling >= 3.0 && qtMezzanine;
     const existingUt = editingUnitTypeId
       ? project.unitTypes.find((t) => t.id === editingUnitTypeId)
       : undefined;
+
+    if (!existingUt && qtBuildingKind === 'casa_sobrado') {
+      const storiesCount = Math.max(2, Math.min(3, qtTotalStories));
+      const bundle = generateMultiStoryHouseBundle({
+        code: qtCode.trim() || `SOB-${project.unitTypes.length + 1}`,
+        name: qtName.trim() || 'Sobrado Residencial',
+        width: Math.max(5.2, safeWidth),
+        depth: Math.max(6.8, safeDepth),
+        ceilingHeight: safeCeiling,
+        bedrooms: Math.max(1, qtBedrooms),
+        suites: qtSuites,
+        hasLaundry: qtLaundry,
+        hasBalcony: qtBalcony,
+        hasMezzanine: false,
+        accessible: qtAccessible,
+        extWallThickness: project.constructionMethod.externalWallThickness,
+        intWallThickness:
+          qtPartition === 'drywall' ? 0.095 : project.constructionMethod.internalWallThickness,
+        constructionSystem: project.constructionMethod.methodId,
+        entrySide: qtEntrySide,
+        internalPartitionType: qtPartition,
+        mepProfile: qtMepProfile,
+        totalStories: storiesCount,
+      });
+      onUpdateProject((prev) => {
+        const baseCfg = prev.implantation ?? createDefaultImplantationConfig(prev);
+        let nextProj: Project = {
+          ...prev,
+          unitTypes: [...prev.unitTypes, ...bundle],
+          implantation: {
+            ...baseCfg,
+            primaryUnitTypeId: baseCfg.primaryUnitTypeId || bundle[0].id,
+            totalUnitsTarget: baseCfg.totalUnitsTarget <= 0 ? 1 : baseCfg.totalUnitsTarget,
+            layoutPattern: prev.unitTypes.length === 0 ? 'isolada' : baseCfg.layoutPattern,
+            primaryZone: prev.unitTypes.length === 0 ? 'centralizada' : baseCfg.primaryZone,
+          },
+        };
+        if (nextProj.floors.length < storiesCount) {
+          nextProj = setProjectFloorCount(nextProj, storiesCount, false);
+        }
+        return nextProj;
+      }, `Criação do Sobrado ${qtCode.trim()} (${storiesCount} pavimentos vinculados)`);
+      onSelectUnitType?.(bundle[0].id);
+      setEditingUnitTypeId(null);
+      setShowQuickTypeForm(false);
+      return;
+    }
+
+    const allowMezz =
+      qtBuildingKind === 'kitnet' && safeCeiling >= 3.0 && qtMezzanine;
 
     const cleanCode =
       qtCode.trim() || existingUt?.code || `TIPO-${project.unitTypes.length + 1}`;
@@ -384,6 +468,7 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
       existingUt!.depth === safeDepth &&
       existingUt!.ceilingHeight === safeCeiling &&
       existingUt!.bedrooms === qtBedrooms &&
+      (existingUt!.suites ?? 0) === qtSuites &&
       existingUt!.hasLaundry === qtLaundry &&
       existingUt!.hasBalcony === qtBalcony &&
       existingUt!.accessible === qtAccessible &&
@@ -417,6 +502,13 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
           name: cleanName,
           basePreset: existingUt?.basePreset,
           finishStandard: existingUt?.finishStandard,
+          buildingKind: existingUt?.buildingKind ?? qtBuildingKind,
+          suites: qtSuites,
+          bathrooms: existingUt?.bathrooms,
+          hasDiningArea: existingUt?.hasDiningArea,
+          totalStories: existingUt?.totalStories,
+          storyIndex: existingUt?.storyIndex,
+          linkedHouseGroupId: existingUt?.linkedHouseGroupId,
           width: safeWidth,
           depth: safeDepth,
           ceilingHeight: safeCeiling,
@@ -1271,10 +1363,10 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
                 <div className="flex items-center justify-between gap-2">
                   <div>
                     <h2 className="text-sm font-semibold text-white">
-                      Modelos / Tipologias de Kitnet ({project.unitTypes.length})
+                      Modelos / Tipologias ({project.unitTypes.length})
                     </h2>
                     <p className="text-[11px] text-[#949BA8]">
-                      Crie, edite ou selecione os modelos que serão implantados no lote.
+                      Crie ou edite Kitnets, Casas Térreas ou Sobrados para implantar no lote.
                     </p>
                   </div>
                   <button
@@ -1284,13 +1376,13 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
                         setShowQuickTypeForm(false);
                         setEditingUnitTypeId(null);
                       } else {
-                        openNewQuickTypeForm();
+                        openNewQuickTypeForm('kitnet');
                       }
                     }}
                     className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded border border-[#323844] bg-[#14161A] text-white hover:border-[#2F7CF6]"
                   >
                     <Plus className="w-3.5 h-3.5 text-[#2F7CF6]" />
-                    {showQuickTypeForm ? 'Fechar' : 'Nova Kitnet'}
+                    {showQuickTypeForm ? 'Fechar' : 'Novo Modelo'}
                   </button>
                 </div>
 
@@ -1303,7 +1395,7 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
                       <span className="text-xs font-semibold text-sky-300">
                         {editingUnitTypeId
                           ? `Editando Modelo Salvo (${qtCode})`
-                          : 'Novo Modelo de Kitnet'}
+                          : 'Novo Modelo de Edificação'}
                       </span>
                       {editingUnitTypeId && (
                         <button
@@ -1318,6 +1410,31 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
                         </button>
                       )}
                     </div>
+
+                    {!editingUnitTypeId && (
+                      <div className="grid grid-cols-3 gap-1 rounded border border-[#2A2F38] bg-[#1B1E24] p-1">
+                        {(
+                          [
+                            ['kitnet', 'Kitnet / Studio'],
+                            ['casa_terrea', 'Casa Térrea'],
+                            ['casa_sobrado', 'Sobrado (Andares)'],
+                          ] as const
+                        ).map(([kv, kl]) => (
+                          <button
+                            key={kv}
+                            type="button"
+                            onClick={() => openNewQuickTypeForm(kv)}
+                            className={`px-2 py-1 text-[11px] font-medium rounded transition-colors ${
+                              qtBuildingKind === kv
+                                ? 'bg-[#2F7CF6] text-white font-semibold'
+                                : 'text-[#949BA8] hover:text-white'
+                            }`}
+                          >
+                            {kl}
+                          </button>
+                        ))}
+                      </div>
+                    )}
 
                     <div className="grid grid-cols-2 gap-2.5">
                       <div>
@@ -1387,11 +1504,17 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
                         <label className="block text-[10px] text-[#949BA8] mb-0.5">Quartos</label>
                         <select
                           value={qtBedrooms}
-                          onChange={(e) => setQtBedrooms(Number(e.target.value))}
+                          onChange={(e) => {
+                            const val = Number(e.target.value);
+                            setQtBedrooms(val);
+                            if (val < 2) setQtSuites(0);
+                          }}
                           className="w-full px-2 py-1 text-xs rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
                         >
-                          <option value={0}>Studio (Integrado)</option>
+                          {qtBuildingKind === 'kitnet' && <option value={0}>Studio (Integrado)</option>}
                           <option value={1}>1 Quarto (Porta 70cm)</option>
+                          <option value={2}>2 Quartos (Casa)</option>
+                          <option value={3}>3 Quartos (Casa)</option>
                         </select>
                       </div>
                       <div>
@@ -1465,7 +1588,30 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
                         />
                         Acessível NBR 9050
                       </label>
-                      {qtCeiling >= 3.0 && (
+                      {qtBedrooms >= 2 && (
+                        <label className="inline-flex items-center gap-1.5 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={qtSuites >= 1}
+                            onChange={(e) => setQtSuites(e.target.checked ? 1 : 0)}
+                          />
+                          Suíte Privativa (2º BWC)
+                        </label>
+                      )}
+                      {qtBuildingKind === 'casa_sobrado' && !editingUnitTypeId && (
+                        <label className="inline-flex items-center gap-1.5 text-sky-300 font-medium">
+                          <span>Pavimentos:</span>
+                          <select
+                            value={qtTotalStories}
+                            onChange={(e) => setQtTotalStories(Number(e.target.value))}
+                            className="px-1.5 py-0.5 text-xs rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                          >
+                            <option value={2}>2 Pav. (Térreo+Sup)</option>
+                            <option value={3}>3 Pav. (+Ático)</option>
+                          </select>
+                        </label>
+                      )}
+                      {qtBuildingKind === 'kitnet' && qtCeiling >= 3.0 && (
                         <label className="inline-flex items-center gap-2 text-xs text-sky-300 cursor-pointer font-medium">
                           <input
                             type="checkbox"
@@ -1707,9 +1853,15 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
                                 )}
                               </div>
                               <div className="text-[11px] font-mono text-[#949BA8] mt-1">
-                                {ut.width}×{ut.depth}m ({round2(ut.width * ut.depth)}m²) · PD{' '}
+                                {ut.buildingKind === 'casa_sobrado'
+                                  ? `Sobrado ${(ut.storyIndex ?? 0) === 0 ? 'Térreo' : `${ut.storyIndex}º Pav.`}`
+                                  : ut.buildingKind === 'casa_terrea'
+                                    ? 'Casa Térrea'
+                                    : 'Kitnet'}{' '}
+                                · {ut.width}×{ut.depth}m ({round2(ut.width * ut.depth)}m²) · PD{' '}
                                 {ut.ceilingHeight}m · Entrada: {entryLabel} ·{' '}
                                 {ut.bedrooms > 0 ? `${ut.bedrooms}Q` : 'Studio'}
+                                {(ut.suites ?? 0) > 0 ? ' (c/ Suíte)' : ''}
                                 {ut.hasLaundry ? ' · A.S.' : ''}
                                 {ut.hasMezzanine ? ' · Mezanino' : ''} · {placedCount} unid.
                               </div>

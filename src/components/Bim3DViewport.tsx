@@ -1306,9 +1306,49 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
         // Floor slab + architectural floor finish + wet-room ceramic + baseboards
         if (layers.arquitetura) {
           const slabCenter = mapUnitPt(inst, ut.width, ut.width / 2, ut.depth / 2);
-          const slabGeom = new THREE.BoxGeometry(ut.width, floor.slabThickness, ut.depth);
+          const buildSlabWithVoid = (
+            rectW: number,
+            rectD: number,
+            thick: number,
+            voidSpec?: NonNullable<typeof ut.stairVoid>,
+          ): THREE.BufferGeometry => {
+            if (!voidSpec) {
+              const g = new THREE.BoxGeometry(rectW, thick, rectD);
+              g.translate(0, thick / 2, 0);
+              return g;
+            }
+            const shape = new THREE.Shape();
+            const hw = rectW / 2;
+            const hd = rectD / 2;
+            shape.moveTo(-hw, -hd);
+            shape.lineTo(hw, -hd);
+            shape.lineTo(hw, hd);
+            shape.lineTo(-hw, hd);
+            shape.closePath();
+
+            const vx0Raw = inst.mirrored ? ut.width - (voidSpec.x + voidSpec.width) : voidSpec.x;
+            const vx1Raw = inst.mirrored ? ut.width - voidSpec.x : voidSpec.x + voidSpec.width;
+            const hx0 = Math.max(-hw + 0.04, Math.min(hw - 0.08, vx0Raw - ut.width / 2));
+            const hx1 = Math.max(hx0 + 0.05, Math.min(hw - 0.04, vx1Raw - ut.width / 2));
+            const hy0 = Math.max(-hd + 0.04, Math.min(hd - 0.08, ut.depth / 2 - (voidSpec.y + voidSpec.depth)));
+            const hy1 = Math.max(hy0 + 0.05, Math.min(hd - 0.04, ut.depth / 2 - voidSpec.y));
+
+            const hole = new THREE.Path();
+            hole.moveTo(hx0, hy0);
+            hole.lineTo(hx0, hy1);
+            hole.lineTo(hx1, hy1);
+            hole.lineTo(hx1, hy0);
+            hole.closePath();
+            shape.holes.push(hole);
+
+            const extrude = new THREE.ExtrudeGeometry(shape, { depth: thick, bevelEnabled: false });
+            extrude.rotateX(-Math.PI / 2);
+            return extrude;
+          };
+
+          const slabGeom = buildSlabWithVoid(ut.width, ut.depth, floor.slabThickness, ut.stairVoid);
           const slabMesh = new THREE.Mesh(slabGeom, fIdx === 0 ? matFascia : matSlab);
-          slabMesh.position.set(slabCenter.x, baseY + floor.slabThickness / 2, slabCenter.z);
+          slabMesh.position.set(slabCenter.x, baseY, slabCenter.z);
           slabMesh.rotation.y = -(inst.rotationDeg * Math.PI) / 180;
           slabMesh.receiveShadow = !isSoftwareGl;
           slabMesh.castShadow = !isSoftwareGl;
@@ -1319,12 +1359,40 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
           };
           group.add(slabMesh);
 
-          const finishGeom = new THREE.BoxGeometry(ut.width - 0.08, 0.025, ut.depth - 0.08);
+          const finishGeom = buildSlabWithVoid(ut.width - 0.08, ut.depth - 0.08, 0.025, ut.stairVoid);
           const finishMesh = new THREE.Mesh(finishGeom, matFloorFinish);
-          finishMesh.position.set(slabCenter.x, baseY + floor.slabThickness + 0.012, slabCenter.z);
+          finishMesh.position.set(slabCenter.x, baseY + floor.slabThickness, slabCenter.z);
           finishMesh.rotation.y = -(inst.rotationDeg * Math.PI) / 180;
           finishMesh.receiveShadow = !isSoftwareGl;
           group.add(finishMesh);
+
+          if (ut.stairVoid) {
+            const sv = ut.stairVoid;
+            const guardGroup = new THREE.Group();
+            const addRailSeg = (x1: number, y1: number, x2: number, y2: number) => {
+              const p1 = mapUnitPt(inst, ut.width, x1, y1);
+              const p2 = mapUnitPt(inst, ut.width, x2, y2);
+              const segLen = Math.hypot(p2.x - p1.x, p2.z - p1.z);
+              if (segLen < 0.15) return;
+              const topBar = new THREE.Mesh(new THREE.BoxGeometry(segLen, 0.035, 0.035), matSteelBeam);
+              topBar.position.set((p1.x + p2.x) / 2, baseY + floor.slabThickness + 1.0, (p1.z + p2.z) / 2);
+              topBar.rotation.y = -Math.atan2(p2.z - p1.z, p2.x - p1.x);
+              const midBar = new THREE.Mesh(new THREE.BoxGeometry(segLen, 0.02, 0.02), matSteelBeam);
+              midBar.position.set((p1.x + p2.x) / 2, baseY + floor.slabThickness + 0.52, (p1.z + p2.z) / 2);
+              midBar.rotation.y = -Math.atan2(p2.z - p1.z, p2.x - p1.x);
+              const pA = new THREE.Mesh(new THREE.BoxGeometry(0.035, 1.02, 0.035), matSteelBeam);
+              pA.position.set(p1.x, baseY + floor.slabThickness + 0.51, p1.z);
+              const pB = new THREE.Mesh(new THREE.BoxGeometry(0.035, 1.02, 0.035), matSteelBeam);
+              pB.position.set(p2.x, baseY + floor.slabThickness + 0.51, p2.z);
+              guardGroup.add(topBar, midBar, pA, pB);
+            };
+            const le = sv.landingEdge ?? 'norte';
+            if (le !== 'oeste' && sv.x > 0.2) addRailSeg(sv.x, sv.y, sv.x, sv.y + sv.depth);
+            if (le !== 'leste' && sv.x + sv.width < ut.width - 0.2) addRailSeg(sv.x + sv.width, sv.y, sv.x + sv.width, sv.y + sv.depth);
+            if (le !== 'sul' && sv.y + sv.depth < ut.depth - 0.2) addRailSeg(sv.x, sv.y + sv.depth, sv.x + sv.width, sv.y + sv.depth);
+            if (le !== 'norte' && sv.y > 0.2) addRailSeg(sv.x, sv.y, sv.x + sv.width, sv.y);
+            group.add(guardGroup);
+          }
 
           // Wet zone ceramic floor inlay (BWC + Cozinha) & baseboard trim
           if (isArchRender) {

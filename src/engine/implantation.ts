@@ -420,6 +420,28 @@ function resolveUnitTypeForSlot(
   return project.unitTypes[slotIndex % project.unitTypes.length];
 }
 
+function resolveStoryUnitType(
+  project: Project,
+  baseUt: UnitType,
+  levelIndex: number,
+): UnitType | null {
+  if (baseUt.linkedHouseGroupId) {
+    if (baseUt.totalStories !== undefined && levelIndex >= baseUt.totalStories) {
+      return null;
+    }
+    const paired = project.unitTypes.find(
+      (t) =>
+        t.linkedHouseGroupId === baseUt.linkedHouseGroupId &&
+        (t.storyIndex ?? 0) === levelIndex,
+    );
+    return paired ?? null;
+  }
+  if (baseUt.buildingKind === 'casa_terrea' && levelIndex > 0) {
+    return null;
+  }
+  return baseUt;
+}
+
 function getObserverVectors(streetSide: LotFrontSide): {
   rightVec: Point2D; // observer left -> right
   inwardVec: Point2D; // street front -> back
@@ -569,7 +591,8 @@ export function generateImplantationUnits(
     let cursor = 0;
 
     for (let i = 0; i < count; i++) {
-      const ut = resolveUnitTypeForSlot(project, config, seq - 1, explicitUtId);
+      const baseUt = resolveUnitTypeForSlot(project, config, seq - 1, explicitUtId);
+      const ut = baseUt ? resolveStoryUnitType(project, baseUt, floor.levelIndex) : null;
       if (!ut) continue;
       // Rotate 180deg when street is 'cima' so natural J1/front faces street, or keep natural orientation for vertical side rows
       const rot = 0;
@@ -1433,14 +1456,41 @@ export function recalculateFloorElevations(floors: Floor[]): Floor[] {
 export function cloneFloorUnitsToTargetFloor(
   sourceUnits: UnitInstance[],
   targetFloor: Floor,
+  unitTypes?: UnitType[],
 ): UnitInstance[] {
   const stamp = Date.now().toString(36).slice(-4);
-  return sourceUnits.map((u, idx) => ({
-    ...u,
-    id: `inst-${targetFloor.levelIndex + 1}-${idx + 1}-${stamp}-${Math.random().toString(36).slice(2, 5)}`,
-    floorId: targetFloor.id,
-    unitNumber: `${targetFloor.levelIndex + 1}${String(idx + 1).padStart(2, '0')}`,
-  }));
+  const result: UnitInstance[] = [];
+  sourceUnits.forEach((u, idx) => {
+    let nextUnitTypeId = u.unitTypeId;
+    if (unitTypes && unitTypes.length > 0) {
+      const srcUt = unitTypes.find((t) => t.id === u.unitTypeId);
+      if (srcUt?.linkedHouseGroupId) {
+        if (
+          srcUt.totalStories !== undefined &&
+          targetFloor.levelIndex >= srcUt.totalStories
+        ) {
+          return;
+        }
+        const paired = unitTypes.find(
+          (t) =>
+            t.linkedHouseGroupId === srcUt.linkedHouseGroupId &&
+            (t.storyIndex ?? 0) === targetFloor.levelIndex,
+        );
+        if (!paired) return;
+        nextUnitTypeId = paired.id;
+      } else if (srcUt?.buildingKind === 'casa_terrea' && targetFloor.levelIndex > 0) {
+        return;
+      }
+    }
+    result.push({
+      ...u,
+      id: `inst-${targetFloor.levelIndex + 1}-${idx + 1}-${stamp}-${Math.random().toString(36).slice(2, 5)}`,
+      floorId: targetFloor.id,
+      unitTypeId: nextUnitTypeId,
+      unitNumber: `${targetFloor.levelIndex + 1}${String(idx + 1).padStart(2, '0')}`,
+    });
+  });
+  return result;
 }
 
 /**
@@ -1479,7 +1529,11 @@ export function setProjectFloorCount(
         extraOpenings: [],
       };
       if (replicateGroundFloor && ground && ground.units.length > 0) {
-        draftFloor.units = cloneFloorUnitsToTargetFloor(ground.units, draftFloor);
+        draftFloor.units = cloneFloorUnitsToTargetFloor(
+          ground.units,
+          draftFloor,
+          project.unitTypes,
+        );
       }
       nextFloors.push(draftFloor);
     }
@@ -1505,7 +1559,7 @@ export function replicateGroundFloorToAllFloors(project: Project): Project {
       ...fl,
       corridorWidth: ground.corridorWidth,
       commonAreaM2: ground.commonAreaM2,
-      units: cloneFloorUnitsToTargetFloor(ground.units, fl),
+      units: cloneFloorUnitsToTargetFloor(ground.units, fl, project.unitTypes),
     };
   });
 
@@ -1742,6 +1796,14 @@ export function customizeUnitTypeForSlot(
     internalPartitionType: baseUt.internalPartitionType ?? 'alvenaria',
     mepProfile: baseUt.mepProfile ?? 'simples',
     finishStandard: baseUt.finishStandard,
+    buildingKind: baseUt.buildingKind,
+    suites: baseUt.suites,
+    bathrooms: baseUt.bathrooms,
+    hasDiningArea: baseUt.hasDiningArea,
+    totalStories: baseUt.totalStories,
+    storyIndex: baseUt.storyIndex,
+    linkedHouseGroupId: baseUt.linkedHouseGroupId,
+    floorToFloorHeight: floor.floorToFloorHeight,
     mezzanineZone: baseUt.mezzanine?.zone,
     mezzanineElevationM: baseUt.mezzanine?.elevationM,
     mezzanineSizingMode: baseUt.mezzanine?.sizingMode,

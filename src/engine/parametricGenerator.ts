@@ -3,7 +3,13 @@ import {
   buildSiteVerticesFromDimensions,
   round2,
 } from './geometry';
+import {
+  generateCasaTerreaLayout,
+  generateMultiStoryHouseBundle,
+  generateSobradoFloorLayout,
+} from './houseGenerator';
 import type {
+  BuildingKind,
   ConstructionMethodId,
   DrainagePoint,
   ElectricalPoint,
@@ -29,6 +35,12 @@ import type {
   Wall,
   WaterPoint,
 } from '../types/project';
+
+export {
+  generateCasaTerreaLayout,
+  generateMultiStoryHouseBundle,
+  generateSobradoFloorLayout,
+};
 
 function round3(n: number): number {
   return Math.round(n * 1000) / 1000;
@@ -108,6 +120,15 @@ export interface ParametricTypologyInput {
   includeHotWater?: boolean;
   includeAcCircuit?: boolean;
   includeSpecialSystems?: boolean;
+  /** Residencial (Casas Térreas & Sobrados): */
+  buildingKind?: BuildingKind;
+  suites?: number;
+  bathrooms?: number;
+  hasDiningArea?: boolean;
+  totalStories?: number;
+  storyIndex?: number;
+  linkedHouseGroupId?: string;
+  floorToFloorHeight?: number;
 }
 
 export function computeMezzanineInteriorBounds(
@@ -156,6 +177,21 @@ export function nextId(prefix: string): string {
 export function generateParametricUnitLayout(
   input: ParametricTypologyInput,
 ): UnitType {
+  if (input.buildingKind === 'casa_sobrado') {
+    return generateSobradoFloorLayout({
+      ...input,
+      storyIndex: input.storyIndex ?? 0,
+      totalStories: input.totalStories ?? 2,
+      linkedHouseGroupId: input.linkedHouseGroupId ?? nextId('house'),
+    });
+  }
+  if (
+    input.buildingKind === 'casa_terrea' ||
+    input.bedrooms >= 2 ||
+    (input.suites ?? 0) >= 1
+  ) {
+    return generateCasaTerreaLayout(input);
+  }
   const id = input.id ?? nextId('ut');
   const W = Math.max(2.8, round2(input.width));
   const D = Math.max(3.6, round2(input.depth));
@@ -3512,21 +3548,66 @@ export function autoDistributeUnitsAcrossFloors(
   const bWidth = Math.max(0.5, bBox.width);
   const bDepth = Math.max(0.5, bBox.depth);
 
+  const isHouseGroup =
+    Boolean(ut.linkedHouseGroupId) ||
+    ut.buildingKind === 'casa_terrea' ||
+    ut.buildingKind === 'casa_sobrado';
+
   const updatedFloors = project.floors.map((fl) => {
     if (fl.units.length > 0) return fl;
+
+    // Resolve paired story typology when unit belongs to a multi-story house (Sobrado)
+    const floorUt = ut.linkedHouseGroupId
+      ? project.unitTypes.find(
+          (t) =>
+            t.linkedHouseGroupId === ut.linkedHouseGroupId &&
+            (t.storyIndex ?? 0) === fl.levelIndex,
+        )
+      : ut.buildingKind === 'casa_terrea' && fl.levelIndex > 0
+        ? undefined
+        : ut;
+
+    if (!floorUt) return fl;
+    if (
+      floorUt.totalStories !== undefined &&
+      fl.levelIndex >= floorUt.totalStories
+    ) {
+      return fl;
+    }
+
+    if (isHouseGroup) {
+      const xPos = round2(bx + Math.max(0, (bWidth - floorUt.width) / 2));
+      const yPos = round2(by);
+      return {
+        ...fl,
+        units: [
+          {
+            id: nextId('inst'),
+            unitNumber: `${fl.levelIndex + 1}01`,
+            unitTypeId: floorUt.id,
+            floorId: fl.id,
+            x: xPos,
+            y: yPos,
+            rotationDeg: 0,
+            mirrored: false,
+          },
+        ],
+      };
+    }
+
     const corridorW = Math.max(1.2, fl.corridorWidth || 1.5);
-    const twoColumnsFit = ut.width * 2 + corridorW <= bWidth + 0.05;
-    const rowsPerCol = Math.max(1, Math.floor(bDepth / ut.depth));
+    const twoColumnsFit = floorUt.width * 2 + corridorW <= bWidth + 0.05;
+    const rowsPerCol = Math.max(1, Math.floor(bDepth / floorUt.depth));
     const generated: UnitInstance[] = [];
     let seq = 1;
 
     for (let r = 0; r < rowsPerCol; r++) {
-      const yPos = round2(by + r * ut.depth);
-      if (yPos + ut.depth > by + bDepth + 0.05) break;
+      const yPos = round2(by + r * floorUt.depth);
+      if (yPos + floorUt.depth > by + bDepth + 0.05) break;
       generated.push({
         id: nextId('inst'),
         unitNumber: `${fl.levelIndex + 1}${String(seq++).padStart(2, '0')}`,
-        unitTypeId: ut.id,
+        unitTypeId: floorUt.id,
         floorId: fl.id,
         x: round2(bx),
         y: yPos,
@@ -3537,9 +3618,9 @@ export function autoDistributeUnitsAcrossFloors(
         generated.push({
           id: nextId('inst'),
           unitNumber: `${fl.levelIndex + 1}${String(seq++).padStart(2, '0')}`,
-          unitTypeId: ut.id,
+          unitTypeId: floorUt.id,
           floorId: fl.id,
-          x: round2(bx + ut.width + corridorW),
+          x: round2(bx + floorUt.width + corridorW),
           y: yPos,
           rotationDeg: 0,
           mirrored: true,
@@ -3547,7 +3628,7 @@ export function autoDistributeUnitsAcrossFloors(
       }
     }
 
-    const nextCommon = round2(corridorW * Math.min(bDepth, rowsPerCol * ut.depth));
+    const nextCommon = round2(corridorW * Math.min(bDepth, rowsPerCol * floorUt.depth));
     return {
       ...fl,
       units: generated,

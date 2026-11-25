@@ -577,7 +577,8 @@ export function runCompatibilityAnalysis(project: Project): ClashIssue[] {
     }
 
     // Walkability & Room Reachability BFS Check (0.10m resolution grid)
-    if (ut.walls.length > 0 && ut.openings.some((o) => o.type === 'porta' && o.role === 'entrada')) {
+    const hasEntryDoor = ut.openings.some((o) => o.type === 'porta' && o.role === 'entrada');
+    if (ut.walls.length > 0 && (hasEntryDoor || Boolean(ut.stairVoid))) {
       const cell = 0.1;
       const cols = Math.max(8, Math.ceil(ut.width / cell));
       const rows = Math.max(8, Math.ceil(ut.depth / cell));
@@ -603,6 +604,16 @@ export function runCompatibilityAnalysis(project: Project): ClashIssue[] {
         const maxY = Math.max(w.start.y, w.end.y) + w.thickness / 2;
         markRect(minX, minY, maxX - minX, maxY - minY, 1);
       }
+      // Mark stairwell slab opening (stairVoid) as non-walkable void
+      if (ut.stairVoid) {
+        markRect(
+          ut.stairVoid.x + 0.05,
+          ut.stairVoid.y + 0.05,
+          Math.max(0.1, ut.stairVoid.width - 0.1),
+          Math.max(0.1, ut.stairVoid.depth - 0.1),
+          1,
+        );
+      }
       // Carve door openings through walls
       for (const op of ut.openings) {
         if (op.type !== 'porta') continue;
@@ -622,10 +633,29 @@ export function runCompatibilityAnalysis(project: Project): ClashIssue[] {
 
       const entryOp = ut.openings.find((o) => o.type === 'porta' && o.role === 'entrada');
       const entryWall = entryOp ? ut.walls.find((w) => w.id === entryOp.wallId) : undefined;
+      let seedPos: { x: number; y: number } | null = null;
+      let accessSourceLabel = 'da porta de entrada P1';
+
       if (entryOp && entryWall) {
-        const { center } = getOpeningWorldPosition(entryWall, entryOp);
-        const seedC = Math.min(cols - 2, Math.max(1, Math.floor(center.x / cell)));
-        const seedR = Math.min(rows - 2, Math.max(1, Math.floor(center.y / cell)));
+        seedPos = getOpeningWorldPosition(entryWall, entryOp).center;
+      } else if (ut.stairVoid) {
+        const sv = ut.stairVoid;
+        const edge = sv.landingEdge ?? 'norte';
+        if (edge === 'norte') {
+          seedPos = { x: sv.x + sv.width / 2, y: Math.max(0.25, sv.y - 0.35) };
+        } else if (edge === 'sul') {
+          seedPos = { x: sv.x + sv.width / 2, y: Math.min(ut.depth - 0.25, sv.y + sv.depth + 0.35) };
+        } else if (edge === 'oeste') {
+          seedPos = { x: Math.max(0.25, sv.x - 0.35), y: sv.y + sv.depth / 2 };
+        } else {
+          seedPos = { x: Math.min(ut.width - 0.25, sv.x + sv.width + 0.35), y: sv.y + sv.depth / 2 };
+        }
+        accessSourceLabel = 'da chegada da escada';
+      }
+
+      if (seedPos) {
+        const seedC = Math.min(cols - 2, Math.max(1, Math.floor(seedPos.x / cell)));
+        const seedR = Math.min(rows - 2, Math.max(1, Math.floor(seedPos.y / cell)));
         const visited = new Uint8Array(cols * rows);
         const queue: number[] = [];
         for (let dr = -2; dr <= 2; dr++) {
@@ -681,7 +711,7 @@ export function runCompatibilityAnalysis(project: Project): ClashIssue[] {
               location: `Tipologia ${ut.code}`,
               floorName: 'Tipologia Padrão',
               roomName: rm.name,
-              description: `Ambiente "${rm.name}" sem acesso livre contínuo a partir da porta de entrada P1.`,
+              description: `Ambiente "${rm.name}" sem acesso livre contínuo a partir ${accessSourceLabel}.`,
               reason: 'Mobiliário ou fechamento de parede bloqueia o trajeto até o cômodo.',
               suggestion: 'Reposicionar móveis ou deslocar porta de acesso no Editor 2D/3D.',
               status: 'pendente',
@@ -908,25 +938,26 @@ export function runCompatibilityAnalysis(project: Project): ClashIssue[] {
           });
         }
       }
-      const stair = ut.furniture.find((f) => f.category === 'escada');
-      if (stair?.stairSpec) {
-        const b = stair.stairSpec.blondelSumM;
-        if (b < 0.6 || b > 0.66) {
-          issues.push({
-            id: `clash-mez-blondel-${ut.id}`,
-            severity: 'ATENCAO',
-            disciplines: 'Arquitetura × Circulação Vertical',
-            elementsInvolved: [stair.name],
-            location: `Tipologia ${ut.code}`,
-            floorName: 'Tipologia Padrão',
-            roomName: 'Escada Mezanino',
-            description: `Escada do mezanino fora da faixa ergonômica de Blondel (2h+p = ${b.toFixed(2)} m).`,
-            reason: 'Fórmula de Blondel recomenda 2h + p entre 0,62 m e 0,65 m (NBR 9050/9077).',
-            suggestion: 'Recalcular espelho/piso ou adotar escada em L.',
-            status: 'pendente',
-            targetUnitTypeId: ut.id,
-          });
-        }
+    }
+
+    const stair = ut.furniture.find((f) => f.category === 'escada');
+    if (stair?.stairSpec) {
+      const b = stair.stairSpec.blondelSumM;
+      if (b < 0.6 || b > 0.66) {
+        issues.push({
+          id: `clash-stair-blondel-${ut.id}`,
+          severity: 'ATENCAO',
+          disciplines: 'Arquitetura × Circulação Vertical',
+          elementsInvolved: [stair.name],
+          location: `Tipologia ${ut.code}`,
+          floorName: 'Tipologia Padrão',
+          roomName: ut.hasMezzanine ? 'Escada Mezanino' : 'Escada Interna',
+          description: `Escada interna fora da faixa ergonômica de Blondel (2h+p = ${b.toFixed(2)} m).`,
+          reason: 'Fórmula de Blondel recomenda 2h + p entre 0,62 m e 0,65 m (NBR 9050/9077).',
+          suggestion: 'Recalcular espelho/piso ou ajustar altura entre pavimentos.',
+          status: 'pendente',
+          targetUnitTypeId: ut.id,
+        });
       }
     }
   }

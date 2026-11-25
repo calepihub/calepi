@@ -544,20 +544,38 @@ export interface RainwaterElement {
   notes: string;
 }
 
+export type BuildingKind = 'kitnet' | 'casa_terrea' | 'casa_sobrado';
+
+export interface StairVoidSpec {
+  x: number;
+  y: number;
+  width: number;
+  depth: number;
+  /** Which edge of the stairwell opening connects to the upper floor landing/hall */
+  landingEdge?: 'norte' | 'sul' | 'leste' | 'oeste';
+}
+
 export interface UnitType {
   id: string;
   code: string;
   name: string;
   basePreset: string;
+  buildingKind?: BuildingKind;
   targetArea: number;
   width: number; // m
   depth: number; // m
   ceilingHeight: number; // m
   bedrooms: number;
+  suites?: number;
   bathrooms: number;
   kitchens: number;
   hasLaundry: boolean;
   hasBalcony: boolean;
+  hasDiningArea?: boolean;
+  totalStories?: number;
+  storyIndex?: number;
+  linkedHouseGroupId?: string;
+  stairVoid?: StairVoidSpec;
   hasMezzanine: boolean;
   mezzanine?: MezzanineConfig;
   entrySide?: EntrySide;

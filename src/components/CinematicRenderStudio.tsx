@@ -881,24 +881,92 @@ export const CinematicRenderStudio: React.FC<CinematicRenderStudioProps> = ({
         maxBZ = Math.max(maxBZ, c0.z, c1.z);
 
         const slabC = mapUnitPt(inst, ut.width, ut.width / 2, ut.depth / 2);
+        const buildSlabGeom = (
+          rectW: number,
+          rectD: number,
+          thick: number,
+          voidSpec?: NonNullable<typeof ut.stairVoid>,
+        ): THREE.BufferGeometry => {
+          if (!voidSpec) {
+            const g = new THREE.BoxGeometry(rectW, thick, rectD);
+            g.translate(0, thick / 2, 0);
+            return g;
+          }
+          const shape = new THREE.Shape();
+          const hw = rectW / 2;
+          const hd = rectD / 2;
+          shape.moveTo(-hw, -hd);
+          shape.lineTo(hw, -hd);
+          shape.lineTo(hw, hd);
+          shape.lineTo(-hw, hd);
+          shape.closePath();
+
+          const vx0Raw = inst.mirrored ? ut.width - (voidSpec.x + voidSpec.width) : voidSpec.x;
+          const vx1Raw = inst.mirrored ? ut.width - voidSpec.x : voidSpec.x + voidSpec.width;
+          const hx0 = Math.max(-hw + 0.04, Math.min(hw - 0.08, vx0Raw - ut.width / 2));
+          const hx1 = Math.max(hx0 + 0.05, Math.min(hw - 0.04, vx1Raw - ut.width / 2));
+          const hy0 = Math.max(-hd + 0.04, Math.min(hd - 0.08, ut.depth / 2 - (voidSpec.y + voidSpec.depth)));
+          const hy1 = Math.max(hy0 + 0.05, Math.min(hd - 0.04, ut.depth / 2 - voidSpec.y));
+
+          const hole = new THREE.Path();
+          hole.moveTo(hx0, hy0);
+          hole.lineTo(hx0, hy1);
+          hole.lineTo(hx1, hy1);
+          hole.lineTo(hx1, hy0);
+          hole.closePath();
+          shape.holes.push(hole);
+
+          const extrude = new THREE.ExtrudeGeometry(shape, { depth: thick, bevelEnabled: false });
+          extrude.rotateX(-Math.PI / 2);
+          return extrude;
+        };
+
         const slab = new THREE.Mesh(
-          new THREE.BoxGeometry(ut.width, floor.slabThickness, ut.depth),
+          buildSlabGeom(ut.width, ut.depth, floor.slabThickness, ut.stairVoid),
           matLightSlab,
         );
-        slab.position.set(slabC.x, baseY + floor.slabThickness / 2, slabC.z);
+        slab.position.set(slabC.x, baseY, slabC.z);
         slab.rotation.y = -(inst.rotationDeg * Math.PI) / 180;
         slab.receiveShadow = !isSoftwareGl;
         slab.castShadow = !isSoftwareGl;
         group.add(slab);
 
         const floorFinish = new THREE.Mesh(
-          new THREE.BoxGeometry(ut.width - 0.08, 0.025, ut.depth - 0.08),
+          buildSlabGeom(ut.width - 0.08, ut.depth - 0.08, 0.025, ut.stairVoid),
           matFloor,
         );
-        floorFinish.position.set(slabC.x, baseY + floor.slabThickness + 0.012, slabC.z);
+        floorFinish.position.set(slabC.x, baseY + floor.slabThickness, slabC.z);
         floorFinish.rotation.y = -(inst.rotationDeg * Math.PI) / 180;
         floorFinish.receiveShadow = !isSoftwareGl;
         group.add(floorFinish);
+
+        if (ut.stairVoid) {
+          const sv = ut.stairVoid;
+          const guardGroup = new THREE.Group();
+          const addRailSeg = (x1: number, y1: number, x2: number, y2: number) => {
+            const p1 = mapUnitPt(inst, ut.width, x1, y1);
+            const p2 = mapUnitPt(inst, ut.width, x2, y2);
+            const segLen = Math.hypot(p2.x - p1.x, p2.z - p1.z);
+            if (segLen < 0.15) return;
+            const topBar = new THREE.Mesh(new THREE.BoxGeometry(segLen, 0.035, 0.035), matSteel);
+            topBar.position.set((p1.x + p2.x) / 2, baseY + floor.slabThickness + 1.0, (p1.z + p2.z) / 2);
+            topBar.rotation.y = -Math.atan2(p2.z - p1.z, p2.x - p1.x);
+            const midBar = new THREE.Mesh(new THREE.BoxGeometry(segLen, 0.02, 0.02), matSteel);
+            midBar.position.set((p1.x + p2.x) / 2, baseY + floor.slabThickness + 0.52, (p1.z + p2.z) / 2);
+            midBar.rotation.y = -Math.atan2(p2.z - p1.z, p2.x - p1.x);
+            const pA = new THREE.Mesh(new THREE.BoxGeometry(0.035, 1.02, 0.035), matSteel);
+            pA.position.set(p1.x, baseY + floor.slabThickness + 0.51, p1.z);
+            const pB = new THREE.Mesh(new THREE.BoxGeometry(0.035, 1.02, 0.035), matSteel);
+            pB.position.set(p2.x, baseY + floor.slabThickness + 0.51, p2.z);
+            guardGroup.add(topBar, midBar, pA, pB);
+          };
+          const le = sv.landingEdge ?? 'norte';
+          if (le !== 'oeste' && sv.x > 0.2) addRailSeg(sv.x, sv.y, sv.x, sv.y + sv.depth);
+          if (le !== 'leste' && sv.x + sv.width < ut.width - 0.2) addRailSeg(sv.x + sv.width, sv.y, sv.x + sv.width, sv.y + sv.depth);
+          if (le !== 'sul' && sv.y + sv.depth < ut.depth - 0.2) addRailSeg(sv.x, sv.y + sv.depth, sv.x + sv.width, sv.y + sv.depth);
+          if (le !== 'norte' && sv.y > 0.2) addRailSeg(sv.x, sv.y, sv.x + sv.width, sv.y);
+          group.add(guardGroup);
+        }
 
         if (nightOn && fIdx === 0) {
           const interiorLight = new THREE.PointLight(0xffdca8, activePreset.isNight ? 1.55 : 0.75, 6.5, 2);

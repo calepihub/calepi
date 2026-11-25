@@ -11,11 +11,13 @@ import {
   autoDistributeUnitsAcrossFloors,
   computeBlondelStairSpec,
   computeMezzanineInteriorBounds,
+  generateMultiStoryHouseBundle,
   generateParametricUnitLayout,
   nextId,
 } from '../engine/parametricGenerator';
 import { NumericInput } from './NumericInput';
 import type {
+  BuildingKind,
   EntrySide,
   InternalPartitionType,
   MezzanineStairLayout,
@@ -38,12 +40,21 @@ interface TypologiesModuleProps {
 }
 
 const PRESETS = [
-  { label: 'Kitnet compacta (20 m²)', width: 4.0, depth: 5.0, bedrooms: 0, laundry: false, balcony: false, acc: false },
-  { label: 'Kitnet padrão (25 m²)', width: 4.0, depth: 6.25, bedrooms: 0, laundry: true, balcony: false, acc: false },
-  { label: 'Kitnet ampliada (30 m²)', width: 4.0, depth: 7.5, bedrooms: 1, laundry: true, balcony: true, acc: false },
-  { label: 'Studio urbano (28 m²)', width: 4.2, depth: 6.7, bedrooms: 0, laundry: true, balcony: true, acc: false },
-  { label: 'Loft / Mezanino (35 m²)', width: 5.0, depth: 7.0, bedrooms: 1, laundry: true, balcony: true, acc: false },
-  { label: 'Unidade Acessível NBR 9050 (32 m²)', width: 4.5, depth: 7.1, bedrooms: 1, laundry: true, balcony: false, acc: true },
+  { label: 'Kitnet compacta (20 m²)', kind: 'kitnet' as BuildingKind, width: 4.0, depth: 5.0, bedrooms: 0, suites: 0, stories: 1, laundry: false, balcony: false, acc: false },
+  { label: 'Kitnet padrão (25 m²)', kind: 'kitnet' as BuildingKind, width: 4.0, depth: 6.25, bedrooms: 0, suites: 0, stories: 1, laundry: true, balcony: false, acc: false },
+  { label: 'Kitnet ampliada (30 m²)', kind: 'kitnet' as BuildingKind, width: 4.0, depth: 7.5, bedrooms: 1, suites: 0, stories: 1, laundry: true, balcony: true, acc: false },
+  { label: 'Studio urbano (28 m²)', kind: 'kitnet' as BuildingKind, width: 4.2, depth: 6.7, bedrooms: 0, suites: 0, stories: 1, laundry: true, balcony: true, acc: false },
+  { label: 'Loft / Mezanino (35 m²)', kind: 'kitnet' as BuildingKind, width: 5.0, depth: 7.0, bedrooms: 1, suites: 0, stories: 1, laundry: true, balcony: true, acc: false },
+  { label: 'Unidade Acessível NBR 9050 (32 m²)', kind: 'kitnet' as BuildingKind, width: 4.5, depth: 7.1, bedrooms: 1, suites: 0, stories: 1, laundry: true, balcony: false, acc: true },
+];
+
+const HOUSE_PRESETS = [
+  { label: 'Casa Térrea 1Q Compacta (42 m²)', kind: 'casa_terrea' as BuildingKind, width: 6.0, depth: 7.0, bedrooms: 1, suites: 0, stories: 1, laundry: true, balcony: false, acc: false },
+  { label: 'Casa Térrea 2Q c/ Suíte (63 m²)', kind: 'casa_terrea' as BuildingKind, width: 7.0, depth: 9.0, bedrooms: 2, suites: 1, stories: 1, laundry: true, balcony: true, acc: false },
+  { label: 'Casa Térrea 3Q c/ Suíte (88 m²)', kind: 'casa_terrea' as BuildingKind, width: 8.0, depth: 11.0, bedrooms: 3, suites: 1, stories: 1, laundry: true, balcony: true, acc: false },
+  { label: 'Sobrado 2 Pav. 2Q c/ Suíte (~108 m²)', kind: 'casa_sobrado' as BuildingKind, width: 6.4, depth: 8.4, bedrooms: 2, suites: 1, stories: 2, laundry: true, balcony: false, acc: false },
+  { label: 'Sobrado 2 Pav. 3Q c/ Suíte (~132 m²)', kind: 'casa_sobrado' as BuildingKind, width: 7.0, depth: 9.4, bedrooms: 3, suites: 1, stories: 2, laundry: true, balcony: true, acc: false },
+  { label: 'Sobrado 3 Pav. c/ Ático (~180 m²)', kind: 'casa_sobrado' as BuildingKind, width: 6.8, depth: 8.8, bedrooms: 3, suites: 1, stories: 3, laundry: true, balcony: true, acc: false },
 ];
 
 export const TypologiesModule: React.FC<TypologiesModuleProps> = ({
@@ -56,6 +67,10 @@ export const TypologiesModule: React.FC<TypologiesModuleProps> = ({
 }) => {
   const activeUt =
     project.unitTypes.find((u) => u.id === selectedUnitTypeId) ?? project.unitTypes[0];
+
+  const [newBuildingKind, setNewBuildingKind] = useState<BuildingKind>('kitnet');
+  const [newSuites, setNewSuites] = useState(0);
+  const [newTotalStories, setNewTotalStories] = useState(2);
 
   const [newCode, setNewCode] = useState(`TIPO-${String.fromCharCode(65 + project.unitTypes.length)}`);
   const [newName, setNewName] = useState('Nova Kitnet Paramétrica');
@@ -88,7 +103,7 @@ export const TypologiesModule: React.FC<TypologiesModuleProps> = ({
   const [distNotice, setDistNotice] = useState<string | null>(null);
   const [confirmDeleteActiveUtId, setConfirmDeleteActiveUtId] = useState<string | null>(null);
 
-  const canNewMezzanine = newCeilingHeight >= 3.0;
+  const canNewMezzanine = newBuildingKind === 'kitnet' && newCeilingHeight >= 3.0;
   const newInteriorBounds = computeMezzanineInteriorBounds(
     newWidth,
     newDepth,
@@ -115,25 +130,109 @@ export const TypologiesModule: React.FC<TypologiesModuleProps> = ({
     setTimeout(() => setDistNotice(null), 5000);
   };
 
+  const switchNewBuildingKind = (kind: BuildingKind) => {
+    setNewBuildingKind(kind);
+    const letter = String.fromCharCode(65 + Math.min(25, project.unitTypes.length));
+    if (kind === 'casa_terrea') {
+      setNewCode(`CASA-${letter}`);
+      setNewName('Casa Térrea Residencial');
+      setNewWidth(7.0);
+      setNewDepth(9.0);
+      setNewCeilingHeight(2.85);
+      setNewBedrooms(2);
+      setNewSuites(1);
+      setNewEntrySide('frente');
+      setNewLaundry(true);
+      setNewMepProfile('completo');
+      setNewMezzEnabled(false);
+    } else if (kind === 'casa_sobrado') {
+      setNewCode(`SOB-${letter}`);
+      setNewName('Sobrado Residencial');
+      setNewWidth(6.8);
+      setNewDepth(8.8);
+      setNewCeilingHeight(2.85);
+      setNewBedrooms(3);
+      setNewSuites(1);
+      setNewTotalStories(2);
+      setNewEntrySide('frente');
+      setNewLaundry(true);
+      setNewMepProfile('completo');
+      setNewMezzEnabled(false);
+    } else {
+      setNewCode(`TIPO-${letter}`);
+      setNewName('Nova Kitnet Paramétrica');
+      setNewWidth(4.2);
+      setNewDepth(6.0);
+      setNewCeilingHeight(2.8);
+      setNewBedrooms(0);
+      setNewSuites(0);
+      setNewMepProfile('simples');
+    }
+  };
+
   const handleCreateTypology = (e: React.FormEvent) => {
     e.preventDefault();
-    const allowMezz = newCeilingHeight >= 3.0 && newMezzEnabled;
+    const intWallT =
+      newPartitionType === 'drywall'
+        ? 0.095
+        : project.constructionMethod.internalWallThickness;
+
+    if (newBuildingKind === 'casa_sobrado') {
+      const storiesCount = Math.max(2, Math.min(3, newTotalStories));
+      const bundle = generateMultiStoryHouseBundle({
+        code: newCode.trim() || `SOB-${project.unitTypes.length + 1}`,
+        name: newName.trim() || 'Sobrado Residencial',
+        width: newWidth,
+        depth: newDepth,
+        ceilingHeight: newCeilingHeight,
+        bedrooms: Math.max(1, newBedrooms),
+        suites: newSuites,
+        hasLaundry: newLaundry,
+        hasBalcony: newBalcony,
+        hasMezzanine: false,
+        accessible: newAcc,
+        extWallThickness: project.constructionMethod.externalWallThickness,
+        intWallThickness: intWallT,
+        constructionSystem: project.constructionMethod.methodId,
+        entrySide: newEntrySide,
+        internalPartitionType: newPartitionType,
+        mepProfile: newMepProfile,
+        totalStories: storiesCount,
+      });
+      onUpdateProject((prev) => {
+        const withTypes: Project = {
+          ...prev,
+          unitTypes: [...prev.unitTypes, ...bundle],
+        };
+        return prev.floors.length < storiesCount
+          ? setProjectFloorCount(withTypes, storiesCount, false)
+          : withTypes;
+      }, `Criação do Sobrado ${newCode.trim()} (${storiesCount} pavimentos vinculados)`);
+      onSelectUnitType(bundle[0].id);
+      setNewCode(`SOB-${String.fromCharCode(65 + project.unitTypes.length + bundle.length)}`);
+      setDistNotice(
+        `Sobrado criado com ${bundle.length} plantas vinculadas (Térreo + Pavimento Superior${storiesCount >= 3 ? ' + Ático' : ''}) e escada Blondel alinhada ao vão da laje.`,
+      );
+      setTimeout(() => setDistNotice(null), 6000);
+      return;
+    }
+
+    const allowMezz = newBuildingKind === 'kitnet' && newCeilingHeight >= 3.0 && newMezzEnabled;
     const created = generateParametricUnitLayout({
       code: newCode.trim() || `TIPO-${project.unitTypes.length + 1}`,
       name: newName.trim() || 'Tipologia Personalizada',
+      buildingKind: newBuildingKind,
       width: newWidth,
       depth: newDepth,
       ceilingHeight: newCeilingHeight,
-      bedrooms: newBedrooms,
+      bedrooms: newBuildingKind === 'casa_terrea' ? Math.max(1, newBedrooms) : newBedrooms,
+      suites: newBuildingKind === 'casa_terrea' ? newSuites : 0,
       hasLaundry: newLaundry,
       hasBalcony: newBalcony,
       hasMezzanine: allowMezz,
       accessible: newAcc,
       extWallThickness: project.constructionMethod.externalWallThickness,
-      intWallThickness:
-        newPartitionType === 'drywall'
-          ? 0.095
-          : project.constructionMethod.internalWallThickness,
+      intWallThickness: intWallT,
       constructionSystem: project.constructionMethod.methodId,
       entrySide: newEntrySide,
       internalPartitionType: newPartitionType,
@@ -154,17 +253,24 @@ export const TypologiesModule: React.FC<TypologiesModuleProps> = ({
       `Criação de tipologia paramétrica ${created.code}`,
     );
     onSelectUnitType(created.id);
-    setNewCode(`TIPO-${String.fromCharCode(65 + project.unitTypes.length + 1)}`);
+    setNewCode(`${newBuildingKind === 'casa_terrea' ? 'CASA' : 'TIPO'}-${String.fromCharCode(65 + project.unitTypes.length + 1)}`);
   };
 
   const handleRegenerateCurrent = (ut: UnitType) => {
-    const allowMezz = ut.ceilingHeight >= 3.0 && ut.hasMezzanine;
+    const allowMezz = ut.buildingKind !== 'casa_sobrado' && ut.buildingKind !== 'casa_terrea' && ut.ceilingHeight >= 3.0 && ut.hasMezzanine;
     const partType = ut.internalPartitionType ?? project.constructionMethod.internalPartitionType ?? 'alvenaria';
     const regenerated = generateParametricUnitLayout({
       id: ut.id,
       code: ut.code,
       name: ut.name,
       basePreset: ut.basePreset,
+      buildingKind: ut.buildingKind,
+      suites: ut.suites,
+      bathrooms: ut.bathrooms,
+      hasDiningArea: ut.hasDiningArea,
+      totalStories: ut.totalStories,
+      storyIndex: ut.storyIndex,
+      linkedHouseGroupId: ut.linkedHouseGroupId,
       width: ut.width,
       depth: ut.depth,
       ceilingHeight: ut.ceilingHeight,
@@ -280,10 +386,10 @@ export const TypologiesModule: React.FC<TypologiesModuleProps> = ({
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[#2A2F38] pb-4">
         <div>
           <h1 className="text-xl font-semibold text-white">
-            Tipologias de Kitnets, Ambientes & Acabamentos
+            Tipologias de Kitnets, Casas Térreas &amp; Sobrados
           </h1>
           <p className="text-xs text-[#949BA8] mt-1">
-            Gerador paramétrico sem limites de modelos. Defina dimensões, cômodos, especificações e edite livremente na planta 2D.
+            Gerador paramétrico completo para kitnets, casas térreas (1–3 quartos c/ suíte) e sobrados com pavimentos vinculados e escada Blondel.
           </p>
         </div>
         {activeUt && (
@@ -449,19 +555,51 @@ export const TypologiesModule: React.FC<TypologiesModuleProps> = ({
           >
             <h2 className="text-sm font-semibold text-white">Nova Tipologia Paramétrica</h2>
 
+            {/* Seletor de Categoria: Kitnet / Casa Térrea / Sobrado */}
+            <div className="grid grid-cols-3 gap-1 rounded border border-[#2A2F38] bg-[#14161A] p-1">
+              {(
+                [
+                  ['kitnet', 'Kitnet / Studio'],
+                  ['casa_terrea', 'Casa Térrea'],
+                  ['casa_sobrado', 'Sobrado (Andares)'],
+                ] as const
+              ).map(([kindVal, kindLbl]) => (
+                <button
+                  key={kindVal}
+                  type="button"
+                  onClick={() => switchNewBuildingKind(kindVal)}
+                  className={`px-2 py-1.5 text-[11px] font-medium rounded transition-colors ${
+                    newBuildingKind === kindVal
+                      ? 'bg-[#2F7CF6] text-white font-semibold'
+                      : 'text-[#949BA8] hover:text-white'
+                  }`}
+                >
+                  {kindLbl}
+                </button>
+              ))}
+            </div>
+
             <div className="flex flex-wrap gap-1.5">
-              {PRESETS.map((pr) => (
+              {(newBuildingKind === 'kitnet' ? PRESETS : HOUSE_PRESETS.filter((p) => p.kind === newBuildingKind)).map((pr) => (
                 <button
                   key={pr.label}
                   type="button"
                   onClick={() => {
+                    setNewBuildingKind(pr.kind);
                     setNewName(pr.label);
                     setNewWidth(pr.width);
                     setNewDepth(pr.depth);
                     setNewBedrooms(pr.bedrooms);
+                    setNewSuites(pr.suites);
+                    setNewTotalStories(pr.stories);
                     setNewLaundry(pr.laundry);
                     setNewBalcony(pr.balcony);
                     setNewAcc(pr.acc);
+                    if (pr.kind !== 'kitnet') {
+                      setNewEntrySide('frente');
+                      setNewMepProfile('completo');
+                      setNewMezzEnabled(false);
+                    }
                   }}
                   className="px-2 py-1 text-[11px] rounded bg-[#14161A] border border-[#2A2F38] text-[#C4C9D4] hover:border-[#2F7CF6]"
                 >
@@ -530,15 +668,84 @@ export const TypologiesModule: React.FC<TypologiesModuleProps> = ({
               <div>
                 <label className="block text-[11px] text-[#949BA8] mb-1">Quartos</label>
                 <NumericInput
-                  min={0}
+                  min={newBuildingKind === 'kitnet' ? 0 : 1}
                   max={3}
                   integerOnly
                   value={newBedrooms}
-                  onCommit={setNewBedrooms}
+                  onCommit={(val) => {
+                    setNewBedrooms(val);
+                    if (val < 2) setNewSuites(0);
+                  }}
                   className="w-full px-2 py-1.5 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
                 />
               </div>
             </div>
+
+            {newBuildingKind !== 'kitnet' && (
+              <div className="grid grid-cols-2 gap-2 rounded border border-[#2A2F38] bg-[#14161A] p-2.5">
+                <div>
+                  <label className="block text-[11px] font-medium text-[#C4C9D4] mb-1">
+                    Suíte Privativa
+                  </label>
+                  <div className="grid grid-cols-2 gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setNewSuites(0)}
+                      className={`px-2 py-1 text-[11px] rounded border ${
+                        newSuites === 0
+                          ? 'border-[#2F7CF6] bg-[#2F7CF6]/20 text-white font-semibold'
+                          : 'border-[#2A2F38] bg-[#1B1E24] text-[#949BA8]'
+                      }`}
+                    >
+                      1 BWC Social
+                    </button>
+                    <button
+                      type="button"
+                      disabled={newBedrooms < 2}
+                      onClick={() => setNewSuites(1)}
+                      className={`px-2 py-1 text-[11px] rounded border disabled:opacity-40 ${
+                        newSuites >= 1
+                          ? 'border-[#2F7CF6] bg-[#2F7CF6]/20 text-white font-semibold'
+                          : 'border-[#2A2F38] bg-[#1B1E24] text-[#949BA8]'
+                      }`}
+                    >
+                      1 Suíte + BWC
+                    </button>
+                  </div>
+                </div>
+                {newBuildingKind === 'casa_sobrado' && (
+                  <div>
+                    <label className="block text-[11px] font-medium text-[#C4C9D4] mb-1">
+                      Pavimentos do Sobrado
+                    </label>
+                    <div className="grid grid-cols-2 gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setNewTotalStories(2)}
+                        className={`px-2 py-1 text-[11px] rounded border ${
+                          newTotalStories === 2
+                            ? 'border-[#2F7CF6] bg-[#2F7CF6]/20 text-white font-semibold'
+                            : 'border-[#2A2F38] bg-[#1B1E24] text-[#949BA8]'
+                        }`}
+                      >
+                        2 Pav. (Térreo+Sup)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setNewTotalStories(3)}
+                        className={`px-2 py-1 text-[11px] rounded border ${
+                          newTotalStories === 3
+                            ? 'border-[#2F7CF6] bg-[#2F7CF6]/20 text-white font-semibold'
+                            : 'border-[#2A2F38] bg-[#1B1E24] text-[#949BA8]'
+                        }`}
+                      >
+                        3 Pav. (+Ático)
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="space-y-2 rounded border border-[#2A2F38] bg-[#14161A] p-2.5">
               <div>
@@ -613,7 +820,7 @@ export const TypologiesModule: React.FC<TypologiesModuleProps> = ({
                         : 'border-[#2A2F38] bg-[#1B1E24] text-[#949BA8] hover:text-white'
                     }`}
                   >
-                    Kitnet Simples (Menor Caminho)
+                    {newBuildingKind === 'kitnet' ? 'Kitnet Simples (Menor Caminho)' : 'Enxuto (Só AF + Chuv. Elét.)'}
                   </button>
                   <button
                     type="button"
@@ -890,7 +1097,9 @@ export const TypologiesModule: React.FC<TypologiesModuleProps> = ({
               className="w-full py-2 text-xs font-semibold rounded bg-[#2F7CF6] text-white hover:bg-[#2569D6] flex items-center justify-center gap-1.5"
             >
               <Plus className="w-3.5 h-3.5" />
-              Gerar Tipologia ({round2(newWidth * newDepth)} m²)
+              {newBuildingKind === 'casa_sobrado'
+                ? `Gerar Sobrado ${newTotalStories} Pav. (~${round2(newWidth * newDepth * newTotalStories)} m² total)`
+                : `Gerar Tipologia (${round2(newWidth * newDepth)} m²)`}
             </button>
           </form>
         </div>
@@ -1076,12 +1285,15 @@ export const TypologiesModule: React.FC<TypologiesModuleProps> = ({
                         handleRegenerateCurrent({
                           ...activeUt,
                           bedrooms: val,
+                          suites: val < 2 ? 0 : activeUt.suites,
                         });
                       }}
                       className="w-full px-2 py-1.5 text-xs rounded bg-[#14161A] border border-[#2A2F38] text-white"
                     >
                       <option value={0}>Studio (Integrado)</option>
                       <option value={1}>1 Quarto (Porta 70cm)</option>
+                      <option value={2}>2 Quartos (Casa)</option>
+                      <option value={3}>3 Quartos (Casa)</option>
                     </select>
                   </div>
                   <div>
@@ -1147,6 +1359,21 @@ export const TypologiesModule: React.FC<TypologiesModuleProps> = ({
                     />
                     Acessível NBR 9050
                   </label>
+                  {activeUt.bedrooms >= 2 && (
+                    <label className="inline-flex items-center gap-1.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={(activeUt.suites ?? 0) >= 1}
+                        onChange={(e) =>
+                          handleRegenerateCurrent({
+                            ...activeUt,
+                            suites: e.target.checked ? 1 : 0,
+                          })
+                        }
+                      />
+                      Suíte Privativa (2º BWC)
+                    </label>
+                  )}
                 </div>
 
                 {/* Entrada Principal, Divisórias Internas & Perfil MEP da Tipologia Ativa */}

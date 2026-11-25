@@ -1319,6 +1319,67 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
           );
         })()}
 
+        {/* Stairwell Slab Cutout (Vão da Escada em Pavimentos Superiores de Sobrado) */}
+        {ut.stairVoid &&
+          (!roomScope || roomScope.category === 'circulacao') &&
+          (() => {
+            const sv = ut.stairVoid;
+            const svX = isMirrored ? ut.width - sv.x - sv.width : sv.x;
+            return (
+              <g pointerEvents="none">
+                <rect
+                  x={svX}
+                  y={sv.y}
+                  width={sv.width}
+                  height={sv.depth}
+                  fill="rgba(15, 23, 42, 0.72)"
+                  stroke="#F59E0B"
+                  strokeWidth="0.032"
+                  strokeDasharray="0.1 0.06"
+                />
+                <line
+                  x1={svX}
+                  y1={sv.y}
+                  x2={svX + sv.width}
+                  y2={sv.y + sv.depth}
+                  stroke="#F59E0B"
+                  strokeOpacity={0.45}
+                  strokeWidth="0.016"
+                />
+                <line
+                  x1={svX + sv.width}
+                  y1={sv.y}
+                  x2={svX}
+                  y2={sv.y + sv.depth}
+                  stroke="#F59E0B"
+                  strokeOpacity={0.45}
+                  strokeWidth="0.016"
+                />
+                <text
+                  x={svX + sv.width / 2}
+                  y={sv.y + sv.depth / 2 - 0.04}
+                  textAnchor="middle"
+                  fill="#FBBF24"
+                  fontSize="0.1"
+                  fontWeight="bold"
+                  fontFamily="JetBrains Mono, monospace"
+                >
+                  VÃO ESCADA
+                </text>
+                <text
+                  x={svX + sv.width / 2}
+                  y={sv.y + sv.depth / 2 + 0.1}
+                  textAnchor="middle"
+                  fill="#FDE68A"
+                  fontSize="0.08"
+                  fontFamily="JetBrains Mono, monospace"
+                >
+                  DESCE ↓
+                </text>
+              </g>
+            );
+          })()}
+
         {/* Furniture (Detailed Architectural CAD Blocks with true rotation & selection rotate handle) */}
         {layers.furniture &&
           ut.furniture.map((f) => {

@@ -279,6 +279,12 @@ export function calculateQuantities(project: Project): QuantitiesReport {
       }
     }
 
+    if (ut.stairVoid) {
+      const voidArea = ut.stairVoid.width * ut.stairVoid.depth * count;
+      totalDryFloorAreaM2 = Math.max(0, totalDryFloorAreaM2 - voidArea);
+      totalCeilingAreaM2 = Math.max(0, totalCeilingAreaM2 - voidArea);
+    }
+
     for (const ep of ut.electricalPoints) {
       if (ep.category === 'quadro_luz' || ep.code.toUpperCase().startsWith('QDC')) {
         totalQdcBoards += count;
@@ -349,7 +355,9 @@ export function calculateQuantities(project: Project): QuantitiesReport {
     project.floors.reduce((sum, fl) => {
       const floorUnitsArea = fl.units.reduce((us, inst) => {
         const ut = project.unitTypes.find((t) => t.id === inst.unitTypeId);
-        return us + (ut ? ut.width * ut.depth : 0);
+        if (!ut) return us;
+        const voidArea = ut.stairVoid ? ut.stairVoid.width * ut.stairVoid.depth : 0;
+        return us + Math.max(0, ut.width * ut.depth - voidArea);
       }, 0);
       return sum + (floorUnitsArea + fl.commonAreaM2) * fl.slabThickness;
     }, 0),
@@ -364,7 +372,9 @@ export function calculateQuantities(project: Project): QuantitiesReport {
     project.floors.reduce((sum, fl) => {
       const floorUnitsArea = fl.units.reduce((us, inst) => {
         const ut = project.unitTypes.find((t) => t.id === inst.unitTypeId);
-        return us + (ut ? ut.width * ut.depth : 0);
+        if (!ut) return us;
+        const voidArea = ut.stairVoid ? ut.stairVoid.width * ut.stairVoid.depth : 0;
+        return us + Math.max(0, ut.width * ut.depth - voidArea);
       }, 0);
       return sum + (floorUnitsArea + fl.commonAreaM2);
     }, 0) +
@@ -579,12 +589,12 @@ export function calculateQuantities(project: Project): QuantitiesReport {
             id: 'q-stairs',
             code: 'ESC-01',
             discipline: 'Estrutura' as const,
-            description: 'Escada Interna Planejada p/ Mezanino c/ Corrimão (Blondel)',
+            description: 'Escada Interna Planejada c/ Corrimão (Mezanino / Sobrado — Blondel)',
             unit: 'un',
             netQuantity: totalMezzanineStairs,
             lossFactorPercent: 0,
             grossQuantity: totalMezzanineStairs,
-            measurementCriterion: 'Contagem unitária de escadas planejadas de acesso ao mezanino',
+            measurementCriterion: 'Contagem unitária de escadas internas planejadas (Blondel)',
             sourceOrigin: 'Mobiliário/circulação categoria escada nas tipologias',
             calculationMemory: `Contagem direta × N_unid = ${totalMezzanineStairs} un`,
             unitTypeBreakdown: breakdownByUt((ut) =>

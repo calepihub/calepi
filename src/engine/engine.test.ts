@@ -19,6 +19,8 @@ import {
   autoDistributeUnitsAcrossFloors,
   createBlankProject,
   createDefaultDemoProject,
+  generateCasaTerreaLayout,
+  generateMultiStoryHouseBundle,
   generateParametricUnitLayout,
 } from './parametricGenerator';
 import {
@@ -1857,6 +1859,175 @@ test('Floor unit typology & entrance edits sync across floors without stacking s
   const cross = (wC.x - wA.x) * (wB.y - wA.y) - (wC.y - wA.y) * (wB.x - wA.x);
   assert.ok(Math.abs(cross) < 1e-6);
 });
+
+test('Casas Térreas (1Q, 2Q c/ Suíte, 3Q c/ Suíte + Varanda): 0 CRITICO clashes, BFS reachability, MEP & SINAPI-RJ budget', () => {
+  const configs = [
+    { code: 'CASA-1Q', name: 'Casa 1Q Compacta', width: 6.0, depth: 7.0, bedrooms: 1, suites: 0, balcony: false },
+    { code: 'CASA-2Q', name: 'Casa 2Q c/ Suíte', width: 7.0, depth: 9.0, bedrooms: 2, suites: 1, balcony: true },
+    { code: 'CASA-3Q', name: 'Casa 3Q c/ Suíte', width: 8.0, depth: 11.0, bedrooms: 3, suites: 1, balcony: true },
+  ];
+
+  for (const cfg of configs) {
+    const ut = generateCasaTerreaLayout({
+      code: cfg.code,
+      name: cfg.name,
+      buildingKind: 'casa_terrea',
+      width: cfg.width,
+      depth: cfg.depth,
+      ceilingHeight: 2.85,
+      bedrooms: cfg.bedrooms,
+      suites: cfg.suites,
+      hasLaundry: true,
+      hasBalcony: cfg.balcony,
+      hasMezzanine: false,
+      accessible: false,
+      extWallThickness: 0.15,
+      intWallThickness: 0.1,
+      constructionSystem: 'alvenaria_convencional',
+      entrySide: 'frente',
+      mepProfile: 'completo',
+    });
+
+    assert.equal(ut.buildingKind, 'casa_terrea');
+    assert.equal(ut.bedrooms, cfg.bedrooms);
+    assert.equal(ut.rooms.filter((r) => r.category === 'quarto').length, cfg.bedrooms);
+    assert.equal(ut.rooms.filter((r) => r.category === 'banheiro').length, cfg.suites > 0 ? 2 : 1);
+    assert.ok(ut.electricalPoints.some((e) => e.category === 'quadro_luz'));
+    assert.equal(ut.furniture.some((f) => f.category === 'tanque'), false);
+
+    const blank = createBlankProject({
+      name: `Projeto ${cfg.code}`,
+      client: 'Cliente Residencial',
+      municipality: 'Niterói',
+      state: 'RJ',
+      front: 12,
+      depth: 25,
+      floorsCount: 1,
+      methodId: 'alvenaria_convencional',
+    });
+    const proj = autoDistributeUnitsAcrossFloors({ ...blank, unitTypes: [ut] }, ut.id);
+    assert.equal(proj.floors[0].units.length, 1);
+
+    const clashes = runCompatibilityAnalysis(proj);
+    const crit = clashes.filter((c) => c.severity === 'CRITICO');
+    assert.equal(
+      crit.length,
+      0,
+      `${cfg.code} had CRITICO clashes: ${JSON.stringify(crit)}`,
+    );
+
+    const qty = calculateQuantities(proj);
+    assert.equal(qty.summary.totalUnits, 1);
+    const syncedEntries = syncBudgetWithQuantities(proj, qty);
+    const budget = calculateBudgetSummary({ ...proj, budgetEntries: syncedEntries }, qty);
+    assert.equal(budget.unquotedCount, 0, `${cfg.code} had unquoted items`);
+    assert.ok(budget.grandTotalCost > 0);
+
+    const dxf = generateProjectDXF(proj, 0);
+    assert.ok(dxf.includes('SALA') || dxf.includes('COZ'));
+  }
+});
+
+test('Sobrados (2 e 3 Pavimentos): Linked stories, stairVoid cutout alignment, Blondel ergonomics, 0 CRITICO & multi-floor implantation', () => {
+  for (const totalStories of [2, 3] as const) {
+    const bundle = generateMultiStoryHouseBundle({
+      code: `SOB-${totalStories}P`,
+      name: `Sobrado ${totalStories} Pavimentos`,
+      width: 7.0,
+      depth: 9.2,
+      ceilingHeight: 2.85,
+      bedrooms: 3,
+      suites: 1,
+      hasLaundry: true,
+      hasBalcony: true,
+      hasMezzanine: false,
+      accessible: false,
+      extWallThickness: 0.15,
+      intWallThickness: 0.1,
+      constructionSystem: 'alvenaria_convencional',
+      entrySide: 'frente',
+      mepProfile: 'completo',
+      totalStories,
+    });
+
+    assert.equal(bundle.length, totalStories);
+    const groupId = bundle[0].linkedHouseGroupId;
+    assert.ok(groupId);
+    assert.equal(bundle[0].storyIndex, 0);
+    assert.equal(bundle[0].stairVoid, undefined);
+    const groundStair = bundle[0].furniture.find((f) => f.category === 'escada');
+    assert.ok(groundStair && groundStair.stairSpec);
+    assert.ok(
+      groundStair.stairSpec.blondelSumM >= 0.6 && groundStair.stairSpec.blondelSumM <= 0.66,
+      `Blondel out of range: ${groundStair.stairSpec.blondelSumM}`,
+    );
+
+    for (let s = 1; s < totalStories; s++) {
+      assert.equal(bundle[s].linkedHouseGroupId, groupId);
+      assert.equal(bundle[s].storyIndex, s);
+      assert.ok(bundle[s].stairVoid, `Story ${s} missing stairVoid`);
+      assert.ok(Math.abs(bundle[s].stairVoid!.x - groundStair.x) < 0.1);
+      assert.ok(Math.abs(bundle[s].stairVoid!.y - groundStair.y) < 0.1);
+    }
+
+    const blank = createBlankProject({
+      name: `Projeto Sobrado ${totalStories}P`,
+      client: 'Cliente Sobrado',
+      municipality: 'Rio de Janeiro',
+      state: 'RJ',
+      front: 12,
+      depth: 25,
+      floorsCount: totalStories,
+      methodId: 'alvenaria_convencional',
+    });
+
+    const baseProj: Project = {
+      ...blank,
+      unitTypes: bundle,
+      implantation: {
+        ...createDefaultImplantationConfig({ ...blank, unitTypes: bundle }),
+        primaryUnitTypeId: bundle[0].id,
+        layoutPattern: 'isolada',
+        primaryZone: 'centralizada',
+        totalUnitsTarget: 1,
+        couplingMode: 'separadas',
+      },
+    };
+
+    const distributed = autoDistributeUnitsAcrossFloors(baseProj, bundle[0].id);
+    for (let s = 0; s < totalStories; s++) {
+      assert.equal(distributed.floors[s].units.length, 1);
+      assert.equal(distributed.floors[s].units[0].unitTypeId, bundle[s].id);
+    }
+
+    // Replicating ground floor remaps paired story UnitType IDs onto upper floors
+    const impFloors = distributed.floors.map((fl) => ({
+      ...fl,
+      units: generateImplantationUnits(distributed, distributed.implantation!, fl.id),
+    }));
+    for (let s = 0; s < totalStories; s++) {
+      assert.equal(impFloors[s].units.length, 1);
+      assert.equal(impFloors[s].units[0].unitTypeId, bundle[s].id);
+    }
+
+    const projReady: Project = { ...distributed, floors: impFloors };
+    const clashes = runCompatibilityAnalysis(projReady);
+    const crit = clashes.filter((c) => c.severity === 'CRITICO');
+    assert.equal(
+      crit.length,
+      0,
+      `Sobrado ${totalStories}P had CRITICO clashes: ${JSON.stringify(crit)}`,
+    );
+
+    const qty = calculateQuantities(projReady);
+    assert.ok(qty.items.some((i) => i.code === 'ESC-01'));
+    const syncedEntries = syncBudgetWithQuantities(projReady, qty);
+    const budget = calculateBudgetSummary({ ...projReady, budgetEntries: syncedEntries }, qty);
+    assert.equal(budget.unquotedCount, 0);
+    assert.ok(budget.grandTotalCost > 0);
+  }
+});
+
 
 
 
