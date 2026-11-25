@@ -397,3 +397,121 @@ export function checkImplantationFeasibility(
     occupancyRatePercent: round2((footprintAreaM2 / siteArea) * 100),
   };
 }
+
+export interface HostWallSnapResult {
+  wall: Wall;
+  offsetAlongWall: number;
+  distance: number;
+  wallLength: number;
+  snappedPoint: Point2D;
+}
+
+/**
+ * Clamps `offsetAlongWall` cleanly within [margin, wallLength - openingWidth - margin]
+ * so an opening always sits validly on its host wall.
+ */
+export function clampOpeningOffsetToWall(
+  wallLength: number,
+  openingWidth: number,
+  rawOffset: number,
+  snapStep = 0.05,
+): number {
+  const margin = wallLength >= openingWidth + 0.06 ? 0.02 : 0;
+  const maxOff = Math.max(margin, wallLength - openingWidth - margin);
+  const clamped = Math.max(margin, Math.min(maxOff, rawOffset));
+  const snapped = snapStep > 0 ? Math.round(clamped / snapStep) * snapStep : clamped;
+  return round2(Math.max(margin, Math.min(maxOff, snapped)));
+}
+
+/**
+ * Finds the best host wall for placing or dragging any door or window near `pt`
+ * (in unit-local coordinates). Supports transferring seamlessly onto ANY wall,
+ * with gentle hysteresis toward `currentWallId` near corners so sliding doesn't jitter.
+ */
+export function findBestHostWallForOpening(
+  pt: Point2D,
+  walls: Wall[],
+  openingWidth: number,
+  currentWallId?: string,
+  maxDistance = 2.0,
+  snapStep = 0.05,
+): HostWallSnapResult | null {
+  type Candidate = HostWallSnapResult & { score: number };
+  const candidates: Candidate[] = [];
+
+  for (const w of walls) {
+    const dx = w.end.x - w.start.x;
+    const dy = w.end.y - w.start.y;
+    const lenSq = dx * dx + dy * dy;
+    const wallLength = Math.sqrt(lenSq);
+    if (wallLength < 0.25) continue;
+
+    const t = Math.max(
+      0,
+      Math.min(1, ((pt.x - w.start.x) * dx + (pt.y - w.start.y) * dy) / lenSq),
+    );
+    const projX = w.start.x + t * dx;
+    const projY = w.start.y + t * dy;
+    const distance = Math.hypot(pt.x - projX, pt.y - projY);
+    if (distance > maxDistance) continue;
+
+    const offsetAlongWall = clampOpeningOffsetToWall(
+      wallLength,
+      openingWidth,
+      t * wallLength - openingWidth / 2,
+      snapStep,
+    );
+    const centerDist = offsetAlongWall + openingWidth / 2;
+    const ux = dx / wallLength;
+    const uy = dy / wallLength;
+    const snappedPoint = {
+      x: round3(w.start.x + ux * centerDist),
+      y: round3(w.start.y + uy * centerDist),
+    };
+
+    // Slight tie-breaker bonus for walls wide enough to comfortably host the opening
+    const fitsBonus = wallLength >= openingWidth + 0.04 ? -0.1 : 0.15;
+    candidates.push({
+      wall: w,
+      offsetAlongWall,
+      distance,
+      wallLength,
+      snappedPoint,
+      score: distance + fitsBonus,
+    });
+  }
+
+  if (candidates.length === 0) return null;
+  candidates.sort((a, b) => a.score - b.score || a.distance - b.distance);
+  const best = candidates[0];
+
+  if (currentWallId) {
+    const cur = candidates.find((c) => c.wall.id === currentWallId);
+    if (cur && cur.distance <= 0.28) {
+      // Keep sliding along current wall unless cursor clearly jumped right onto a corner neighbor
+      const switchedTightly =
+        best.wall.id !== currentWallId &&
+        best.distance < 0.14 &&
+        best.distance + 0.06 < cur.distance &&
+        best.wallLength >= openingWidth + 0.02;
+      if (!switchedTightly) {
+        return {
+          wall: cur.wall,
+          offsetAlongWall: cur.offsetAlongWall,
+          distance: cur.distance,
+          wallLength: cur.wallLength,
+          snappedPoint: cur.snappedPoint,
+        };
+      }
+    }
+  }
+
+  return {
+    wall: best.wall,
+    offsetAlongWall: best.offsetAlongWall,
+    distance: best.distance,
+    wallLength: best.wallLength,
+    snappedPoint: best.snappedPoint,
+  };
+}
+

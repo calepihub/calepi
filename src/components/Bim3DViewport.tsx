@@ -18,6 +18,8 @@ import {
 } from 'lucide-react';
 import {
   analyzeSiteGeometry,
+  clampOpeningOffsetToWall,
+  findBestHostWallForOpening,
   getBoundingBox,
   getOpeningWorldPosition,
   getWallAngleRad,
@@ -290,7 +292,7 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
     unitInstanceId: string;
     plane: THREE.Plane;
   } | null>(null);
-  const lastDragOffsetRef = useRef<number | null>(null);
+  const lastDragKeyRef = useRef<string | null>(null);
 
   // Initialize Three.js WebGLRenderer once
   useEffect(() => {
@@ -466,7 +468,7 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
           ...meta,
           plane: new THREE.Plane(new THREE.Vector3(0, 1, 0), -opHit.point.y),
         };
-        lastDragOffsetRef.current = null;
+        lastDragKeyRef.current = null;
         controls.enabled = false;
         renderer.domElement.style.cursor = 'grabbing';
       }
@@ -481,7 +483,6 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
 
       const curProj = latestProjectRef.current;
       const ut = curProj.unitTypes.find((u) => u.id === activeDrag.unitTypeId);
-      const wall = ut?.walls.find((w) => w.id === activeDrag.wallId);
       const op = ut?.openings.find((o) => o.id === activeDrag.openingId);
       let inst: { x: number; y: number; rotationDeg: number; mirrored: boolean } | undefined;
       for (const fl of curProj.floors) {
@@ -491,7 +492,7 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
           break;
         }
       }
-      if (!ut || !wall || !op || !inst) return;
+      if (!ut || !op || !inst) return;
 
       const co = centerOffsetRef.current;
       const dxW = dragIntersect.x + co.x - inst.x;
@@ -503,21 +504,33 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
       const ly = -dxW * sin + dyW * cos;
       const lx = inst.mirrored ? ut.width - mx : mx;
 
-      const wxVec = wall.end.x - wall.start.x;
-      const wyVec = wall.end.y - wall.start.y;
-      const wallLen = Math.hypot(wxVec, wyVec);
-      if (wallLen < 0.2) return;
+      const match = findBestHostWallForOpening(
+        { x: lx, y: ly },
+        ut.walls,
+        op.width,
+        op.wallId,
+        2.5,
+        0.05,
+      );
+      if (!match) return;
 
-      const t = ((lx - wall.start.x) * wxVec + (ly - wall.start.y) * wyVec) / (wallLen * wallLen);
-      const centerAlong = t * wallLen;
-      const maxOff = Math.max(0.04, wallLen - op.width - 0.04);
-      const rawOff = Math.max(0.04, Math.min(maxOff, centerAlong - op.width / 2));
-      const nextOff = round2(Math.round(rawOff / 0.05) * 0.05);
-
-      if (lastDragOffsetRef.current === nextOff || Math.abs(nextOff - op.offsetAlongWall) < 0.01) {
+      const dragKey = `${match.wall.id}:${match.offsetAlongWall.toFixed(2)}`;
+      if (
+        lastDragKeyRef.current === dragKey ||
+        (match.wall.id === op.wallId && Math.abs(match.offsetAlongWall - op.offsetAlongWall) < 0.01)
+      ) {
         return;
       }
-      lastDragOffsetRef.current = nextOff;
+      lastDragKeyRef.current = dragKey;
+      activeDrag.wallId = match.wall.id;
+      if (match.wall.id !== op.wallId) {
+        setSelectedOpening3D({
+          unitTypeId: activeDrag.unitTypeId,
+          openingId: activeDrag.openingId,
+          wallId: match.wall.id,
+          unitInstanceId: activeDrag.unitInstanceId,
+        });
+      }
       onUpdateProjectRef.current((prev) => ({
         ...prev,
         unitTypes: prev.unitTypes.map((u) =>
@@ -526,7 +539,9 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
             : {
                 ...u,
                 openings: u.openings.map((o) =>
-                  o.id === op.id ? { ...o, offsetAlongWall: nextOff } : o,
+                  o.id === op.id
+                    ? { ...o, wallId: match.wall.id, offsetAlongWall: match.offsetAlongWall }
+                    : o,
                 ),
               },
         ),
@@ -2674,8 +2689,11 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
                                 const nLen = nw ? getWallLength(nw) : 3;
                                 patchOp({
                                   wallId: e.target.value,
-                                  offsetAlongWall: round2(
-                                    Math.max(0.04, Math.min(Math.max(0.04, nLen - op.width - 0.04), op.offsetAlongWall)),
+                                  offsetAlongWall: clampOpeningOffsetToWall(
+                                    nLen,
+                                    op.width,
+                                    op.offsetAlongWall,
+                                    0.01,
                                   ),
                                 });
                                 setSelectedOpening3D({ ...selectedOpening3D, wallId: e.target.value });
@@ -2695,12 +2713,51 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
                             </span>
                             <input
                               type="range"
-                              min={0.04}
+                              min={0.02}
                               max={maxOff}
                               step={0.05}
                               value={Math.min(maxOff, op.offsetAlongWall)}
                               onChange={(e) => patchOp({ offsetAlongWall: Number(e.target.value) })}
                               className="w-28 accent-[#2F7CF6]"
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              patchOp({
+                                offsetAlongWall: clampOpeningOffsetToWall(
+                                  wallLen,
+                                  op.width,
+                                  (wallLen - op.width) / 2,
+                                  0.01,
+                                ),
+                              })
+                            }
+                            className="rounded border border-slate-700 bg-[#1B1E24] px-2 py-0.5 text-[11px] text-sky-300 hover:border-[#2F7CF6]"
+                          >
+                            Centralizar
+                          </button>
+                          <label className="flex items-center gap-1.5">
+                            <span className="text-[11px] text-slate-400">Largura:</span>
+                            <input
+                              type="number"
+                              step={0.05}
+                              min={0.4}
+                              max={2.4}
+                              value={op.width}
+                              onChange={(e) => {
+                                const wVal = Math.max(0.4, Number(e.target.value));
+                                patchOp({
+                                  width: wVal,
+                                  offsetAlongWall: clampOpeningOffsetToWall(
+                                    wallLen,
+                                    wVal,
+                                    op.offsetAlongWall,
+                                    0.01,
+                                  ),
+                                });
+                              }}
+                              className="w-16 rounded border border-slate-700 bg-[#1B1E24] px-1.5 py-0.5 font-mono text-[11px] text-white"
                             />
                           </label>
                           {op.type === 'janela' && (
@@ -2718,7 +2775,7 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
                             </label>
                           )}
                           <span className="ml-auto text-[10.5px] text-slate-400">
-                            Dica: arraste a esquadria diretamente no modelo 3D
+                            Dica: arraste a esquadria p/ qualquer parede no 3D
                           </span>
                         </div>
                       );

@@ -455,6 +455,8 @@ export function generateProjectDXF(project: Project, floorIndex = 0): string {
             entities.push(dxfLine(pa.x, pa.y + 0.03, pb.x, pb.y + 0.03, 'ESQUADRIAS'));
           }
         }
+        const pCenter = unitLocalToWorld(inst, ut, pos.center.x, pos.center.y);
+        entities.push(dxfText(pCenter.x - 0.1, pCenter.y - 0.12, 0.1, op.code, 'ESQUADRIAS'));
       }
 
       for (const fur of ut.furniture) {

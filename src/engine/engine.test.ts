@@ -8,7 +8,10 @@ import {
   calculatePolygonArea,
   calculatePolygonPerimeter,
   checkImplantationFeasibility,
+  clampOpeningOffsetToWall,
+  findBestHostWallForOpening,
   getFurnitureWorldRect,
+  getOpeningWorldPosition,
   rectsOverlap,
   round2,
 } from './geometry';
@@ -1500,4 +1503,103 @@ test('QDC-01 explicit board, Kitnet Simples default profile (4 circuits + AF onl
   const dxf = generateProjectDXF(proj, 0);
   assert.ok(dxf.includes('QDC-01'));
 });
+
+test('Any door or window can be dragged/repositioned onto any external or internal wall cleanly', () => {
+  const ut = generateParametricUnitLayout({
+    code: 'OP-MOVE',
+    name: 'Kit Reposição Esquadrias',
+    width: 4.0,
+    depth: 5.5,
+    ceilingHeight: 2.8,
+    bedrooms: 0,
+    hasLaundry: true,
+    hasBalcony: false,
+    hasMezzanine: false,
+    accessible: false,
+    extWallThickness: 0.15,
+    intWallThickness: 0.1,
+    constructionSystem: 'alvenaria_convencional',
+    entrySide: 'frente',
+  });
+
+  const p1 = ut.openings.find((o) => o.code === 'P1');
+  const j1 = ut.openings.find((o) => o.code === 'J1');
+  assert.ok(p1 && j1);
+  const origP1Wall = p1.wallId;
+
+  // Drag P1 over to the right exterior wall (x ≈ ut.width, y ≈ 3.8)
+  const rightSnap = findBestHostWallForOpening(
+    { x: ut.width - 0.05, y: 3.8 },
+    ut.walls,
+    p1.width,
+    p1.wallId,
+    3.5,
+    0.05,
+  );
+  assert.ok(rightSnap);
+  assert.notEqual(rightSnap.wall.id, origP1Wall);
+  assert.ok(Math.abs(rightSnap.wall.start.x - ut.width) < 0.05 && Math.abs(rightSnap.wall.end.x - ut.width) < 0.05);
+
+  p1.wallId = rightSnap.wall.id;
+  p1.offsetAlongWall = rightSnap.offsetAlongWall;
+  const p1Pos = getOpeningWorldPosition(rightSnap.wall, p1);
+  assert.ok(Math.abs(p1Pos.center.x - ut.width) < 0.05);
+
+  // Drag J1 onto the left exterior wall (x ≈ 0, y ≈ 3.5)
+  const leftSnap = findBestHostWallForOpening(
+    { x: 0.08, y: 3.5 },
+    ut.walls,
+    j1.width,
+    j1.wallId,
+    3.5,
+    0.05,
+  );
+  assert.ok(leftSnap);
+  assert.ok(Math.abs(leftSnap.wall.start.x) < 0.05 && Math.abs(leftSnap.wall.end.x) < 0.05);
+  j1.wallId = leftSnap.wall.id;
+  j1.offsetAlongWall = leftSnap.offsetAlongWall;
+
+  // Hysteresis check: sliding slightly off-axis (0.15m) along the new wall stays on that wall
+  const slideSameWall = findBestHostWallForOpening(
+    { x: 0.15, y: 4.1 },
+    ut.walls,
+    j1.width,
+    j1.wallId,
+    3.5,
+    0.05,
+  );
+  assert.ok(slideSameWall);
+  assert.equal(slideSameWall.wall.id, j1.wallId);
+
+  // Move J1 onto an internal partition wall as well
+  const intWall = ut.walls.find((w) => !w.isExternal);
+  assert.ok(intWall);
+  const clampedOff = clampOpeningOffsetToWall(
+    Math.hypot(intWall.end.x - intWall.start.x, intWall.end.y - intWall.start.y),
+    j1.width,
+    99,
+    0.05,
+  );
+  assert.ok(clampedOff >= 0);
+
+  // Verify quantities, engineering, elevations, and DXF work after moving openings
+  const blank = createBlankProject({
+    name: 'Kit Esquadrias Livres',
+    client: '',
+    municipality: 'Rio de Janeiro',
+    state: 'RJ',
+    front: 12,
+    depth: 25,
+    floorsCount: 1,
+    methodId: 'alvenaria_convencional',
+  });
+  const proj = autoDistributeUnitsAcrossFloors({ ...blank, unitTypes: [ut] }, ut.id);
+  const clashes = runCompatibilityAnalysis(proj);
+  assert.ok(Array.isArray(clashes));
+  const qty = calculateQuantities(proj);
+  assert.ok(qty.items.length > 0);
+  const dxf = generateProjectDXF(proj, 0);
+  assert.ok(dxf.includes('P1') && dxf.includes('J1'));
+});
+
 

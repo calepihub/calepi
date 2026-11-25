@@ -24,7 +24,9 @@ import {
 } from 'lucide-react';
 import {
   analyzeSiteGeometry,
+  clampOpeningOffsetToWall,
   distance2D,
+  findBestHostWallForOpening,
   getBoundingBox,
   getOpeningWorldPosition,
   getRoomArea,
@@ -207,7 +209,7 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
       }
     | { kind: 'wall_start'; id: string }
     | { kind: 'wall_end'; id: string }
-    | { kind: 'opening'; id: string }
+    | { kind: 'opening'; id: string; planOffsetX?: number; planOffsetY?: number }
     | null
   >(null);
 
@@ -335,22 +337,26 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
     return { x: snapVal(wx), y: snapVal(wy) };
   };
 
-  const findNearestWall = (pt: Point2D, walls: Wall[]): { wall: Wall; offset: number; dist: number } | null => {
-    let best: { wall: Wall; offset: number; dist: number } | null = null;
-    for (const w of walls) {
-      const dx = w.end.x - w.start.x;
-      const dy = w.end.y - w.start.y;
-      const lenSq = dx * dx + dy * dy;
-      if (lenSq < 0.001) continue;
-      const t = Math.max(0, Math.min(1, ((pt.x - w.start.x) * dx + (pt.y - w.start.y) * dy) / lenSq));
-      const projX = w.start.x + t * dx;
-      const projY = w.start.y + t * dy;
-      const d = Math.hypot(pt.x - projX, pt.y - projY);
-      if (d < 0.45 && (!best || d < best.dist)) {
-        best = { wall: w, offset: round2(t * Math.sqrt(lenSq)), dist: d };
-      }
+  const resolveUnitLocalPoint = (worldPt: Point2D): { localPt: Point2D; slotOffsetX: number; slotOffsetY: number } => {
+    if (planViewMode === 'por_comodo' && roomSlots.length > 0) {
+      const hitSlot =
+        roomSlots.find(
+          (s) =>
+            worldPt.x >= s.slotX - 0.5 &&
+            worldPt.x <= s.slotX + s.room.width + 0.5 &&
+            worldPt.y >= s.slotY - 0.5 &&
+            worldPt.y <= s.slotY + s.room.depth + 0.5,
+        ) ?? roomSlots[0];
+      return {
+        localPt: {
+          x: round2(worldPt.x - hitSlot.offsetX),
+          y: round2(worldPt.y - hitSlot.offsetY),
+        },
+        slotOffsetX: hitSlot.offsetX,
+        slotOffsetY: hitSlot.offsetY,
+      };
     }
-    return best;
+    return { localPt: worldPt, slotOffsetX: 0, slotOffsetY: 0 };
   };
 
   const updateActiveUt = (fn: (ut: UnitType) => UnitType, note?: string) => {
@@ -403,17 +409,21 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
       }
 
       if (tool === 'door' || tool === 'window' || tool === 'vitro') {
-        const hit = findNearestWall(pt, activeUt.walls);
+        const { localPt } = resolveUnitLocalPoint(pt);
+        const isDoor = tool === 'door';
+        const isVitro = tool === 'vitro';
+        const role: OpeningRole | undefined = isDoor ? doorRolePreset : undefined;
+        const fixedW = role ? FIXED_DOOR_WIDTHS[role] : undefined;
+        const defW = isDoor ? (fixedW ?? 0.8) : isVitro ? 0.6 : 1.0;
+        const hit = findBestHostWallForOpening(
+          localPt,
+          activeUt.walls,
+          defW,
+          undefined,
+          0.75,
+          snapEnabled ? snapStep : 0.01,
+        );
         if (hit) {
-          const wLen = getWallLength(hit.wall);
-          const isDoor = tool === 'door';
-          const isVitro = tool === 'vitro';
-          const role: OpeningRole | undefined = isDoor ? doorRolePreset : undefined;
-          const fixedW = role ? FIXED_DOOR_WIDTHS[role] : undefined;
-          const defW = isDoor ? (fixedW ?? 0.8) : isVitro ? 0.6 : 1.0;
-          const offset = round2(
-            Math.max(0.04, Math.min(Math.max(0.04, wLen - defW - 0.04), hit.offset - defW / 2)),
-          );
           const newOp: Opening = {
             id: nextId('op'),
             code: `${isDoor ? 'P' : isVitro ? 'V' : 'J'}${activeUt.openings.length + 1}`,
@@ -432,7 +442,7 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
               : isVitro
                 ? 'Vitrô basculante alumínio'
                 : 'Janela de correr',
-            offsetAlongWall: offset,
+            offsetAlongWall: hit.offsetAlongWall,
             width: defW,
             height: isDoor ? 2.1 : isVitro ? 0.6 : 1.1,
             sillHeight: isDoor ? 0 : isVitro ? 1.6 : 1.0,
@@ -442,9 +452,11 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
           };
           updateActiveUt(
             (ut) => ({ ...ut, openings: [...ut.openings, newOp] }),
-            `Inserção de ${newOp.code} em ${activeUt.code}`,
+            `Inserção de ${newOp.code} na parede ${hit.wall.code}`,
           );
+          setLayers((prev) => ({ ...prev, openings: true }));
           setSelected({ kind: 'opening', id: newOp.id });
+          setTool('select');
         }
         return;
       }
@@ -773,35 +785,56 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
         scope === 'tipologia' &&
         activeUt
       ) {
-        updateActiveUt((ut) => ({
-          ...ut,
-          walls: ut.walls.map((w) => {
+        updateActiveUt((ut) => {
+          let resizedLen: number | null = null;
+          const nextWalls = ut.walls.map((w) => {
             if (w.id !== draggingItem.id) return w;
             const targetPt = { x: round2(pt.x), y: round2(pt.y) };
             const nextStart = draggingItem.kind === 'wall_start' ? targetPt : w.start;
             const nextEnd = draggingItem.kind === 'wall_end' ? targetPt : w.end;
-            if (distance2D(nextStart, nextEnd) < 0.2) return w;
+            const len = distance2D(nextStart, nextEnd);
+            if (len < 0.25) return w;
+            resizedLen = len;
             return { ...w, start: nextStart, end: nextEnd };
-          }),
-        }));
+          });
+          if (resizedLen === null) return ut;
+          const finalLen = resizedLen;
+          return {
+            ...ut,
+            walls: nextWalls,
+            openings: ut.openings.map((o) =>
+              o.wallId === draggingItem.id
+                ? {
+                    ...o,
+                    offsetAlongWall: clampOpeningOffsetToWall(finalLen, o.width, o.offsetAlongWall, 0.01),
+                  }
+                : o,
+            ),
+          };
+        });
       } else if (draggingItem.kind === 'opening' && scope === 'tipologia' && activeUt) {
         updateActiveUt((ut) => {
           const op = ut.openings.find((o) => o.id === draggingItem.id);
           if (!op) return ut;
-          const wall = ut.walls.find((w) => w.id === op.wallId);
-          if (!wall) return ut;
-          const dx = wall.end.x - wall.start.x;
-          const dy = wall.end.y - wall.start.y;
-          const wallLen = Math.hypot(dx, dy);
-          if (wallLen < 0.1) return ut;
-          const t = ((pt.x - wall.start.x) * dx + (pt.y - wall.start.y) * dy) / (wallLen * wallLen);
-          const centerOffset = t * wallLen;
-          const maxOff = Math.max(0.02, wallLen - op.width - 0.02);
-          const nextOff = round2(Math.max(0.02, Math.min(maxOff, centerOffset - op.width / 2)));
+          const localPt: Point2D = {
+            x: pt.x - (draggingItem.planOffsetX ?? 0),
+            y: pt.y - (draggingItem.planOffsetY ?? 0),
+          };
+          const match = findBestHostWallForOpening(
+            localPt,
+            ut.walls,
+            op.width,
+            op.wallId,
+            3.5,
+            snapEnabled ? snapStep : 0.01,
+          );
+          if (!match) return ut;
           return {
             ...ut,
             openings: ut.openings.map((o) =>
-              o.id === op.id ? { ...o, offsetAlongWall: nextOff } : o,
+              o.id === op.id
+                ? { ...o, wallId: match.wall.id, offsetAlongWall: match.offsetAlongWall }
+                : o,
             ),
           };
         });
@@ -1488,7 +1521,7 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
           </g>
         )}
 
-        {/* Openings (Doors with swing arc, Windows & Vitrôs — rendered on Ground/Completo) */}
+        {/* Openings (Doors with swing arc, Windows & Vitrôs — drag onto ANY wall) */}
         {layers.openings &&
           mezView !== 'mezanino' && (
           <g clipPath={roomClipId ? `url(#${roomClipId})` : undefined}>
@@ -1502,10 +1535,14 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
             const cy = center.y;
             const angleDeg = (getWallAngleRad(wall) * 180) / Math.PI;
             const isSel = interactive && selected?.kind === 'opening' && selected.id === op.id;
+            const isDraggingThis = draggingItem?.kind === 'opening' && draggingItem.id === op.id;
             const isVitro =
               op.openingKind?.startsWith('vitro_') ||
               op.subtype.toLowerCase().includes('vitrô') ||
               op.subtype.toLowerCase().includes('basculante');
+            const wallLen = getWallLength(wall);
+            const distStart = round2(op.offsetAlongWall);
+            const distEnd = round2(Math.max(0, wallLen - op.offsetAlongWall - op.width));
 
             return (
               <g
@@ -1515,10 +1552,18 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
                   if (!interactive || tool !== 'select') return;
                   e.stopPropagation();
                   setSelected({ kind: 'opening', id: op.id });
-                  setDraggingItem({ kind: 'opening', id: op.id });
+                  setDraggingItem({ kind: 'opening', id: op.id, planOffsetX, planOffsetY });
                 }}
                 className={interactive && tool === 'select' ? 'cursor-move' : ''}
               >
+                {/* Generous invisible hitbox so any door or window is effortless to grab & move */}
+                <rect
+                  x={-op.width / 2 - 0.05}
+                  y={-Math.max(0.24, wall.thickness * 1.45)}
+                  width={op.width + 0.1}
+                  height={Math.max(0.48, wall.thickness * 2.9)}
+                  fill="transparent"
+                />
                 {/* Clear wall break */}
                 <rect
                   x={-op.width / 2}
@@ -1527,17 +1572,31 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
                   height={wall.thickness * 1.2}
                   fill="#111317"
                 />
+                {isSel && (
+                  <rect
+                    x={-op.width / 2 - 0.04}
+                    y={-wall.thickness * 0.85}
+                    width={op.width + 0.08}
+                    height={wall.thickness * 1.7}
+                    rx="0.02"
+                    fill="rgba(96, 165, 250, 0.18)"
+                    stroke="#60A5FA"
+                    strokeDasharray="0.06 0.04"
+                    strokeWidth="0.022"
+                    pointerEvents="none"
+                  />
+                )}
                 {op.type === 'janela' ? (
                   <>
                     <rect
                       x={-op.width / 2}
-                      y={-0.04}
+                      y={-0.045}
                       width={op.width}
-                      height={0.08}
+                      height={0.09}
                       fill={isVitro ? '#22D3EE' : '#0EA5E9'}
-                      fillOpacity={0.35}
+                      fillOpacity={isSel ? 0.55 : 0.35}
                       stroke={isSel ? '#60A5FA' : isVitro ? '#22D3EE' : '#38BDF8'}
-                      strokeWidth="0.025"
+                      strokeWidth={isSel ? '0.032' : '0.025'}
                     />
                     <line
                       x1={-op.width / 2}
@@ -1558,16 +1617,16 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
                   <>
                     <rect
                       x={-op.width / 2}
-                      y={-0.02}
+                      y={-0.025}
                       width={op.width}
-                      height={0.04}
+                      height={0.05}
                       fill={isSel ? '#60A5FA' : '#F59E0B'}
                     />
                     <line
                       x1={-op.width / 2}
-                      y1={0.05}
+                      y1={0.055}
                       x2={op.width * 0.5}
-                      y2={0.05}
+                      y2={0.055}
                       stroke={isSel ? '#60A5FA' : '#F59E0B'}
                       strokeDasharray="0.06 0.04"
                       strokeWidth="0.018"
@@ -1581,13 +1640,18 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
                     const sy = isOut ? -1 : 1;
                     return (
                       <g transform={`scale(${sx}, ${sy})`}>
+                        {/* Clickable invisible door swing sector */}
+                        <path
+                          d={`M ${-op.width / 2} 0 L ${-op.width / 2} ${op.width} A ${op.width} ${op.width} 0 0 0 ${op.width / 2} 0 Z`}
+                          fill={isSel ? 'rgba(96, 165, 250, 0.09)' : 'transparent'}
+                        />
                         <line
                           x1={-op.width / 2}
                           y1={0}
                           x2={-op.width / 2}
                           y2={op.width}
                           stroke={isSel ? '#60A5FA' : '#F59E0B'}
-                          strokeWidth="0.035"
+                          strokeWidth={isSel ? '0.042' : '0.035'}
                         />
                         <path
                           d={`M ${-op.width / 2} ${op.width} A ${op.width} ${op.width} 0 0 0 ${op.width / 2} 0`}
@@ -1602,15 +1666,30 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
                 )}
                 <text
                   x={0}
-                  y={-0.16}
+                  y={-0.18}
                   textAnchor="middle"
-                  transform={Math.abs(isMirrored ? -angleDeg : angleDeg) > 90 ? 'rotate(180 0 -0.16)' : undefined}
+                  transform={Math.abs(isMirrored ? -angleDeg : angleDeg) > 90 ? 'rotate(180 0 -0.18)' : undefined}
                   fill={isSel ? '#60A5FA' : '#CBD5E1'}
+                  fontWeight={isSel ? 'bold' : undefined}
                   fontSize="0.14"
                   fontFamily="JetBrains Mono, monospace"
                 >
                   {op.code}
                 </text>
+                {(isSel || isDraggingThis) && (
+                  <text
+                    x={0}
+                    y={0.28}
+                    textAnchor="middle"
+                    transform={Math.abs(isMirrored ? -angleDeg : angleDeg) > 90 ? 'rotate(180 0 0.28)' : undefined}
+                    fill="#93C5FD"
+                    fontSize="0.11"
+                    fontFamily="JetBrains Mono, monospace"
+                    pointerEvents="none"
+                  >
+                    {`${distStart.toFixed(2)}m | ${wall.code} | ${distEnd.toFixed(2)}m`}
+                  </text>
+                )}
               </g>
             );
           })}
@@ -2458,6 +2537,59 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
               </g>
             )}
 
+            {/* Live hover ghost preview when inserting Porta / Janela / Vitrô */}
+            {scope === 'tipologia' &&
+              activeUt &&
+              cursorWorld &&
+              (tool === 'door' || tool === 'window' || tool === 'vitro') &&
+              (() => {
+                const { localPt, slotOffsetX, slotOffsetY } = resolveUnitLocalPoint(cursorWorld);
+                const defW =
+                  tool === 'door'
+                    ? (FIXED_DOOR_WIDTHS[doorRolePreset] ?? 0.8)
+                    : tool === 'vitro'
+                      ? 0.6
+                      : 1.0;
+                const snap = findBestHostWallForOpening(
+                  localPt,
+                  activeUt.walls,
+                  defW,
+                  undefined,
+                  0.75,
+                  snapEnabled ? snapStep : 0.01,
+                );
+                if (!snap) return null;
+                const ang = (getWallAngleRad(snap.wall) * 180) / Math.PI;
+                return (
+                  <g
+                    transform={`translate(${snap.snappedPoint.x + slotOffsetX}, ${snap.snappedPoint.y + slotOffsetY}) rotate(${ang})`}
+                    pointerEvents="none"
+                  >
+                    <rect
+                      x={-defW / 2}
+                      y={-snap.wall.thickness * 0.65}
+                      width={defW}
+                      height={snap.wall.thickness * 1.3}
+                      fill={tool === 'door' ? '#F59E0B' : '#22D3EE'}
+                      fillOpacity={0.35}
+                      stroke={tool === 'door' ? '#FBBF24' : '#38BDF8'}
+                      strokeDasharray="0.06 0.04"
+                      strokeWidth="0.025"
+                    />
+                    <text
+                      x={0}
+                      y={-0.18}
+                      textAnchor="middle"
+                      fill="#F8FAFC"
+                      fontSize="0.13"
+                      fontFamily="JetBrains Mono, monospace"
+                    >
+                      {`${snap.wall.code} · ${snap.offsetAlongWall.toFixed(2)}m`}
+                    </text>
+                  </g>
+                );
+              })()}
+
             {/* Live draft preview for wall / measure */}
             {draftStart && cursorWorld && (
               <g>
@@ -2497,7 +2629,7 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
               )}
             </div>
             <div className="flex items-center gap-3">
-              <span>Alt + Arrastar: Pan · Roda: Zoom</span>
+              <span>Arraste portas/janelas p/ qualquer parede · Alt+Arrastar: Pan · Roda: Zoom</span>
               <span className={criticalCount > 0 ? 'text-red-400' : 'text-emerald-400'}>
                 Conflitos críticos: {criticalCount}
               </span>
@@ -2514,18 +2646,48 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
           {!selected && (
             <div className="text-xs text-[#949BA8] space-y-2">
               <p>
-                Selecione uma parede, porta, janela, ambiente, mobiliário ou unidade na planta para inspecionar e editar suas propriedades reais.
+                Arraste qualquer <strong className="text-white">porta, janela ou vitrô</strong> para reposicionar em qualquer parede, ou selecione um item abaixo.
               </p>
               {activeUt && scope === 'tipologia' && (
-                <div className="pt-3 border-t border-[#2A2F38] space-y-1.5 font-mono text-[11px] tabular-nums">
-                  <div className="text-white font-sans font-medium">Resumo {activeUt.code}</div>
-                  <div>Paredes: {activeUt.walls.length}</div>
-                  <div>Portas/Janelas: {activeUt.openings.length}</div>
-                  <div>Mobiliário: {activeUt.furniture.length}</div>
-                  <div>Pontos Elétricos: {activeUt.electricalPoints.length}</div>
-                  <div>Pontos Água: {activeUt.waterPoints.length}</div>
-                  <div>Pontos Esgoto: {activeUt.drainagePoints.length}</div>
-                </div>
+                <>
+                  <div className="pt-3 border-t border-[#2A2F38] space-y-1.5 font-mono text-[11px] tabular-nums">
+                    <div className="text-white font-sans font-medium">Resumo {activeUt.code}</div>
+                    <div>Paredes: {activeUt.walls.length}</div>
+                    <div>Portas/Janelas: {activeUt.openings.length}</div>
+                    <div>Mobiliário: {activeUt.furniture.length}</div>
+                    <div>Pontos Elétricos: {activeUt.electricalPoints.length}</div>
+                    <div>Pontos Água: {activeUt.waterPoints.length}</div>
+                    <div>Pontos Esgoto: {activeUt.drainagePoints.length}</div>
+                  </div>
+                  {activeUt.openings.length > 0 && (
+                    <div className="pt-3 border-t border-[#2A2F38] space-y-1.5">
+                      <div className="text-[11px] font-medium text-white">
+                        Portas & Janelas ({activeUt.openings.length})
+                      </div>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {activeUt.openings.map((op) => {
+                          const w = activeUt.walls.find((wl) => wl.id === op.wallId);
+                          return (
+                            <button
+                              key={op.id}
+                              type="button"
+                              onClick={() => {
+                                setLayers((prev) => ({ ...prev, openings: true }));
+                                setSelected({ kind: 'opening', id: op.id });
+                              }}
+                              className="text-left px-2 py-1 rounded border border-[#2A2F38] bg-[#14161A] hover:border-[#2F7CF6] text-[11px] text-slate-200"
+                            >
+                              <div className="font-mono font-semibold text-[#F59E0B]">{op.code}</div>
+                              <div className="text-[10px] text-[#949BA8] truncate">
+                                {w?.code ?? op.wallId} · {op.width.toFixed(2)}m
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           )}
@@ -2722,13 +2884,38 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
             </div>
           )}
 
-          {selectedOpening && (
-            <div className="space-y-3 text-xs">
-              <div className="font-semibold text-[#F59E0B]">
-                {selectedOpening.type.toUpperCase()} {selectedOpening.code}
-              </div>
+          {selectedOpening && activeUt && (() => {
+            const hostWall = activeUt.walls.find((w) => w.id === selectedOpening.wallId);
+            const hostLen = hostWall ? getWallLength(hostWall) : 3.0;
+            const maxOff = round2(Math.max(0.02, hostLen - selectedOpening.width - 0.02));
+            const distEnd = round2(Math.max(0, hostLen - selectedOpening.offsetAlongWall - selectedOpening.width));
+            const updateSelectedOp = (patch: Partial<Opening>, note?: string) => {
+              updateActiveUt(
+                (ut) => ({
+                  ...ut,
+                  openings: ut.openings.map((o) =>
+                    o.id === selectedOpening.id ? { ...o, ...patch } : o,
+                  ),
+                }),
+                note,
+              );
+            };
+            const widthPresets =
+              selectedOpening.type === 'porta'
+                ? [0.6, 0.7, 0.8, 0.9]
+                : [0.6, 0.8, 1.0, 1.2, 1.5];
 
-              {selectedOpening && activeUt && (
+            return (
+              <div className="space-y-3 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-[#F59E0B]">
+                    {selectedOpening.type.toUpperCase()} {selectedOpening.code}
+                  </span>
+                  <span className="text-[10px] text-[#949BA8]">
+                    Arraste para qualquer parede
+                  </span>
+                </div>
+
                 <div>
                   <label className="block text-[11px] text-[#949BA8] mb-1">Parede Hospedeira</label>
                   <select
@@ -2736,28 +2923,17 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
                     onChange={(e) => {
                       const nextWallId = e.target.value;
                       const nextWall = activeUt.walls.find((w) => w.id === nextWallId);
-                      const maxLen = nextWall ? getWallLength(nextWall) : 3;
-                      updateActiveUt(
-                        (ut) => ({
-                          ...ut,
-                          openings: ut.openings.map((o) =>
-                            o.id === selectedOpening.id
-                              ? {
-                                  ...o,
-                                  wallId: nextWallId,
-                                  offsetAlongWall: round2(
-                                    Math.max(
-                                      0.04,
-                                      Math.min(
-                                        Math.max(0.04, maxLen - o.width - 0.04),
-                                        o.offsetAlongWall,
-                                      ),
-                                    ),
-                                  ),
-                                }
-                              : o,
+                      const nextLen = nextWall ? getWallLength(nextWall) : 3;
+                      updateSelectedOp(
+                        {
+                          wallId: nextWallId,
+                          offsetAlongWall: clampOpeningOffsetToWall(
+                            nextLen,
+                            selectedOpening.width,
+                            selectedOpening.offsetAlongWall,
+                            0.01,
                           ),
-                        }),
+                        },
                         `Movimentação de ${selectedOpening.code} para parede ${nextWall?.code ?? nextWallId}`,
                       );
                     }}
@@ -2770,218 +2946,348 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
                     ))}
                   </select>
                 </div>
-              )}
 
-              {selectedOpening.type === 'porta' && (
-                <div>
-                  <label className="block text-[11px] text-[#949BA8] mb-1">
-                    Função / Regra de Largura
-                  </label>
-                  <select
-                    value={selectedOpening.role ?? 'outro'}
-                    onChange={(e) => {
-                      const nextRole = e.target.value as OpeningRole;
-                      const fixedW = FIXED_DOOR_WIDTHS[nextRole];
-                      updateActiveUt((ut) => ({
-                        ...ut,
-                        openings: ut.openings.map((o) =>
-                          o.id === selectedOpening.id
-                            ? { ...o, role: nextRole, width: fixedW ?? o.width }
-                            : o,
-                        ),
-                      }));
-                    }}
-                    className="w-full px-2 py-1 rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                  >
-                    <option value="entrada">Entrada Social (0,80m fixo)</option>
-                    <option value="banheiro">Banheiro (0,60m fixo)</option>
-                    <option value="quarto">Quarto (0,70m fixo)</option>
-                    <option value="outro">Outra porta (largura livre)</option>
-                  </select>
-                </div>
-              )}
-
-              {selectedOpening.type === 'porta' && selectedOpening.swingDirection !== 'sliding' && (
-                <div>
-                  <label className="block text-[11px] text-[#949BA8] mb-1">
-                    Sentido da Folha (Giro)
-                  </label>
-                  <select
-                    value={selectedOpening.swingDirection}
-                    onChange={(e) => {
-                      const val = e.target.value as Opening['swingDirection'];
-                      updateActiveUt((ut) => ({
-                        ...ut,
-                        openings: ut.openings.map((o) =>
-                          o.id === selectedOpening.id ? { ...o, swingDirection: val } : o,
-                        ),
-                      }));
-                    }}
-                    className="w-full px-2 py-1 rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                  >
-                    <option value="left_in">Esquerda — Para Dentro</option>
-                    <option value="right_in">Direita — Para Dentro</option>
-                    <option value="left_out">Esquerda — Para Fora</option>
-                    <option value="right_out">Direita — Para Fora</option>
-                  </select>
-                </div>
-              )}
-
-              <div>
-                <label className="block text-[11px] text-[#949BA8] mb-1">Modelo / Tipo</label>
-                <select
-                  value={
-                    selectedOpening.openingKind ??
-                    (selectedOpening.type === 'porta' ? 'porta_abrir' : 'janela_correr')
-                  }
-                  onChange={(e) => {
-                    const nextKind = e.target.value as OpeningKind;
-                    updateActiveUt((ut) => ({
-                      ...ut,
-                      openings: ut.openings.map((o) =>
-                        o.id === selectedOpening.id
-                          ? {
-                              ...o,
-                              openingKind: nextKind,
-                              swingDirection:
-                                nextKind === 'porta_correr' || nextKind !== 'porta_abrir'
-                                  ? 'sliding'
-                                  : o.swingDirection === 'sliding'
-                                    ? 'left_in'
-                                    : o.swingDirection,
-                            }
-                          : o,
-                      ),
-                    }));
-                  }}
-                  className="w-full px-2 py-1 rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                >
-                  {selectedOpening.type === 'porta' ? (
-                    <>
-                      <option value="porta_abrir">Porta de Abrir</option>
-                      <option value="porta_correr">Porta de Correr</option>
-                    </>
-                  ) : (
-                    <>
-                      <option value="janela_correr">Janela de Correr</option>
-                      <option value="vitro_basculante">Vitrô Basculante</option>
-                      <option value="vitro_maxim_ar">Vitrô Maxim-Ar</option>
-                      <option value="vitro_fixo">Vitrô Fixo</option>
-                    </>
-                  )}
-                </select>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-[11px] text-[#949BA8] mb-1">
-                    Largura (m)
-                    {selectedOpening.type === 'porta' &&
-                    selectedOpening.role &&
-                    FIXED_DOOR_WIDTHS[selectedOpening.role] !== undefined
-                      ? ' · Fixo'
-                      : ''}
-                  </label>
+                {/* Deslizamento rápido + Alinhamento exato na parede */}
+                <div className="p-2 rounded bg-[#14161A] border border-[#2A2F38] space-y-2">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="text-[#949BA8]">Posição na Parede</span>
+                    <span className="font-mono text-sky-300">
+                      {selectedOpening.offsetAlongWall.toFixed(2)}m ↔ {distEnd.toFixed(2)}m
+                    </span>
+                  </div>
                   <input
-                    type="number"
-                    step="0.05"
-                    min={0.4}
-                    disabled={Boolean(
-                      selectedOpening.type === 'porta' &&
-                        selectedOpening.role &&
-                        FIXED_DOOR_WIDTHS[selectedOpening.role] !== undefined,
-                    )}
-                    value={selectedOpening.width}
-                    onChange={(e) => {
-                      const val = Number(e.target.value);
-                      updateActiveUt((ut) => ({
-                        ...ut,
-                        openings: ut.openings.map((o) =>
-                          o.id === selectedOpening.id ? { ...o, width: val } : o,
-                        ),
-                      }));
-                    }}
-                    className="w-full px-2 py-1 font-mono bg-[#14161A] border border-[#2A2F38] rounded text-white disabled:opacity-60"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] text-[#949BA8] mb-1">Altura (m)</label>
-                  <input
-                    type="number"
-                    step="0.05"
-                    min={0.4}
-                    value={selectedOpening.height}
-                    onChange={(e) => {
-                      const val = Number(e.target.value);
-                      updateActiveUt((ut) => ({
-                        ...ut,
-                        openings: ut.openings.map((o) =>
-                          o.id === selectedOpening.id ? { ...o, height: val } : o,
-                        ),
-                      }));
-                    }}
-                    className="w-full px-2 py-1 font-mono bg-[#14161A] border border-[#2A2F38] rounded text-white"
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-[11px] text-[#949BA8] mb-1">Peitoril (m)</label>
-                  <input
-                    type="number"
-                    step="0.05"
-                    min={0}
-                    value={selectedOpening.sillHeight}
-                    onChange={(e) => {
-                      const val = Number(e.target.value);
-                      updateActiveUt((ut) => ({
-                        ...ut,
-                        openings: ut.openings.map((o) =>
-                          o.id === selectedOpening.id ? { ...o, sillHeight: val } : o,
-                        ),
-                      }));
-                    }}
-                    className="w-full px-2 py-1 font-mono bg-[#14161A] border border-[#2A2F38] rounded text-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] text-[#949BA8] mb-1">Pos. na Parede (m)</label>
-                  <input
-                    type="number"
-                    step="0.05"
+                    type="range"
                     min={0.02}
-                    value={selectedOpening.offsetAlongWall}
-                    onChange={(e) => {
-                      const val = Math.max(0.02, Number(e.target.value));
-                      updateActiveUt((ut) => ({
-                        ...ut,
-                        openings: ut.openings.map((o) =>
-                          o.id === selectedOpening.id ? { ...o, offsetAlongWall: val } : o,
+                    max={Math.max(0.02, maxOff)}
+                    step={0.05}
+                    value={Math.min(maxOff, selectedOpening.offsetAlongWall)}
+                    onChange={(e) =>
+                      updateSelectedOp({
+                        offsetAlongWall: clampOpeningOffsetToWall(
+                          hostLen,
+                          selectedOpening.width,
+                          Number(e.target.value),
+                          0.01,
                         ),
-                      }));
-                    }}
-                    className="w-full px-2 py-1 font-mono bg-[#14161A] border border-[#2A2F38] rounded text-white"
+                      })
+                    }
+                    className="w-full accent-[#2F7CF6]"
                   />
+                  <div className="grid grid-cols-5 gap-1 text-[10px]">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateSelectedOp({
+                          offsetAlongWall: clampOpeningOffsetToWall(
+                            hostLen,
+                            selectedOpening.width,
+                            selectedOpening.offsetAlongWall - 0.1,
+                            0.01,
+                          ),
+                        })
+                      }
+                      className="py-1 rounded border border-[#2A2F38] bg-[#1B1E24] text-slate-200 hover:border-[#2F7CF6]"
+                    >
+                      -10cm
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => updateSelectedOp({ offsetAlongWall: 0.04 })}
+                      className="py-1 rounded border border-[#2A2F38] bg-[#1B1E24] text-slate-200 hover:border-[#2F7CF6]"
+                    >
+                      Início
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateSelectedOp({
+                          offsetAlongWall: clampOpeningOffsetToWall(
+                            hostLen,
+                            selectedOpening.width,
+                            (hostLen - selectedOpening.width) / 2,
+                            0.01,
+                          ),
+                        })
+                      }
+                      className="py-1 rounded border border-[#2A2F38] bg-[#1B1E24] text-sky-300 hover:border-[#2F7CF6]"
+                    >
+                      Centro
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateSelectedOp({
+                          offsetAlongWall: round2(Math.max(0.02, hostLen - selectedOpening.width - 0.04)),
+                        })
+                      }
+                      className="py-1 rounded border border-[#2A2F38] bg-[#1B1E24] text-slate-200 hover:border-[#2F7CF6]"
+                    >
+                      Fim
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateSelectedOp({
+                          offsetAlongWall: clampOpeningOffsetToWall(
+                            hostLen,
+                            selectedOpening.width,
+                            selectedOpening.offsetAlongWall + 0.1,
+                            0.01,
+                          ),
+                        })
+                      }
+                      className="py-1 rounded border border-[#2A2F38] bg-[#1B1E24] text-slate-200 hover:border-[#2F7CF6]"
+                    >
+                      +10cm
+                    </button>
+                  </div>
+                </div>
+
+                {selectedOpening.type === 'porta' && (
+                  <div>
+                    <label className="block text-[11px] text-[#949BA8] mb-1">
+                      Função / Referência
+                    </label>
+                    <select
+                      value={selectedOpening.role ?? 'outro'}
+                      onChange={(e) => {
+                        const nextRole = e.target.value as OpeningRole;
+                        const fixedW = FIXED_DOOR_WIDTHS[nextRole];
+                        const nextW = fixedW ?? selectedOpening.width;
+                        updateSelectedOp({
+                          role: nextRole,
+                          width: nextW,
+                          offsetAlongWall: clampOpeningOffsetToWall(
+                            hostLen,
+                            nextW,
+                            selectedOpening.offsetAlongWall,
+                            0.01,
+                          ),
+                        });
+                      }}
+                      className="w-full px-2 py-1 rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                    >
+                      <option value="entrada">Entrada Social (Ref. 0,80m)</option>
+                      <option value="banheiro">Banheiro (Ref. 0,60m)</option>
+                      <option value="quarto">Quarto (Ref. 0,70m)</option>
+                      <option value="outro">Outra porta (livre)</option>
+                    </select>
+                  </div>
+                )}
+
+                {selectedOpening.type === 'porta' && selectedOpening.swingDirection !== 'sliding' && (
+                  <div className="space-y-1.5">
+                    <label className="block text-[11px] text-[#949BA8]">
+                      Sentido da Folha (Giro)
+                    </label>
+                    <select
+                      value={selectedOpening.swingDirection}
+                      onChange={(e) =>
+                        updateSelectedOp({
+                          swingDirection: e.target.value as Opening['swingDirection'],
+                        })
+                      }
+                      className="w-full px-2 py-1 rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                    >
+                      <option value="left_in">Esquerda — Para Dentro</option>
+                      <option value="right_in">Direita — Para Dentro</option>
+                      <option value="left_out">Esquerda — Para Fora</option>
+                      <option value="right_out">Direita — Para Fora</option>
+                    </select>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <button
+                        type="button"
+                        onClick={handleMirrorSelected}
+                        className="py-1 rounded border border-[#323844] bg-[#22262E] text-white text-[11px] flex items-center justify-center gap-1 hover:border-[#2F7CF6]"
+                      >
+                        <FlipHorizontal2 className="w-3 h-3" /> Esq ↔ Dir
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const flipInOut: Record<Opening['swingDirection'], Opening['swingDirection']> = {
+                            left_in: 'left_out',
+                            left_out: 'left_in',
+                            right_in: 'right_out',
+                            right_out: 'right_in',
+                            sliding: 'sliding',
+                            none: 'none',
+                          };
+                          updateSelectedOp({
+                            swingDirection: flipInOut[selectedOpening.swingDirection],
+                          });
+                        }}
+                        className="py-1 rounded border border-[#323844] bg-[#22262E] text-white text-[11px] flex items-center justify-center gap-1 hover:border-[#2F7CF6]"
+                      >
+                        Dentro ↔ Fora
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-[11px] text-[#949BA8] mb-1">Modelo / Tipo</label>
+                  <select
+                    value={
+                      selectedOpening.openingKind ??
+                      (selectedOpening.type === 'porta' ? 'porta_abrir' : 'janela_correr')
+                    }
+                    onChange={(e) => {
+                      const nextKind = e.target.value as OpeningKind;
+                      updateSelectedOp({
+                        openingKind: nextKind,
+                        swingDirection:
+                          nextKind === 'porta_correr' || nextKind !== 'porta_abrir'
+                            ? 'sliding'
+                            : selectedOpening.swingDirection === 'sliding'
+                              ? 'left_in'
+                              : selectedOpening.swingDirection,
+                      });
+                    }}
+                    className="w-full px-2 py-1 rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                  >
+                    {selectedOpening.type === 'porta' ? (
+                      <>
+                        <option value="porta_abrir">Porta de Abrir</option>
+                        <option value="porta_correr">Porta de Correr</option>
+                      </>
+                    ) : (
+                      <>
+                        <option value="janela_correr">Janela de Correr</option>
+                        <option value="vitro_basculante">Vitrô Basculante</option>
+                        <option value="vitro_maxim_ar">Vitrô Maxim-Ar</option>
+                        <option value="vitro_fixo">Vitrô Fixo</option>
+                      </>
+                    )}
+                  </select>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between text-[11px] text-[#949BA8] mb-1">
+                    <span>Largura rápida (m)</span>
+                    <span className="font-mono text-white">{selectedOpening.width.toFixed(2)}m</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1 mb-2">
+                    {widthPresets.map((wVal) => (
+                      <button
+                        key={wVal}
+                        type="button"
+                        onClick={() =>
+                          updateSelectedOp({
+                            width: wVal,
+                            offsetAlongWall: clampOpeningOffsetToWall(
+                              hostLen,
+                              wVal,
+                              selectedOpening.offsetAlongWall,
+                              0.01,
+                            ),
+                          })
+                        }
+                        className={`px-1.5 py-0.5 text-[10px] font-mono rounded border ${
+                          Math.abs(selectedOpening.width - wVal) < 0.01
+                            ? 'border-[#2F7CF6] bg-[#2F7CF6]/20 text-white'
+                            : 'border-[#2A2F38] bg-[#14161A] text-[#949BA8] hover:text-white'
+                        }`}
+                      >
+                        {wVal.toFixed(2)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[11px] text-[#949BA8] mb-1">Largura (m)</label>
+                    <input
+                      type="number"
+                      step="0.05"
+                      min={0.4}
+                      value={selectedOpening.width}
+                      onChange={(e) => {
+                        const val = Math.max(0.4, Number(e.target.value));
+                        updateSelectedOp({
+                          width: val,
+                          offsetAlongWall: clampOpeningOffsetToWall(
+                            hostLen,
+                            val,
+                            selectedOpening.offsetAlongWall,
+                            0.01,
+                          ),
+                        });
+                      }}
+                      className="w-full px-2 py-1 font-mono bg-[#14161A] border border-[#2A2F38] rounded text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-[#949BA8] mb-1">Altura (m)</label>
+                    <input
+                      type="number"
+                      step="0.05"
+                      min={0.4}
+                      value={selectedOpening.height}
+                      onChange={(e) =>
+                        updateSelectedOp({ height: Math.max(0.4, Number(e.target.value)) })
+                      }
+                      className="w-full px-2 py-1 font-mono bg-[#14161A] border border-[#2A2F38] rounded text-white"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[11px] text-[#949BA8] mb-1">Peitoril (m)</label>
+                    <input
+                      type="number"
+                      step="0.05"
+                      min={0}
+                      value={selectedOpening.sillHeight}
+                      onChange={(e) =>
+                        updateSelectedOp({ sillHeight: Math.max(0, Number(e.target.value)) })
+                      }
+                      className="w-full px-2 py-1 font-mono bg-[#14161A] border border-[#2A2F38] rounded text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-[#949BA8] mb-1">Dist. Início (m)</label>
+                    <input
+                      type="number"
+                      step="0.05"
+                      min={0}
+                      max={maxOff}
+                      value={selectedOpening.offsetAlongWall}
+                      onChange={(e) =>
+                        updateSelectedOp({
+                          offsetAlongWall: clampOpeningOffsetToWall(
+                            hostLen,
+                            selectedOpening.width,
+                            Number(e.target.value),
+                            0.01,
+                          ),
+                        })
+                      }
+                      className="w-full px-2 py-1 font-mono bg-[#14161A] border border-[#2A2F38] rounded text-white"
+                    />
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={handleMirrorSelected}
+                    className="flex-1 py-1.5 rounded border border-[#323844] bg-[#22262E] text-white flex items-center justify-center gap-1"
+                  >
+                    <FlipHorizontal2 className="w-3.5 h-3.5" /> Inverter Abertura
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDeleteSelected}
+                    className="p-1.5 rounded bg-red-950/60 border border-red-500/40 text-red-300"
+                    title="Excluir esquadria"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               </div>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={handleMirrorSelected}
-                  className="flex-1 py-1.5 rounded border border-[#323844] bg-[#22262E] text-white flex items-center justify-center gap-1"
-                >
-                  <FlipHorizontal2 className="w-3.5 h-3.5" /> Inverter Abertura
-                </button>
-                <button
-                  type="button"
-                  onClick={handleDeleteSelected}
-                  className="p-1.5 rounded bg-red-950/60 border border-red-500/40 text-red-300"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
-          )}
+            );
+          })()}
 
           {selectedFurniture && (
             <div className="space-y-3 text-xs">
