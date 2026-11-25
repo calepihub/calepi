@@ -51,6 +51,7 @@ import {
 import { computeElectricalRouting, computeHydraulicRouting } from '../engine/mepRouting';
 import { nextId } from '../engine/parametricGenerator';
 import { ElectricalSymbolSvg, FurnitureCadBlock } from './CadArchitecturalSymbols';
+import { PaginationBar, paginateItems, useViewportPageSize } from './PaginationBar';
 import type {
   DrainagePoint,
   ElectricalCategory,
@@ -185,6 +186,7 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
   const [doorRolePreset, setDoorRolePreset] = useState<OpeningRole>('outro');
   const [furniturePresetIdx, setFurniturePresetIdx] = useState(0);
   const [selected, setSelected] = useState<SelectedElement>(null);
+  const [openingInspectorTab, setOpeningInspectorTab] = useState<'posicao' | 'dimensoes'>('posicao');
 
   // CAD viewport state
   const [zoom, setZoom] = useState(1);
@@ -2481,9 +2483,9 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
       <div className="flex-1 flex min-h-0">
         {/* Central CAD Viewport */}
         <div className="flex-1 relative bg-[#0F1115] flex flex-col min-w-0">
-          {/* Layer Strip */}
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-[#16191F] border-b border-[#252A33] text-[11px] overflow-x-auto">
-            <span className="text-[#949BA8] flex items-center gap-1 shrink-0">
+          {/* Layer Strip (zero horizontal scroll) */}
+          <div className="flex flex-wrap items-center gap-1 px-3 py-1 bg-[#16191F] border-b border-[#252A33] text-[11px]">
+            <span className="text-[#949BA8] flex items-center gap-1 shrink-0 mr-1">
               <Eye className="w-3 h-3" /> Layers:
             </span>
             {(
@@ -2801,57 +2803,26 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
           </div>
         </div>
 
-        {/* Right Contextual Properties Inspector */}
-        <aside className="w-72 shrink-0 bg-[#1B1E24] border-l border-[#2A2F38] p-4 overflow-y-auto space-y-4">
-          <h2 className="text-xs font-semibold text-white uppercase tracking-wider">
-            Inspetor de Propriedades
-          </h2>
+        {/* Right Contextual Properties Inspector (zero vertical scroll) */}
+        <aside className="flex w-72 shrink-0 flex-col justify-between overflow-hidden border-l border-[#2A2F38] bg-[#1B1E24] p-3">
+          <div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-hidden">
+            <h2 className="shrink-0 text-xs font-semibold uppercase tracking-wider text-white">
+              Inspetor de Propriedades
+            </h2>
 
           {!selected && (
-            <div className="text-xs text-[#949BA8] space-y-2">
-              <p>
-                Arraste qualquer <strong className="text-white">porta, janela ou vitrô</strong> para reposicionar em qualquer parede, ou selecione um item abaixo.
+            <div className="flex min-h-0 flex-1 flex-col gap-2 text-xs text-[#949BA8]">
+              <p className="shrink-0 text-[11px] leading-snug">
+                Arraste qualquer <strong className="text-white">porta, janela ou vitrô</strong> para reposicionar em qualquer parede, ou selecione abaixo.
               </p>
               {activeUt && scope === 'tipologia' && (
-                <>
-                  <div className="pt-3 border-t border-[#2A2F38] space-y-1.5 font-mono text-[11px] tabular-nums">
-                    <div className="text-white font-sans font-medium">Resumo {activeUt.code}</div>
-                    <div>Paredes: {activeUt.walls.length}</div>
-                    <div>Portas/Janelas: {activeUt.openings.length}</div>
-                    <div>Mobiliário: {activeUt.furniture.length}</div>
-                    <div>Pontos Elétricos: {activeUt.electricalPoints.length}</div>
-                    <div>Pontos Água: {activeUt.waterPoints.length}</div>
-                    <div>Pontos Esgoto: {activeUt.drainagePoints.length}</div>
-                  </div>
-                  {activeUt.openings.length > 0 && (
-                    <div className="pt-3 border-t border-[#2A2F38] space-y-1.5">
-                      <div className="text-[11px] font-medium text-white">
-                        Portas & Janelas ({activeUt.openings.length})
-                      </div>
-                      <div className="grid grid-cols-2 gap-1.5">
-                        {activeUt.openings.map((op) => {
-                          const w = activeUt.walls.find((wl) => wl.id === op.wallId);
-                          return (
-                            <button
-                              key={op.id}
-                              type="button"
-                              onClick={() => {
-                                setLayers((prev) => ({ ...prev, openings: true }));
-                                setSelected({ kind: 'opening', id: op.id });
-                              }}
-                              className="text-left px-2 py-1 rounded border border-[#2A2F38] bg-[#14161A] hover:border-[#2F7CF6] text-[11px] text-slate-200"
-                            >
-                              <div className="font-mono font-semibold text-[#F59E0B]">{op.code}</div>
-                              <div className="text-[10px] text-[#949BA8] truncate">
-                                {w?.code ?? op.wallId} · {op.width.toFixed(2)}m
-                              </div>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-                </>
+                <InspectorOverviewPanel
+                  activeUt={activeUt}
+                  onSelectOpening={(opId) => {
+                    setLayers((prev) => ({ ...prev, openings: true }));
+                    setSelected({ kind: 'opening', id: opId });
+                  }}
+                />
               )}
             </div>
           )}
@@ -3070,369 +3041,400 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
                 : [0.6, 0.8, 1.0, 1.2, 1.5];
 
             return (
-              <div className="space-y-3 text-xs">
+              <div className="space-y-2 text-xs">
                 <div className="flex items-center justify-between">
                   <span className="font-semibold text-[#F59E0B]">
                     {selectedOpening.type.toUpperCase()} {selectedOpening.code}
                   </span>
-                  <span className="text-[10px] text-[#949BA8]">
-                    Arraste para qualquer parede
+                  <span className="font-mono text-[10px] text-[#949BA8] tabular-nums">
+                    {selectedOpening.width.toFixed(2)}×{selectedOpening.height.toFixed(2)}m
                   </span>
                 </div>
 
-                <div>
-                  <label className="block text-[11px] text-[#949BA8] mb-1">Parede Hospedeira</label>
-                  <select
-                    value={selectedOpening.wallId}
-                    onChange={(e) => {
-                      const nextWallId = e.target.value;
-                      const nextWall = activeUt.walls.find((w) => w.id === nextWallId);
-                      const nextLen = nextWall ? getWallLength(nextWall) : 3;
-                      updateSelectedOp(
-                        {
-                          wallId: nextWallId,
-                          offsetAlongWall: clampOpeningOffsetToWall(
-                            nextLen,
-                            selectedOpening.width,
-                            selectedOpening.offsetAlongWall,
-                            0.01,
-                          ),
-                        },
-                        `Movimentação de ${selectedOpening.code} para parede ${nextWall?.code ?? nextWallId}`,
-                      );
-                    }}
-                    className="w-full px-2 py-1 rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                <div className="grid grid-cols-2 gap-1 rounded border border-[#2A2F38] bg-[#14161A] p-0.5 text-[11px]">
+                  <button
+                    type="button"
+                    onClick={() => setOpeningInspectorTab('posicao')}
+                    className={`rounded py-1 font-medium transition-colors ${
+                      openingInspectorTab === 'posicao'
+                        ? 'bg-[#2F7CF6] text-white'
+                        : 'text-[#949BA8] hover:text-white'
+                    }`}
                   >
-                    {activeUt.walls.map((w) => (
-                      <option key={w.id} value={w.id}>
-                        {w.code} — {getWallLength(w).toFixed(2)} m ({w.isExternal ? 'Externa' : 'Interna'})
-                      </option>
-                    ))}
-                  </select>
+                    Posição &amp; Giro
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setOpeningInspectorTab('dimensoes')}
+                    className={`rounded py-1 font-medium transition-colors ${
+                      openingInspectorTab === 'dimensoes'
+                        ? 'bg-[#2F7CF6] text-white'
+                        : 'text-[#949BA8] hover:text-white'
+                    }`}
+                  >
+                    Dimensões &amp; Tipo
+                  </button>
                 </div>
 
-                {/* Deslizamento rápido + Alinhamento exato na parede */}
-                <div className="p-2 rounded bg-[#14161A] border border-[#2A2F38] space-y-2">
-                  <div className="flex items-center justify-between text-[11px]">
-                    <span className="text-[#949BA8]">Posição na Parede</span>
-                    <span className="font-mono text-sky-300">
-                      {selectedOpening.offsetAlongWall.toFixed(2)}m ↔ {distEnd.toFixed(2)}m
-                    </span>
-                  </div>
-                  <input
-                    type="range"
-                    min={0.02}
-                    max={Math.max(0.02, maxOff)}
-                    step={0.05}
-                    value={Math.min(maxOff, selectedOpening.offsetAlongWall)}
-                    onChange={(e) =>
-                      updateSelectedOp({
-                        offsetAlongWall: clampOpeningOffsetToWall(
-                          hostLen,
-                          selectedOpening.width,
-                          Number(e.target.value),
-                          0.01,
-                        ),
-                      })
-                    }
-                    className="w-full accent-[#2F7CF6]"
-                  />
-                  <div className="grid grid-cols-5 gap-1 text-[10px]">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        updateSelectedOp({
-                          offsetAlongWall: clampOpeningOffsetToWall(
-                            hostLen,
-                            selectedOpening.width,
-                            selectedOpening.offsetAlongWall - 0.1,
-                            0.01,
-                          ),
-                        })
-                      }
-                      className="py-1 rounded border border-[#2A2F38] bg-[#1B1E24] text-slate-200 hover:border-[#2F7CF6]"
-                    >
-                      -10cm
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => updateSelectedOp({ offsetAlongWall: 0.04 })}
-                      className="py-1 rounded border border-[#2A2F38] bg-[#1B1E24] text-slate-200 hover:border-[#2F7CF6]"
-                    >
-                      Início
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        updateSelectedOp({
-                          offsetAlongWall: clampOpeningOffsetToWall(
-                            hostLen,
-                            selectedOpening.width,
-                            (hostLen - selectedOpening.width) / 2,
-                            0.01,
-                          ),
-                        })
-                      }
-                      className="py-1 rounded border border-[#2A2F38] bg-[#1B1E24] text-sky-300 hover:border-[#2F7CF6]"
-                    >
-                      Centro
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        updateSelectedOp({
-                          offsetAlongWall: round2(Math.max(0.02, hostLen - selectedOpening.width - 0.04)),
-                        })
-                      }
-                      className="py-1 rounded border border-[#2A2F38] bg-[#1B1E24] text-slate-200 hover:border-[#2F7CF6]"
-                    >
-                      Fim
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        updateSelectedOp({
-                          offsetAlongWall: clampOpeningOffsetToWall(
-                            hostLen,
-                            selectedOpening.width,
-                            selectedOpening.offsetAlongWall + 0.1,
-                            0.01,
-                          ),
-                        })
-                      }
-                      className="py-1 rounded border border-[#2A2F38] bg-[#1B1E24] text-slate-200 hover:border-[#2F7CF6]"
-                    >
-                      +10cm
-                    </button>
-                  </div>
-                </div>
-
-                {selectedOpening.type === 'porta' && (
-                  <div>
-                    <label className="block text-[11px] text-[#949BA8] mb-1">
-                      Função / Referência
-                    </label>
-                    <select
-                      value={selectedOpening.role ?? 'outro'}
-                      onChange={(e) => {
-                        const nextRole = e.target.value as OpeningRole;
-                        const fixedW = FIXED_DOOR_WIDTHS[nextRole];
-                        const nextW = fixedW ?? selectedOpening.width;
-                        updateSelectedOp({
-                          role: nextRole,
-                          width: nextW,
-                          offsetAlongWall: clampOpeningOffsetToWall(
-                            hostLen,
-                            nextW,
-                            selectedOpening.offsetAlongWall,
-                            0.01,
-                          ),
-                        });
-                      }}
-                      className="w-full px-2 py-1 rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                    >
-                      <option value="entrada">Entrada Social (Ref. 0,80m)</option>
-                      <option value="banheiro">Banheiro (Ref. 0,60m)</option>
-                      <option value="quarto">Quarto (Ref. 0,70m)</option>
-                      <option value="outro">Outra porta (livre)</option>
-                    </select>
-                  </div>
-                )}
-
-                {selectedOpening.type === 'porta' && selectedOpening.swingDirection !== 'sliding' && (
-                  <div className="space-y-1.5">
-                    <label className="block text-[11px] text-[#949BA8]">
-                      Sentido da Folha (Giro)
-                    </label>
-                    <select
-                      value={selectedOpening.swingDirection}
-                      onChange={(e) =>
-                        updateSelectedOp({
-                          swingDirection: e.target.value as Opening['swingDirection'],
-                        })
-                      }
-                      className="w-full px-2 py-1 rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                    >
-                      <option value="left_in">Esquerda — Para Dentro</option>
-                      <option value="right_in">Direita — Para Dentro</option>
-                      <option value="left_out">Esquerda — Para Fora</option>
-                      <option value="right_out">Direita — Para Fora</option>
-                    </select>
-                    <div className="grid grid-cols-2 gap-1.5">
-                      <button
-                        type="button"
-                        onClick={handleMirrorSelected}
-                        className="py-1 rounded border border-[#323844] bg-[#22262E] text-white text-[11px] flex items-center justify-center gap-1 hover:border-[#2F7CF6]"
-                      >
-                        <FlipHorizontal2 className="w-3 h-3" /> Esq ↔ Dir
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const flipInOut: Record<Opening['swingDirection'], Opening['swingDirection']> = {
-                            left_in: 'left_out',
-                            left_out: 'left_in',
-                            right_in: 'right_out',
-                            right_out: 'right_in',
-                            sliding: 'sliding',
-                            none: 'none',
-                          };
-                          updateSelectedOp({
-                            swingDirection: flipInOut[selectedOpening.swingDirection],
-                          });
+                {openingInspectorTab === 'posicao' ? (
+                  <div className="space-y-2">
+                    <div>
+                      <label className="block text-[11px] text-[#949BA8] mb-1">Parede Hospedeira</label>
+                      <select
+                        value={selectedOpening.wallId}
+                        onChange={(e) => {
+                          const nextWallId = e.target.value;
+                          const nextWall = activeUt.walls.find((w) => w.id === nextWallId);
+                          const nextLen = nextWall ? getWallLength(nextWall) : 3;
+                          updateSelectedOp(
+                            {
+                              wallId: nextWallId,
+                              offsetAlongWall: clampOpeningOffsetToWall(
+                                nextLen,
+                                selectedOpening.width,
+                                selectedOpening.offsetAlongWall,
+                                0.01,
+                              ),
+                            },
+                            `Movimentação de ${selectedOpening.code} para parede ${nextWall?.code ?? nextWallId}`,
+                          );
                         }}
-                        className="py-1 rounded border border-[#323844] bg-[#22262E] text-white text-[11px] flex items-center justify-center gap-1 hover:border-[#2F7CF6]"
+                        className="w-full px-2 py-1 rounded bg-[#14161A] border border-[#2A2F38] text-white"
                       >
-                        Dentro ↔ Fora
-                      </button>
+                        {activeUt.walls.map((w) => (
+                          <option key={w.id} value={w.id}>
+                            {w.code} — {getWallLength(w).toFixed(2)} m ({w.isExternal ? 'Externa' : 'Interna'})
+                          </option>
+                        ))}
+                      </select>
                     </div>
-                  </div>
-                )}
 
-                <div>
-                  <label className="block text-[11px] text-[#949BA8] mb-1">Modelo / Tipo</label>
-                  <select
-                    value={
-                      selectedOpening.openingKind ??
-                      (selectedOpening.type === 'porta' ? 'porta_abrir' : 'janela_correr')
-                    }
-                    onChange={(e) => {
-                      const nextKind = e.target.value as OpeningKind;
-                      updateSelectedOp({
-                        openingKind: nextKind,
-                        swingDirection:
-                          nextKind === 'porta_correr' || nextKind !== 'porta_abrir'
-                            ? 'sliding'
-                            : selectedOpening.swingDirection === 'sliding'
-                              ? 'left_in'
-                              : selectedOpening.swingDirection,
-                      });
-                    }}
-                    className="w-full px-2 py-1 rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                  >
-                    {selectedOpening.type === 'porta' ? (
-                      <>
-                        <option value="porta_abrir">Porta de Abrir</option>
-                        <option value="porta_correr">Porta de Correr</option>
-                      </>
-                    ) : (
-                      <>
-                        <option value="janela_correr">Janela de Correr</option>
-                        <option value="vitro_basculante">Vitrô Basculante</option>
-                        <option value="vitro_maxim_ar">Vitrô Maxim-Ar</option>
-                        <option value="vitro_fixo">Vitrô Fixo</option>
-                      </>
-                    )}
-                  </select>
-                </div>
-
-                <div>
-                  <div className="flex items-center justify-between text-[11px] text-[#949BA8] mb-1">
-                    <span>Largura rápida (m)</span>
-                    <span className="font-mono text-white">{selectedOpening.width.toFixed(2)}m</span>
-                  </div>
-                  <div className="flex flex-wrap gap-1 mb-2">
-                    {widthPresets.map((wVal) => (
-                      <button
-                        key={wVal}
-                        type="button"
-                        onClick={() =>
+                    <div className="p-2 rounded bg-[#14161A] border border-[#2A2F38] space-y-2">
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className="text-[#949BA8]">Posição na Parede</span>
+                        <span className="font-mono text-sky-300 tabular-nums">
+                          {selectedOpening.offsetAlongWall.toFixed(2)}m ↔ {distEnd.toFixed(2)}m
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min={0.02}
+                        max={Math.max(0.02, maxOff)}
+                        step={0.05}
+                        value={Math.min(maxOff, selectedOpening.offsetAlongWall)}
+                        onChange={(e) =>
                           updateSelectedOp({
-                            width: wVal,
                             offsetAlongWall: clampOpeningOffsetToWall(
                               hostLen,
-                              wVal,
-                              selectedOpening.offsetAlongWall,
+                              selectedOpening.width,
+                              Number(e.target.value),
                               0.01,
                             ),
                           })
                         }
-                        className={`px-1.5 py-0.5 text-[10px] font-mono rounded border ${
-                          Math.abs(selectedOpening.width - wVal) < 0.01
-                            ? 'border-[#2F7CF6] bg-[#2F7CF6]/20 text-white'
-                            : 'border-[#2A2F38] bg-[#14161A] text-[#949BA8] hover:text-white'
-                        }`}
-                      >
-                        {wVal.toFixed(2)}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                        className="w-full accent-[#2F7CF6]"
+                      />
+                      <div className="grid grid-cols-5 gap-1 text-[10px]">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            updateSelectedOp({
+                              offsetAlongWall: clampOpeningOffsetToWall(
+                                hostLen,
+                                selectedOpening.width,
+                                selectedOpening.offsetAlongWall - 0.1,
+                                0.01,
+                              ),
+                            })
+                          }
+                          className="py-1 rounded border border-[#2A2F38] bg-[#1B1E24] text-slate-200 hover:border-[#2F7CF6]"
+                        >
+                          -10cm
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => updateSelectedOp({ offsetAlongWall: 0.04 })}
+                          className="py-1 rounded border border-[#2A2F38] bg-[#1B1E24] text-slate-200 hover:border-[#2F7CF6]"
+                        >
+                          Início
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            updateSelectedOp({
+                              offsetAlongWall: clampOpeningOffsetToWall(
+                                hostLen,
+                                selectedOpening.width,
+                                (hostLen - selectedOpening.width) / 2,
+                                0.01,
+                              ),
+                            })
+                          }
+                          className="py-1 rounded border border-[#2A2F38] bg-[#1B1E24] text-sky-300 hover:border-[#2F7CF6]"
+                        >
+                          Centro
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            updateSelectedOp({
+                              offsetAlongWall: round2(Math.max(0.02, hostLen - selectedOpening.width - 0.04)),
+                            })
+                          }
+                          className="py-1 rounded border border-[#2A2F38] bg-[#1B1E24] text-slate-200 hover:border-[#2F7CF6]"
+                        >
+                          Fim
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            updateSelectedOp({
+                              offsetAlongWall: clampOpeningOffsetToWall(
+                                hostLen,
+                                selectedOpening.width,
+                                selectedOpening.offsetAlongWall + 0.1,
+                                0.01,
+                              ),
+                            })
+                          }
+                          className="py-1 rounded border border-[#2A2F38] bg-[#1B1E24] text-slate-200 hover:border-[#2F7CF6]"
+                        >
+                          +10cm
+                        </button>
+                      </div>
+                    </div>
 
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="block text-[11px] text-[#949BA8] mb-1">Largura (m)</label>
-                    <input
-                      type="number"
-                      step="0.05"
-                      min={0.4}
-                      value={selectedOpening.width}
-                      onChange={(e) => {
-                        const val = Math.max(0.4, Number(e.target.value));
-                        updateSelectedOp({
-                          width: val,
-                          offsetAlongWall: clampOpeningOffsetToWall(
-                            hostLen,
-                            val,
-                            selectedOpening.offsetAlongWall,
-                            0.01,
-                          ),
-                        });
-                      }}
-                      className="w-full px-2 py-1 font-mono bg-[#14161A] border border-[#2A2F38] rounded text-white"
-                    />
+                    {selectedOpening.type === 'porta' && selectedOpening.swingDirection !== 'sliding' && (
+                      <div className="space-y-1.5">
+                        <label className="block text-[11px] text-[#949BA8]">
+                          Sentido da Folha (Giro)
+                        </label>
+                        <select
+                          value={selectedOpening.swingDirection}
+                          onChange={(e) =>
+                            updateSelectedOp({
+                              swingDirection: e.target.value as Opening['swingDirection'],
+                            })
+                          }
+                          className="w-full px-2 py-1 rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                        >
+                          <option value="left_in">Esquerda — Para Dentro</option>
+                          <option value="right_in">Direita — Para Dentro</option>
+                          <option value="left_out">Esquerda — Para Fora</option>
+                          <option value="right_out">Direita — Para Fora</option>
+                        </select>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <button
+                            type="button"
+                            onClick={handleMirrorSelected}
+                            className="py-1 rounded border border-[#323844] bg-[#22262E] text-white text-[11px] flex items-center justify-center gap-1 hover:border-[#2F7CF6]"
+                          >
+                            <FlipHorizontal2 className="w-3 h-3" /> Esq ↔ Dir
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const flipInOut: Record<Opening['swingDirection'], Opening['swingDirection']> = {
+                                left_in: 'left_out',
+                                left_out: 'left_in',
+                                right_in: 'right_out',
+                                right_out: 'right_in',
+                                sliding: 'sliding',
+                                none: 'none',
+                              };
+                              updateSelectedOp({
+                                swingDirection: flipInOut[selectedOpening.swingDirection],
+                              });
+                            }}
+                            className="py-1 rounded border border-[#323844] bg-[#22262E] text-white text-[11px] flex items-center justify-center gap-1 hover:border-[#2F7CF6]"
+                          >
+                            Dentro ↔ Fora
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                  <div>
-                    <label className="block text-[11px] text-[#949BA8] mb-1">Altura (m)</label>
-                    <input
-                      type="number"
-                      step="0.05"
-                      min={0.4}
-                      value={selectedOpening.height}
-                      onChange={(e) =>
-                        updateSelectedOp({ height: Math.max(0.4, Number(e.target.value)) })
-                      }
-                      className="w-full px-2 py-1 font-mono bg-[#14161A] border border-[#2A2F38] rounded text-white"
-                    />
+                ) : (
+                  <div className="space-y-2">
+                    {selectedOpening.type === 'porta' && (
+                      <div>
+                        <label className="block text-[11px] text-[#949BA8] mb-1">
+                          Função / Referência
+                        </label>
+                        <select
+                          value={selectedOpening.role ?? 'outro'}
+                          onChange={(e) => {
+                            const nextRole = e.target.value as OpeningRole;
+                            const fixedW = FIXED_DOOR_WIDTHS[nextRole];
+                            const nextW = fixedW ?? selectedOpening.width;
+                            updateSelectedOp({
+                              role: nextRole,
+                              width: nextW,
+                              offsetAlongWall: clampOpeningOffsetToWall(
+                                hostLen,
+                                nextW,
+                                selectedOpening.offsetAlongWall,
+                                0.01,
+                              ),
+                            });
+                          }}
+                          className="w-full px-2 py-1 rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                        >
+                          <option value="entrada">Entrada Social (Ref. 0,80m)</option>
+                          <option value="banheiro">Banheiro (Ref. 0,60m)</option>
+                          <option value="quarto">Quarto (Ref. 0,70m)</option>
+                          <option value="outro">Outra porta (livre)</option>
+                        </select>
+                      </div>
+                    )}
+
+                    <div>
+                      <label className="block text-[11px] text-[#949BA8] mb-1">Modelo / Tipo</label>
+                      <select
+                        value={
+                          selectedOpening.openingKind ??
+                          (selectedOpening.type === 'porta' ? 'porta_abrir' : 'janela_correr')
+                        }
+                        onChange={(e) => {
+                          const nextKind = e.target.value as OpeningKind;
+                          updateSelectedOp({
+                            openingKind: nextKind,
+                            swingDirection:
+                              nextKind === 'porta_correr' || nextKind !== 'porta_abrir'
+                                ? 'sliding'
+                                : selectedOpening.swingDirection === 'sliding'
+                                  ? 'left_in'
+                                  : selectedOpening.swingDirection,
+                          });
+                        }}
+                        className="w-full px-2 py-1 rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                      >
+                        {selectedOpening.type === 'porta' ? (
+                          <>
+                            <option value="porta_abrir">Porta de Abrir</option>
+                            <option value="porta_correr">Porta de Correr</option>
+                          </>
+                        ) : (
+                          <>
+                            <option value="janela_correr">Janela de Correr</option>
+                            <option value="vitro_basculante">Vitrô Basculante</option>
+                            <option value="vitro_maxim_ar">Vitrô Maxim-Ar</option>
+                            <option value="vitro_fixo">Vitrô Fixo</option>
+                          </>
+                        )}
+                      </select>
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between text-[11px] text-[#949BA8] mb-1">
+                        <span>Largura rápida (m)</span>
+                        <span className="font-mono text-white tabular-nums">{selectedOpening.width.toFixed(2)}m</span>
+                      </div>
+                      <div className="flex flex-wrap gap-1">
+                        {widthPresets.map((wVal) => (
+                          <button
+                            key={wVal}
+                            type="button"
+                            onClick={() =>
+                              updateSelectedOp({
+                                width: wVal,
+                                offsetAlongWall: clampOpeningOffsetToWall(
+                                  hostLen,
+                                  wVal,
+                                  selectedOpening.offsetAlongWall,
+                                  0.01,
+                                ),
+                              })
+                            }
+                            className={`px-1.5 py-0.5 text-[10px] font-mono rounded border ${
+                              Math.abs(selectedOpening.width - wVal) < 0.01
+                                ? 'border-[#2F7CF6] bg-[#2F7CF6]/20 text-white'
+                                : 'border-[#2A2F38] bg-[#14161A] text-[#949BA8] hover:text-white'
+                            }`}
+                          >
+                            {wVal.toFixed(2)}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[11px] text-[#949BA8] mb-1">Largura (m)</label>
+                        <input
+                          type="number"
+                          step="0.05"
+                          min={0.4}
+                          value={selectedOpening.width}
+                          onChange={(e) => {
+                            const val = Math.max(0.4, Number(e.target.value));
+                            updateSelectedOp({
+                              width: val,
+                              offsetAlongWall: clampOpeningOffsetToWall(
+                                hostLen,
+                                val,
+                                selectedOpening.offsetAlongWall,
+                                0.01,
+                              ),
+                            });
+                          }}
+                          className="w-full px-2 py-1 font-mono bg-[#14161A] border border-[#2A2F38] rounded text-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] text-[#949BA8] mb-1">Altura (m)</label>
+                        <input
+                          type="number"
+                          step="0.05"
+                          min={0.4}
+                          value={selectedOpening.height}
+                          onChange={(e) =>
+                            updateSelectedOp({ height: Math.max(0.4, Number(e.target.value)) })
+                          }
+                          className="w-full px-2 py-1 font-mono bg-[#14161A] border border-[#2A2F38] rounded text-white"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[11px] text-[#949BA8] mb-1">Peitoril (m)</label>
+                        <input
+                          type="number"
+                          step="0.05"
+                          min={0}
+                          value={selectedOpening.sillHeight}
+                          onChange={(e) =>
+                            updateSelectedOp({ sillHeight: Math.max(0, Number(e.target.value)) })
+                          }
+                          className="w-full px-2 py-1 font-mono bg-[#14161A] border border-[#2A2F38] rounded text-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] text-[#949BA8] mb-1">Dist. Início (m)</label>
+                        <input
+                          type="number"
+                          step="0.05"
+                          min={0}
+                          max={maxOff}
+                          value={selectedOpening.offsetAlongWall}
+                          onChange={(e) =>
+                            updateSelectedOp({
+                              offsetAlongWall: clampOpeningOffsetToWall(
+                                hostLen,
+                                selectedOpening.width,
+                                Number(e.target.value),
+                                0.01,
+                              ),
+                            })
+                          }
+                          className="w-full px-2 py-1 font-mono bg-[#14161A] border border-[#2A2F38] rounded text-white"
+                        />
+                      </div>
+                    </div>
                   </div>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="block text-[11px] text-[#949BA8] mb-1">Peitoril (m)</label>
-                    <input
-                      type="number"
-                      step="0.05"
-                      min={0}
-                      value={selectedOpening.sillHeight}
-                      onChange={(e) =>
-                        updateSelectedOp({ sillHeight: Math.max(0, Number(e.target.value)) })
-                      }
-                      className="w-full px-2 py-1 font-mono bg-[#14161A] border border-[#2A2F38] rounded text-white"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] text-[#949BA8] mb-1">Dist. Início (m)</label>
-                    <input
-                      type="number"
-                      step="0.05"
-                      min={0}
-                      max={maxOff}
-                      value={selectedOpening.offsetAlongWall}
-                      onChange={(e) =>
-                        updateSelectedOp({
-                          offsetAlongWall: clampOpeningOffsetToWall(
-                            hostLen,
-                            selectedOpening.width,
-                            Number(e.target.value),
-                            0.01,
-                          ),
-                        })
-                      }
-                      className="w-full px-2 py-1 font-mono bg-[#14161A] border border-[#2A2F38] rounded text-white"
-                    />
-                  </div>
-                </div>
-                <div className="flex gap-2">
+                )}
+
+                <div className="flex gap-2 pt-1 border-t border-[#2A2F38]">
                   <button
                     type="button"
                     onClick={handleMirrorSelected}
@@ -4523,8 +4525,81 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
               </div>
             );
           })()}
+          </div>
         </aside>
       </div>
     </div>
   );
 };
+
+interface InspectorOverviewPanelProps {
+  activeUt: UnitType;
+  onSelectOpening: (openingId: string) => void;
+}
+
+const InspectorOverviewPanel: React.FC<InspectorOverviewPanelProps> = ({
+  activeUt,
+  onSelectOpening,
+}) => {
+  const [page, setPage] = useState(0);
+  const itemsPerPage = useViewportPageSize(430, 22, 4, 12);
+  const paged = paginateItems(activeUt.openings, page, itemsPerPage);
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col justify-between gap-2 overflow-hidden">
+      <div className="space-y-2">
+        <div className="border-t border-[#2A2F38] pt-2 font-mono text-[11px] tabular-nums space-y-1">
+          <div className="font-sans font-medium text-white">Resumo {activeUt.code}</div>
+          <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10.5px]">
+            <span>Paredes: {activeUt.walls.length}</span>
+            <span>Esquadrias: {activeUt.openings.length}</span>
+            <span>Mobiliário: {activeUt.furniture.length}</span>
+            <span>Elétrica: {activeUt.electricalPoints.length}</span>
+            <span>Água: {activeUt.waterPoints.length}</span>
+            <span>Esgoto: {activeUt.drainagePoints.length}</span>
+          </div>
+        </div>
+
+        {activeUt.openings.length > 0 && (
+          <div className="border-t border-[#2A2F38] pt-2 space-y-1.5">
+            <div className="text-[11px] font-medium text-white">
+              Portas &amp; Janelas ({activeUt.openings.length})
+            </div>
+            <div className="grid grid-cols-2 gap-1.5">
+              {paged.slice.map((op) => {
+                const w = activeUt.walls.find((wl) => wl.id === op.wallId);
+                return (
+                  <button
+                    key={op.id}
+                    type="button"
+                    onClick={() => onSelectOpening(op.id)}
+                    className="rounded border border-[#2A2F38] bg-[#14161A] px-2 py-1 text-left text-[11px] text-slate-200 hover:border-[#2F7CF6]"
+                  >
+                    <div className="font-mono font-semibold text-[#F59E0B]">{op.code}</div>
+                    <div className="truncate text-[10px] text-[#949BA8]">
+                      {w?.code ?? op.wallId} · {op.width.toFixed(2)}m
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {activeUt.openings.length > itemsPerPage && (
+        <PaginationBar
+          page={paged.safePage}
+          totalPages={paged.totalPages}
+          totalItems={activeUt.openings.length}
+          startIndex={paged.start}
+          endIndex={paged.end}
+          onPageChange={setPage}
+          itemLabel="esquadrias"
+          compact
+        />
+      )}
+    </div>
+  );
+};
+

@@ -53,6 +53,7 @@ import {
   nextId,
 } from '../engine/parametricGenerator';
 import { NumericInput } from './NumericInput';
+import { PaginationBar, paginateItems, useViewportPageSize } from './PaginationBar';
 import type {
   AccessGateType,
   BoundaryCondition,
@@ -151,6 +152,27 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
   const [qtMezzStairLayout, setQtMezzStairLayout] = useState<MezzanineStairLayout>('reta');
   const [qtMezzStairSide, setQtMezzStairSide] = useState<'esquerda' | 'direita'>('direita');
 
+  // Zero-scroll studio sub-tabs & pagination states
+  const [stage1SubTab, setStage1SubTab] = useState<'dimensoes' | 'divisas' | 'portoes' | 'vertices'>('dimensoes');
+  const [stage2SubTab, setStage2SubTab] = useState<'modelos' | 'implantacao' | 'grupos'>(
+    project.unitTypes.length === 0 ? 'modelos' : 'implantacao',
+  );
+  const [quickFormStep, setQuickFormStep] = useState<'basico' | 'config'>('basico');
+  const [rightPaneTab, setRightPaneTab] = useState<'planta' | 'tabela' | 'unidade'>('planta');
+  const [gatesPage, setGatesPage] = useState(0);
+  const [verticesPage, setVerticesPage] = useState(0);
+  const [modelsPage, setModelsPage] = useState(0);
+  const [groupsPage, setGroupsPage] = useState(0);
+  const [issuesPage, setIssuesPage] = useState(0);
+  const [floorUnitsPage, setFloorUnitsPage] = useState(0);
+
+  const gatesPageSize = useViewportPageSize(370, 82, 2, 6);
+  const verticesPageSize = useViewportPageSize(360, 38, 4, 10);
+  const modelsPageSize = useViewportPageSize(360, 76, 2, 6);
+  const groupsPageSize = useViewportPageSize(380, 78, 2, 5);
+  const issuesPageSize = useViewportPageSize(430, 62, 2, 6);
+  const floorUnitsPageSize = useViewportPageSize(340, 38, 4, 14);
+
   // Per-unit quick dimension customization modal/panel state
   const [customizingUnitId, setCustomizingUnitId] = useState<string | null>(null);
   const [customW, setCustomW] = useState(4.0);
@@ -183,6 +205,13 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
   const selectedInstanceType = selectedInstance
     ? project.unitTypes.find((t) => t.id === selectedInstance.unitTypeId) ?? null
     : null;
+
+  const gatesPager = paginateItems(site.accesses, gatesPage, gatesPageSize);
+  const verticesPager = paginateItems(site.vertices, verticesPage, verticesPageSize);
+  const modelsPager = paginateItems(project.unitTypes, modelsPage, modelsPageSize);
+  const groupsPager = paginateItems(impConfig.groups, groupsPage, groupsPageSize);
+  const issuesPager = paginateItems(validation.issues, issuesPage, issuesPageSize);
+  const floorUnitsPager = paginateItems(activeFloor?.units ?? [], floorUnitsPage, floorUnitsPageSize);
 
   // Helpers for unit conversion between UI (m or cm) and canonical internal meters
   const toDisplay = (meters: number) =>
@@ -361,6 +390,8 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
     setQtMezzUsage('dormitorio');
     setQtMezzStairLayout('reta');
     setQtMezzStairSide('direita');
+    setQuickFormStep('basico');
+    setStage2SubTab('modelos');
     setShowQuickTypeForm(true);
   };
 
@@ -395,6 +426,8 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
     setQtMezzUsage(ut.mezzanine?.usage ?? 'dormitorio');
     setQtMezzStairLayout(ut.mezzanine?.stairLayout ?? 'reta');
     setQtMezzStairSide(ut.mezzanine?.stairSide ?? 'direita');
+    setQuickFormStep('basico');
+    setStage2SubTab('modelos');
     setShowQuickTypeForm(true);
   };
 
@@ -675,6 +708,7 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
     setCustomW(baseUt.width);
     setCustomD(baseUt.depth);
     setCustomEntry(baseUt.entrySide ?? 'frente');
+    setRightPaneTab('unidade');
   };
 
   const handleSaveCustomUnitDimensions = (e: React.FormEvent) => {
@@ -789,27 +823,45 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
     right: 'Lateral Direita (vista da rua)',
   };
 
+  const hasMixedGroups =
+    impConfig.couplingMode === 'mista' || impConfig.modelMode === 'misto_repeticao';
+  const isPolygonalSite = site.shapeType === 'irregular' || site.shapeType === 'poligonal';
+
   return (
-    <div className="p-4 lg:p-6 max-w-[1520px] mx-auto space-y-5">
-      {/* Header & Top Actions */}
-      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[#2A2F38] pb-4">
-        <div>
-          <h1 className="text-xl font-semibold text-white">
-            Terreno, Divisas &amp; Implantação das Kitnets
+    <div className="mx-auto flex h-full w-full max-w-[1560px] flex-col gap-2 overflow-hidden p-3">
+      {/* Compact Header & Top Actions */}
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-[#2A2F38] pb-2">
+        <div className="min-w-0 flex items-center gap-3">
+          <h1 className="text-base font-semibold text-white truncate">
+            Terreno, Divisas &amp; Implantação
           </h1>
-          <p className="text-xs text-[#949BA8] mt-1">
-            Fluxo guiado em 4 etapas obrigatórias: caracterize o lote, defina a implantação das unidades (geminadas, separadas ou mista), ajuste afastamentos e valide em tempo real.
-          </p>
+          <span className="hidden lg:inline text-[11px] text-[#949BA8] truncate">
+            Lote {siteCheck.calculatedArea} m² · Edificável {siteCheck.buildableBox.area} m²
+          </span>
+          {siteCheck.hasAreaDivergence && (
+            <span
+              title={`Área informada (${siteCheck.declaredArea} m²) difere em ${siteCheck.areaDivergenceM2} m² da calculada (${siteCheck.calculatedArea} m²)`}
+              className="inline-flex items-center gap-1 rounded border border-amber-500/40 bg-amber-950/30 px-2 py-0.5 text-[10px] text-amber-200"
+            >
+              <AlertTriangle className="h-3 w-3 text-amber-400" />
+              Dif. área: {siteCheck.areaDivergenceM2} m²
+            </span>
+          )}
+          {importMsg && (
+            <span className="rounded border border-[#2F7CF6]/40 bg-[#2F7CF6]/10 px-2 py-0.5 text-[10px] text-[#E6E9EF]">
+              {importMsg}
+            </span>
+          )}
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="inline-flex rounded border border-[#323844] bg-[#14161A] p-0.5 text-xs">
+        <div className="flex items-center gap-2">
+          <div className="inline-flex rounded border border-[#323844] bg-[#14161A] p-0.5 text-[11px]">
             {(['m', 'cm'] as MeasurementUnit[]).map((u) => (
               <button
                 key={u}
                 type="button"
                 onClick={() => updateSite((s) => ({ ...s, measurementUnit: u }))}
-                className={`px-2.5 py-1 rounded font-mono transition ${
+                className={`px-2 py-0.5 rounded font-mono transition ${
                   unit === u
                     ? 'bg-[#2F7CF6] text-white font-semibold'
                     : 'text-[#949BA8] hover:text-white'
@@ -830,18 +882,18 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
           <button
             type="button"
             onClick={() => surveyInputRef.current?.click()}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded border border-[#323844] bg-[#1E222A] text-[#E6E9EF] hover:bg-[#262B35]"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] rounded border border-[#323844] bg-[#1E222A] text-[#E6E9EF] hover:bg-[#262B35]"
           >
-            <Upload className="w-3.5 h-3.5" />
+            <Upload className="w-3 h-3" />
             Importar Vértices
           </button>
         </div>
       </div>
 
-      {/* 4-Stage Progress Bar */}
+      {/* Compact 4-Stage Progress Bar */}
       <nav
         aria-label="Etapas de configuração do terreno e implantação"
-        className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2.5"
+        className="grid shrink-0 grid-cols-2 xl:grid-cols-4 gap-2"
       >
         {STAGE_ITEMS.map((st) => {
           const isCurrent = activeStage === st.id;
@@ -855,14 +907,14 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
               key={st.id}
               type="button"
               onClick={() => setActiveStage(st.id)}
-              className={`flex items-center gap-3 rounded-lg border p-3 text-left transition ${
+              className={`flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-left transition ${
                 isCurrent
                   ? 'border-[#2F7CF6] bg-[#2F7CF6]/15 text-white'
                   : 'border-[#2A2F38] bg-[#1B1E24] text-[#C4C9D4] hover:border-slate-600'
               }`}
             >
               <span
-                className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md font-mono text-xs font-bold ${
+                className={`flex h-5 w-5 shrink-0 items-center justify-center rounded font-mono text-[11px] font-bold ${
                   isCurrent
                     ? 'bg-[#2F7CF6] text-white'
                     : isDone
@@ -873,480 +925,609 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
                 {st.num}
               </span>
               <div className="min-w-0">
-                <div className="text-xs font-semibold truncate">{st.title}</div>
-                <div className="text-[11px] text-[#949BA8] truncate">{st.subtitle}</div>
+                <div className="text-[11px] font-semibold truncate">{st.title}</div>
+                <div className="text-[10px] text-[#949BA8] truncate hidden sm:block">{st.subtitle}</div>
               </div>
             </button>
           );
         })}
       </nav>
 
-      {importMsg && (
-        <div className="p-2.5 rounded border border-[#2F7CF6]/40 bg-[#2F7CF6]/10 text-xs text-[#E6E9EF]">
-          {importMsg}
-        </div>
-      )}
-
-      {siteCheck.hasAreaDivergence && (
-        <div className="p-3 rounded border border-amber-500/40 bg-amber-950/30 text-amber-200 text-xs flex items-center gap-2">
-          <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400" />
-          <span>
-            Divergência geométrica: Área informada ({siteCheck.declaredArea} m²) difere em{' '}
-            <strong className="font-mono">{siteCheck.areaDivergenceM2} m²</strong> da área poligonal calculada ({siteCheck.calculatedArea} m²). Os cálculos adotam a geometria real.
-          </span>
-        </div>
-      )}
-
-      {/* Main Two-Column Layout: Left Wizard (5 cols) | Right Interactive Scaled Plan (7 cols) */}
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start">
+      {/* Main Two-Column Studio Grid: Zero-scroll */}
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-hidden xl:grid-cols-12">
         {/* LEFT PANE: 4-Stage Configuration */}
-        <div className="xl:col-span-5 space-y-4">
+        <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-[#2A2F38] bg-[#1B1E24] xl:col-span-5">
           {/* ==================== ETAPA 1 ==================== */}
           {activeStage === 1 && (
-            <div className="space-y-4">
-              <div className="rounded-lg border border-[#2A2F38] bg-[#1B1E24] p-4 space-y-3.5">
-                <h2 className="text-sm font-semibold text-white">
-                  1A. Identificação &amp; Dimensões do Lote ({unit})
-                </h2>
-
-                <div>
-                  <label className="block text-[11px] text-[#949BA8] mb-1">
-                    Nome / Identificação do Projeto
-                  </label>
-                  <input
-                    type="text"
-                    value={project.name}
-                    onChange={(e) =>
-                      onUpdateProject((prev) => ({ ...prev, name: e.target.value }))
-                    }
-                    className="w-full px-2.5 py-1.5 text-xs rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[11px] text-[#949BA8] mb-1">Formato do Lote</label>
-                    <select
-                      value={site.shapeType}
-                      onChange={(e) =>
-                        updateSite(
-                          (s) => ({ ...s, shapeType: e.target.value as SiteShapeType }),
-                          true,
-                        )
-                      }
-                      className="w-full px-2.5 py-1.5 text-xs rounded bg-[#14161A] border border-[#2A2F38] text-white"
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+              <div className="flex shrink-0 items-center justify-between gap-1 border-b border-[#2A2F38] bg-[#171A20] px-2.5 py-1.5">
+                <div className="flex items-center gap-1">
+                  {(
+                    [
+                      ['dimensoes', '1A. Lote'],
+                      ['divisas', '1B. Divisas'],
+                      ['portoes', `1C. Portões (${site.accesses.length})`],
+                    ] as const
+                  ).map(([tid, label]) => (
+                    <button
+                      key={tid}
+                      type="button"
+                      onClick={() => setStage1SubTab(tid)}
+                      className={`rounded px-2 py-1 text-[11px] font-medium transition ${
+                        stage1SubTab === tid
+                          ? 'bg-[#2F7CF6] text-white'
+                          : 'text-[#949BA8] hover:text-white'
+                      }`}
                     >
-                      <option value="retangular">Retangular</option>
-                      <option value="quadrado">Quadrado</option>
-                      <option value="trapezoidal">Trapezoidal</option>
-                      <option value="irregular">Irregular (4 vértices)</option>
-                      <option value="poligonal">Poligonal Livre</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-[11px] text-[#949BA8] mb-1">
-                      Frente voltada para a Rua
-                    </label>
-                    <select
-                      value={site.streetSide}
-                      onChange={(e) =>
-                        updateSite((s) => ({ ...s, streetSide: e.target.value as LotFrontSide }))
-                      }
-                      className="w-full px-2.5 py-1.5 text-xs rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                      {label}
+                    </button>
+                  ))}
+                  {isPolygonalSite && (
+                    <button
+                      type="button"
+                      onClick={() => setStage1SubTab('vertices')}
+                      className={`rounded px-2 py-1 text-[11px] font-medium transition ${
+                        stage1SubTab === 'vertices'
+                          ? 'bg-[#2F7CF6] text-white'
+                          : 'text-[#949BA8] hover:text-white'
+                      }`}
                     >
-                      <option value="baixo">Abaixo (Perspectiva padrão da rua)</option>
-                      <option value="cima">Acima</option>
-                      <option value="esquerda">À Esquerda</option>
-                      <option value="direita">À Direita</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                  <div>
-                    <label className="block text-[11px] text-[#949BA8] mb-1">
-                      Frente ({unit})
-                    </label>
-                    <NumericInput
-                      min={unit === 'cm' ? 200 : 2}
-                      value={toDisplay(site.front)}
-                      onCommit={(val) =>
-                        updateSite(
-                          (s) => ({ ...s, front: Math.max(2, fromDisplay(val)) }),
-                          true,
-                        )
-                      }
-                      className="w-full px-2 py-1.5 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] text-[#949BA8] mb-1">
-                      Fundos ({unit})
-                    </label>
-                    <NumericInput
-                      min={unit === 'cm' ? 200 : 2}
-                      disabled={site.shapeType === 'retangular' || site.shapeType === 'quadrado'}
-                      value={toDisplay(site.back)}
-                      onCommit={(val) =>
-                        updateSite(
-                          (s) => ({ ...s, back: Math.max(2, fromDisplay(val)) }),
-                          true,
-                        )
-                      }
-                      className="w-full px-2 py-1.5 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white disabled:opacity-45"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] text-[#949BA8] mb-1">
-                      Prof. Esq. ({unit})
-                    </label>
-                    <NumericInput
-                      min={unit === 'cm' ? 200 : 2}
-                      disabled={site.shapeType === 'quadrado'}
-                      value={toDisplay(site.leftDepth)}
-                      onCommit={(val) =>
-                        updateSite(
-                          (s) => ({
-                            ...s,
-                            leftDepth: Math.max(2, fromDisplay(val)),
-                          }),
-                          true,
-                        )
-                      }
-                      className="w-full px-2 py-1.5 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white disabled:opacity-45"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] text-[#949BA8] mb-1">
-                      Prof. Dir. ({unit})
-                    </label>
-                    <NumericInput
-                      min={unit === 'cm' ? 200 : 2}
-                      disabled={site.shapeType === 'retangular' || site.shapeType === 'quadrado'}
-                      value={toDisplay(site.rightDepth)}
-                      onCommit={(val) =>
-                        updateSite(
-                          (s) => ({
-                            ...s,
-                            rightDepth: Math.max(2, fromDisplay(val)),
-                          }),
-                          true,
-                        )
-                      }
-                      className="w-full px-2 py-1.5 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white disabled:opacity-45"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-3 gap-2.5">
-                  <div>
-                    <label className="block text-[11px] text-[#949BA8] mb-1">
-                      Área Matrícula (m²)
-                    </label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      value={site.declaredArea}
-                      onChange={(e) =>
-                        updateSite((s) => ({ ...s, declaredArea: Number(e.target.value) }))
-                      }
-                      className="w-full px-2 py-1.5 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] text-[#949BA8] mb-1">Norte (°)</label>
-                    <input
-                      type="number"
-                      step="5"
-                      min={0}
-                      max={359}
-                      value={site.orientationDeg}
-                      onChange={(e) =>
-                        updateSite((s) => ({ ...s, orientationDeg: Number(e.target.value) }))
-                      }
-                      className="w-full px-2 py-1.5 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] text-[#949BA8] mb-1">Topografia</label>
-                    <select
-                      value={site.topography}
-                      onChange={(e) =>
-                        updateSite((s) => ({
-                          ...s,
-                          topography: e.target.value as TopographyType,
-                        }))
-                      }
-                      className="w-full px-2 py-1.5 text-xs rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                    >
-                      <option value="plano">Plano</option>
-                      <option value="aclive">Aclive</option>
-                      <option value="declive">Declive</option>
-                      <option value="irregular">Irregular</option>
-                    </select>
-                  </div>
+                      Vértices ({site.vertices.length})
+                    </button>
+                  )}
                 </div>
               </div>
 
-              {/* 1B. Condição individual de cada uma das 4 divisas */}
-              <div className="rounded-lg border border-[#2A2F38] bg-[#1B1E24] p-4 space-y-3">
-                <div>
-                  <h2 className="text-sm font-semibold text-white">
-                    1B. Situação das 4 Divisas (Muros, Cercas e Vizinhos)
-                  </h2>
-                  <p className="text-[11px] text-[#949BA8]">
-                    Cada extremidade do lote é renderizada na planta e no 3D conforme o fechamento real informado.
-                  </p>
-                </div>
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-3">
+                {stage1SubTab === 'dimensoes' && (
+                  <div className="space-y-2.5">
+                    <div>
+                      <label className="block text-[10px] text-[#949BA8] mb-0.5">
+                        Nome / Identificação do Projeto
+                      </label>
+                      <input
+                        type="text"
+                        value={project.name}
+                        onChange={(e) =>
+                          onUpdateProject((prev) => ({ ...prev, name: e.target.value }))
+                        }
+                        className="w-full px-2.5 py-1 text-xs rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                      />
+                    </div>
 
-                <div className="space-y-2.5">
-                  {(['front', 'back', 'left', 'right'] as LotSideKey[]).map((sideKey) => {
-                    const b = site.boundaries[sideKey];
-                    return (
-                      <div
-                        key={sideKey}
-                        className="rounded border border-[#2A2F38] bg-[#14161A] p-2.5 space-y-2"
-                      >
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <span className="text-xs font-medium text-slate-200">
-                            {sideLabels[sideKey]}
-                          </span>
-                          <label className="inline-flex items-center gap-1.5 text-[11px] text-slate-400 cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={b.hasNeighborBuilding}
-                              onChange={(e) =>
-                                updateSite((s) => ({
-                                  ...s,
-                                  boundaries: {
-                                    ...s.boundaries,
-                                    [sideKey]: {
-                                      ...s.boundaries[sideKey],
-                                      hasNeighborBuilding: e.target.checked,
-                                    },
-                                  },
-                                }))
-                              }
-                            />
-                            Construção vizinha
-                          </label>
-                        </div>
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <div>
+                        <label className="block text-[10px] text-[#949BA8] mb-0.5">Formato do Lote</label>
+                        <select
+                          value={site.shapeType}
+                          onChange={(e) =>
+                            updateSite(
+                              (s) => ({ ...s, shapeType: e.target.value as SiteShapeType }),
+                              true,
+                            )
+                          }
+                          className="w-full px-2 py-1 text-xs rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                        >
+                          <option value="retangular">Retangular</option>
+                          <option value="quadrado">Quadrado</option>
+                          <option value="trapezoidal">Trapezoidal</option>
+                          <option value="irregular">Irregular (4 vértices)</option>
+                          <option value="poligonal">Poligonal Livre</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] text-[#949BA8] mb-0.5">
+                          Frente voltada para a Rua
+                        </label>
+                        <select
+                          value={site.streetSide}
+                          onChange={(e) =>
+                            updateSite((s) => ({ ...s, streetSide: e.target.value as LotFrontSide }))
+                          }
+                          className="w-full px-2 py-1 text-xs rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                        >
+                          <option value="baixo">Abaixo (Padrão)</option>
+                          <option value="cima">Acima</option>
+                          <option value="esquerda">À Esquerda</option>
+                          <option value="direita">À Direita</option>
+                        </select>
+                      </div>
+                    </div>
 
-                        <div className="grid grid-cols-2 gap-2">
-                          <select
-                            aria-label={`Condição ${sideLabels[sideKey]}`}
-                            value={b.condition}
-                            onChange={(e) => {
-                              const cond = e.target.value as BoundaryCondition;
-                              updateSite((s) => ({
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      <div>
+                        <label className="block text-[10px] text-[#949BA8] mb-0.5">
+                          Frente ({unit})
+                        </label>
+                        <NumericInput
+                          min={unit === 'cm' ? 200 : 2}
+                          value={toDisplay(site.front)}
+                          onCommit={(val) =>
+                            updateSite(
+                              (s) => ({ ...s, front: Math.max(2, fromDisplay(val)) }),
+                              true,
+                            )
+                          }
+                          className="w-full px-2 py-1 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] text-[#949BA8] mb-0.5">
+                          Fundos ({unit})
+                        </label>
+                        <NumericInput
+                          min={unit === 'cm' ? 200 : 2}
+                          disabled={site.shapeType === 'retangular' || site.shapeType === 'quadrado'}
+                          value={toDisplay(site.back)}
+                          onCommit={(val) =>
+                            updateSite(
+                              (s) => ({ ...s, back: Math.max(2, fromDisplay(val)) }),
+                              true,
+                            )
+                          }
+                          className="w-full px-2 py-1 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white disabled:opacity-45"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] text-[#949BA8] mb-0.5">
+                          Prof. Esq. ({unit})
+                        </label>
+                        <NumericInput
+                          min={unit === 'cm' ? 200 : 2}
+                          disabled={site.shapeType === 'quadrado'}
+                          value={toDisplay(site.leftDepth)}
+                          onCommit={(val) =>
+                            updateSite(
+                              (s) => ({
                                 ...s,
-                                boundaries: {
-                                  ...s.boundaries,
-                                  [sideKey]: {
-                                    ...s.boundaries[sideKey],
-                                    condition: cond,
-                                    heightM:
-                                      cond === 'aberta'
-                                        ? 0
-                                        : s.boundaries[sideKey].heightM || 2.0,
-                                  },
-                                },
-                              }));
-                            }}
-                            className="px-2 py-1 text-xs rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
-                          >
-                            <option value="murada">Murada (Alvenaria)</option>
-                            <option value="aberta">Aberta (Sem muro)</option>
-                            <option value="compartilhada">Divisa Compartilhada</option>
-                            <option value="cerca">Cerca / Gradil</option>
-                            <option value="outra">Outra condição</option>
-                          </select>
+                                leftDepth: Math.max(2, fromDisplay(val)),
+                              }),
+                              true,
+                            )
+                          }
+                          className="w-full px-2 py-1 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white disabled:opacity-45"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] text-[#949BA8] mb-0.5">
+                          Prof. Dir. ({unit})
+                        </label>
+                        <NumericInput
+                          min={unit === 'cm' ? 200 : 2}
+                          disabled={site.shapeType === 'retangular' || site.shapeType === 'quadrado'}
+                          value={toDisplay(site.rightDepth)}
+                          onCommit={(val) =>
+                            updateSite(
+                              (s) => ({
+                                ...s,
+                                rightDepth: Math.max(2, fromDisplay(val)),
+                              }),
+                              true,
+                            )
+                          }
+                          className="w-full px-2 py-1 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white disabled:opacity-45"
+                        />
+                      </div>
+                    </div>
 
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-[11px] text-[#949BA8] whitespace-nowrap">
-                              Alt. (m):
+                    <div className="grid grid-cols-3 gap-2">
+                      <div>
+                        <label className="block text-[10px] text-[#949BA8] mb-0.5">
+                          Área Matrícula (m²)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.1"
+                          value={site.declaredArea}
+                          onChange={(e) =>
+                            updateSite((s) => ({ ...s, declaredArea: Number(e.target.value) }))
+                          }
+                          className="w-full px-2 py-1 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] text-[#949BA8] mb-0.5">Norte (°)</label>
+                        <input
+                          type="number"
+                          step="5"
+                          min={0}
+                          max={359}
+                          value={site.orientationDeg}
+                          onChange={(e) =>
+                            updateSite((s) => ({ ...s, orientationDeg: Number(e.target.value) }))
+                          }
+                          className="w-full px-2 py-1 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] text-[#949BA8] mb-0.5">Topografia</label>
+                        <select
+                          value={site.topography}
+                          onChange={(e) =>
+                            updateSite((s) => ({
+                              ...s,
+                              topography: e.target.value as TopographyType,
+                            }))
+                          }
+                          className="w-full px-2 py-1 text-xs rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                        >
+                          <option value="plano">Plano</option>
+                          <option value="aclive">Aclive</option>
+                          <option value="declive">Declive</option>
+                          <option value="irregular">Irregular</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {stage1SubTab === 'divisas' && (
+                  <div className="grid grid-cols-1 gap-2">
+                    {(['front', 'back', 'left', 'right'] as LotSideKey[]).map((sideKey) => {
+                      const b = site.boundaries[sideKey];
+                      return (
+                        <div
+                          key={sideKey}
+                          className="rounded border border-[#2A2F38] bg-[#14161A] p-2 space-y-1.5"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-medium text-slate-200 truncate">
+                              {sideLabels[sideKey]}
                             </span>
-                            <input
-                              type="number"
-                              step="0.1"
-                              min={0}
-                              max={5}
-                              disabled={b.condition === 'aberta'}
-                              value={b.heightM}
-                              onChange={(e) =>
+                            <label className="inline-flex items-center gap-1.5 text-[11px] text-slate-400 cursor-pointer shrink-0">
+                              <input
+                                type="checkbox"
+                                checked={b.hasNeighborBuilding}
+                                onChange={(e) =>
+                                  updateSite((s) => ({
+                                    ...s,
+                                    boundaries: {
+                                      ...s.boundaries,
+                                      [sideKey]: {
+                                        ...s.boundaries[sideKey],
+                                        hasNeighborBuilding: e.target.checked,
+                                      },
+                                    },
+                                  }))
+                                }
+                              />
+                              Vizinho construído
+                            </label>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2">
+                            <select
+                              aria-label={`Condição ${sideLabels[sideKey]}`}
+                              value={b.condition}
+                              onChange={(e) => {
+                                const cond = e.target.value as BoundaryCondition;
                                 updateSite((s) => ({
                                   ...s,
                                   boundaries: {
                                     ...s.boundaries,
                                     [sideKey]: {
                                       ...s.boundaries[sideKey],
-                                      heightM: Number(e.target.value),
+                                      condition: cond,
+                                      heightM:
+                                        cond === 'aberta'
+                                          ? 0
+                                          : s.boundaries[sideKey].heightM || 2.0,
                                     },
                                   },
-                                }))
-                              }
-                              className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white disabled:opacity-45"
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* 1C. Portões e Acessos */}
-              <div className="rounded-lg border border-[#2A2F38] bg-[#1B1E24] p-4 space-y-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <h2 className="text-sm font-semibold text-white">
-                      1C. Portões de Pedestres &amp; Veículos
-                    </h2>
-                    <p className="text-[11px] text-[#949BA8]">
-                      Defina posição e largura de cada acesso ao lote.
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => handleAddGate('pedestre')}
-                      className="inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded bg-[#22262E] border border-[#323844] text-white hover:border-[#2F7CF6]"
-                    >
-                      <Plus className="w-3 h-3" /> Pedestre
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleAddGate('veiculo')}
-                      className="inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded bg-[#22262E] border border-[#323844] text-white hover:border-[#2F7CF6]"
-                    >
-                      <Plus className="w-3 h-3" /> Veículo
-                    </button>
-                  </div>
-                </div>
-
-                {site.accesses.length === 0 ? (
-                  <p className="text-xs text-amber-300">
-                    Nenhum portão cadastrado. Adicione um acesso acima se o lote possuir portões.
-                  </p>
-                ) : (
-                  <div className="space-y-2">
-                    {site.accesses.map((gate) => (
-                      <div
-                        key={gate.id}
-                        className="rounded border border-[#2A2F38] bg-[#14161A] p-2.5 space-y-2"
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <label className="inline-flex items-center gap-2 text-xs font-medium text-white cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={gate.enabled}
-                              onChange={(e) =>
-                                updateSite((s) => ({
-                                  ...s,
-                                  accesses: s.accesses.map((g) =>
-                                    g.id === gate.id ? { ...g, enabled: e.target.checked } : g,
-                                  ),
-                                }))
-                              }
-                            />
-                            {gate.label}
-                          </label>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              updateSite((s) => ({
-                                ...s,
-                                accesses: s.accesses.filter((g) => g.id !== gate.id),
-                              }))
-                            }
-                            aria-label={`Remover ${gate.label}`}
-                            className="p-1 text-red-400 hover:text-red-300"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-
-                        <div className="grid grid-cols-3 gap-2">
-                          <div>
-                            <label className="block text-[10px] text-[#949BA8] mb-0.5">
-                              Divisa
-                            </label>
-                            <select
-                              value={gate.side}
-                              onChange={(e) =>
-                                updateSite((s) => ({
-                                  ...s,
-                                  accesses: s.accesses.map((g) =>
-                                    g.id === gate.id
-                                      ? { ...g, side: e.target.value as LotSideKey }
-                                      : g,
-                                  ),
-                                }))
-                              }
-                              className="w-full px-1.5 py-1 text-xs rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                                }));
+                              }}
+                              className="px-2 py-1 text-xs rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
                             >
-                              <option value="front">Frente</option>
-                              <option value="back">Fundos</option>
-                              <option value="left">Lat. Esq</option>
-                              <option value="right">Lat. Dir</option>
+                              <option value="murada">Murada (Alvenaria)</option>
+                              <option value="aberta">Aberta (Sem muro)</option>
+                              <option value="compartilhada">Divisa Compartilhada</option>
+                              <option value="cerca">Cerca / Gradil</option>
+                              <option value="outra">Outra condição</option>
                             </select>
-                          </div>
-                          <div>
-                            <label className="block text-[10px] text-[#949BA8] mb-0.5">
-                              Posição ({unit})
-                            </label>
-                            <input
-                              type="number"
-                              step={unit === 'cm' ? 10 : 0.2}
-                              min={0}
-                              value={toDisplay(gate.offsetM)}
-                              onChange={(e) =>
-                                updateSite((s) => ({
-                                  ...s,
-                                  accesses: s.accesses.map((g) =>
-                                    g.id === gate.id
-                                      ? { ...g, offsetM: Math.max(0, fromDisplay(Number(e.target.value))) }
-                                      : g,
-                                  ),
-                                }))
-                              }
-                              className="w-full px-1.5 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-[10px] text-[#949BA8] mb-0.5">
-                              Largura ({unit})
-                            </label>
-                            <input
-                              type="number"
-                              step={unit === 'cm' ? 10 : 0.1}
-                              min={unit === 'cm' ? 60 : 0.6}
-                              value={toDisplay(gate.widthM)}
-                              onChange={(e) =>
-                                updateSite((s) => ({
-                                  ...s,
-                                  accesses: s.accesses.map((g) =>
-                                    g.id === gate.id
-                                      ? { ...g, widthM: Math.max(0.6, fromDisplay(Number(e.target.value))) }
-                                      : g,
-                                  ),
-                                }))
-                              }
-                              className="w-full px-1.5 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
-                            />
+
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[11px] text-[#949BA8] whitespace-nowrap">
+                                Alt. (m):
+                              </span>
+                              <input
+                                type="number"
+                                step="0.1"
+                                min={0}
+                                max={5}
+                                disabled={b.condition === 'aberta'}
+                                value={b.heightM}
+                                onChange={(e) =>
+                                  updateSite((s) => ({
+                                    ...s,
+                                    boundaries: {
+                                      ...s.boundaries,
+                                      [sideKey]: {
+                                        ...s.boundaries[sideKey],
+                                        heightM: Number(e.target.value),
+                                      },
+                                    },
+                                  }))
+                                }
+                                className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white disabled:opacity-45"
+                              />
+                            </div>
                           </div>
                         </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {stage1SubTab === 'portoes' && (
+                  <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                    <div className="flex shrink-0 items-center justify-between gap-2 pb-2">
+                      <span className="text-[11px] text-[#949BA8]">
+                        Posição e largura dos acessos ao lote
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => handleAddGate('pedestre')}
+                          className="inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded bg-[#22262E] border border-[#323844] text-white hover:border-[#2F7CF6]"
+                        >
+                          <Plus className="w-3 h-3" /> Pedestre
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleAddGate('veiculo')}
+                          className="inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded bg-[#22262E] border border-[#323844] text-white hover:border-[#2F7CF6]"
+                        >
+                          <Plus className="w-3 h-3" /> Veículo
+                        </button>
                       </div>
-                    ))}
+                    </div>
+
+                    {site.accesses.length === 0 ? (
+                      <p className="text-xs text-amber-300">
+                        Nenhum portão cadastrado. Adicione um acesso acima se o lote possuir portões.
+                      </p>
+                    ) : (
+                      <>
+                        <div className="min-h-0 flex-1 space-y-2 overflow-hidden">
+                          {gatesPager.slice.map((gate) => (
+                            <div
+                              key={gate.id}
+                              className="rounded border border-[#2A2F38] bg-[#14161A] p-2 space-y-1.5"
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <label className="inline-flex items-center gap-2 text-xs font-medium text-white cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={gate.enabled}
+                                    onChange={(e) =>
+                                      updateSite((s) => ({
+                                        ...s,
+                                        accesses: s.accesses.map((g) =>
+                                          g.id === gate.id ? { ...g, enabled: e.target.checked } : g,
+                                        ),
+                                      }))
+                                    }
+                                  />
+                                  {gate.label}
+                                </label>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    updateSite((s) => ({
+                                      ...s,
+                                      accesses: s.accesses.filter((g) => g.id !== gate.id),
+                                    }))
+                                  }
+                                  aria-label={`Remover ${gate.label}`}
+                                  className="p-1 text-red-400 hover:text-red-300"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+
+                              <div className="grid grid-cols-3 gap-2">
+                                <div>
+                                  <label className="block text-[10px] text-[#949BA8] mb-0.5">Divisa</label>
+                                  <select
+                                    value={gate.side}
+                                    onChange={(e) =>
+                                      updateSite((s) => ({
+                                        ...s,
+                                        accesses: s.accesses.map((g) =>
+                                          g.id === gate.id
+                                            ? { ...g, side: e.target.value as LotSideKey }
+                                            : g,
+                                        ),
+                                      }))
+                                    }
+                                    className="w-full px-1.5 py-0.5 text-xs rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                                  >
+                                    <option value="front">Frente</option>
+                                    <option value="back">Fundos</option>
+                                    <option value="left">Lat. Esq</option>
+                                    <option value="right">Lat. Dir</option>
+                                  </select>
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] text-[#949BA8] mb-0.5">
+                                    Posição ({unit})
+                                  </label>
+                                  <input
+                                    type="number"
+                                    step={unit === 'cm' ? 10 : 0.2}
+                                    min={0}
+                                    value={toDisplay(gate.offsetM)}
+                                    onChange={(e) =>
+                                      updateSite((s) => ({
+                                        ...s,
+                                        accesses: s.accesses.map((g) =>
+                                          g.id === gate.id
+                                            ? { ...g, offsetM: Math.max(0, fromDisplay(Number(e.target.value))) }
+                                            : g,
+                                        ),
+                                      }))
+                                    }
+                                    className="w-full px-1.5 py-0.5 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] text-[#949BA8] mb-0.5">
+                                    Largura ({unit})
+                                  </label>
+                                  <input
+                                    type="number"
+                                    step={unit === 'cm' ? 10 : 0.1}
+                                    min={unit === 'cm' ? 60 : 0.6}
+                                    value={toDisplay(gate.widthM)}
+                                    onChange={(e) =>
+                                      updateSite((s) => ({
+                                        ...s,
+                                        accesses: s.accesses.map((g) =>
+                                          g.id === gate.id
+                                            ? { ...g, widthM: Math.max(0.6, fromDisplay(Number(e.target.value))) }
+                                            : g,
+                                        ),
+                                      }))
+                                    }
+                                    className="w-full px-1.5 py-0.5 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        <PaginationBar
+                          compact
+                          page={gatesPager.safePage}
+                          totalPages={gatesPager.totalPages}
+                          totalItems={site.accesses.length}
+                          startIndex={gatesPager.start}
+                          endIndex={gatesPager.end}
+                          onPageChange={setGatesPage}
+                          itemLabel="portões"
+                        />
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {stage1SubTab === 'vertices' && isPolygonalSite && (
+                  <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                    <div className="flex shrink-0 items-center justify-between pb-2">
+                      <span className="text-xs font-medium text-white">
+                        Vértices do Polígono ({site.vertices.length})
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onUpdateProject((prev) => {
+                            const last =
+                              prev.site.vertices[prev.site.vertices.length - 1] ?? { x: 0, y: 0 };
+                            return {
+                              ...prev,
+                              site: {
+                                ...prev.site,
+                                shapeType: 'poligonal',
+                                vertices: [
+                                  ...prev.site.vertices,
+                                  { x: round2(last.x - 1), y: round2(last.y + 1) },
+                                ],
+                              },
+                            };
+                          })
+                        }
+                        className="inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded bg-[#22262E] border border-[#323844] text-white hover:border-[#2F7CF6]"
+                      >
+                        <Plus className="w-3 h-3" /> Vértice
+                      </button>
+                    </div>
+                    <div className="min-h-0 flex-1 space-y-1.5 overflow-hidden">
+                      {verticesPager.slice.map((v, localIdx) => {
+                        const idx = verticesPager.start + localIdx;
+                        return (
+                          <div key={idx} className="flex items-center gap-2 text-xs">
+                            <span className="font-mono text-[#949BA8] w-7">V{idx + 1}</span>
+                            <input
+                              type="number"
+                              step="0.25"
+                              value={v.x}
+                              aria-label={`Vértice ${idx + 1} X`}
+                              onChange={(e) => {
+                                const val = Number(e.target.value);
+                                onUpdateProject((prev) => ({
+                                  ...prev,
+                                  site: {
+                                    ...prev.site,
+                                    shapeType: 'poligonal',
+                                    vertices: prev.site.vertices.map((pt, i) =>
+                                      i === idx ? { ...pt, x: val } : pt,
+                                    ),
+                                  },
+                                }));
+                              }}
+                              className="w-24 px-2 py-1 font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                            />
+                            <input
+                              type="number"
+                              step="0.25"
+                              value={v.y}
+                              aria-label={`Vértice ${idx + 1} Y`}
+                              onChange={(e) => {
+                                const val = Number(e.target.value);
+                                onUpdateProject((prev) => ({
+                                  ...prev,
+                                  site: {
+                                    ...prev.site,
+                                    shapeType: 'poligonal',
+                                    vertices: prev.site.vertices.map((pt, i) =>
+                                      i === idx ? { ...pt, y: val } : pt,
+                                    ),
+                                  },
+                                }));
+                              }}
+                              className="w-24 px-2 py-1 font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                            />
+                            {site.vertices.length > 3 && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  onUpdateProject((prev) => ({
+                                    ...prev,
+                                    site: {
+                                      ...prev.site,
+                                      shapeType: 'poligonal',
+                                      vertices: prev.site.vertices.filter((_, i) => i !== idx),
+                                    },
+                                  }))
+                                }
+                                className="p-1 text-red-400"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <PaginationBar
+                      compact
+                      page={verticesPager.safePage}
+                      totalPages={verticesPager.totalPages}
+                      totalItems={site.vertices.length}
+                      startIndex={verticesPager.start}
+                      endIndex={verticesPager.end}
+                      onPageChange={setVerticesPage}
+                      itemLabel="vértices"
+                    />
                   </div>
                 )}
               </div>
 
-              <div className="flex justify-end">
+              <div className="flex shrink-0 items-center justify-end border-t border-[#2A2F38] bg-[#171A20] px-3 py-2">
                 <button
                   type="button"
                   onClick={() => setActiveStage(2)}
-                  className="inline-flex items-center gap-2 rounded-md bg-[#2F7CF6] px-4 py-2 text-xs font-semibold text-white hover:bg-[#2567d4]"
+                  className="inline-flex items-center gap-1.5 rounded-md bg-[#2F7CF6] px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-[#2567d4]"
                 >
                   Avançar para Etapa 2: Implantação
                   <ArrowRight className="w-3.5 h-3.5" />
@@ -1357,18 +1538,47 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
 
           {/* ==================== ETAPA 2 ==================== */}
           {activeStage === 2 && (
-            <div className="space-y-4">
-              {/* Inline Typology Creator & Editor */}
-              <div className="rounded-lg border border-[#2A2F38] bg-[#1B1E24] p-4 space-y-3">
-                <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <h2 className="text-sm font-semibold text-white">
-                      Modelos / Tipologias ({project.unitTypes.length})
-                    </h2>
-                    <p className="text-[11px] text-[#949BA8]">
-                      Crie ou edite Kitnets, Casas Térreas ou Sobrados para implantar no lote.
-                    </p>
-                  </div>
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+              <div className="flex shrink-0 items-center justify-between gap-2 border-b border-[#2A2F38] bg-[#171A20] px-2.5 py-1.5">
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setStage2SubTab('modelos')}
+                    className={`rounded px-2 py-1 text-[11px] font-medium transition ${
+                      stage2SubTab === 'modelos'
+                        ? 'bg-[#2F7CF6] text-white'
+                        : 'text-[#949BA8] hover:text-white'
+                    }`}
+                  >
+                    Modelos ({project.unitTypes.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setStage2SubTab('implantacao')}
+                    className={`rounded px-2 py-1 text-[11px] font-medium transition ${
+                      stage2SubTab === 'implantacao'
+                        ? 'bg-[#2F7CF6] text-white'
+                        : 'text-[#949BA8] hover:text-white'
+                    }`}
+                  >
+                    Implantação &amp; Andares
+                  </button>
+                  {hasMixedGroups && (
+                    <button
+                      type="button"
+                      onClick={() => setStage2SubTab('grupos')}
+                      className={`rounded px-2 py-1 text-[11px] font-medium transition ${
+                        stage2SubTab === 'grupos'
+                          ? 'bg-[#2F7CF6] text-white'
+                          : 'text-[#949BA8] hover:text-white'
+                      }`}
+                    >
+                      Grupos ({impConfig.groups.length})
+                    </button>
+                  )}
+                </div>
+
+                {stage2SubTab === 'modelos' && (
                   <button
                     type="button"
                     onClick={() => {
@@ -1379,947 +1589,1020 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
                         openNewQuickTypeForm('kitnet');
                       }
                     }}
-                    className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded border border-[#323844] bg-[#14161A] text-white hover:border-[#2F7CF6]"
+                    className="inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded border border-[#323844] bg-[#14161A] text-white hover:border-[#2F7CF6]"
                   >
-                    <Plus className="w-3.5 h-3.5 text-[#2F7CF6]" />
-                    {showQuickTypeForm ? 'Fechar' : 'Novo Modelo'}
+                    <Plus className="w-3 h-3 text-[#2F7CF6]" />
+                    {showQuickTypeForm ? 'Lista' : 'Novo Modelo'}
                   </button>
-                </div>
-
-                {showQuickTypeForm && (
-                  <form
-                    onSubmit={handleQuickSaveTypology}
-                    className="rounded border border-[#2F7CF6]/40 bg-[#14161A] p-3 space-y-3"
-                  >
-                    <div className="flex items-center justify-between gap-2 pb-1.5 border-b border-[#2A2F38]">
-                      <span className="text-xs font-semibold text-sky-300">
-                        {editingUnitTypeId
-                          ? `Editando Modelo Salvo (${qtCode})`
-                          : 'Novo Modelo de Edificação'}
-                      </span>
-                      {editingUnitTypeId && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEditingUnitTypeId(null);
-                            setShowQuickTypeForm(false);
-                          }}
-                          className="text-[11px] text-[#949BA8] hover:text-white"
-                        >
-                          Cancelar edição
-                        </button>
-                      )}
-                    </div>
-
-                    {!editingUnitTypeId && (
-                      <div className="grid grid-cols-3 gap-1 rounded border border-[#2A2F38] bg-[#1B1E24] p-1">
-                        {(
-                          [
-                            ['kitnet', 'Kitnet / Studio'],
-                            ['casa_terrea', 'Casa Térrea'],
-                            ['casa_sobrado', 'Sobrado (Andares)'],
-                          ] as const
-                        ).map(([kv, kl]) => (
-                          <button
-                            key={kv}
-                            type="button"
-                            onClick={() => openNewQuickTypeForm(kv)}
-                            className={`px-2 py-1 text-[11px] font-medium rounded transition-colors ${
-                              qtBuildingKind === kv
-                                ? 'bg-[#2F7CF6] text-white font-semibold'
-                                : 'text-[#949BA8] hover:text-white'
-                            }`}
-                          >
-                            {kl}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-
-                    <div className="grid grid-cols-2 gap-2.5">
-                      <div>
-                        <label className="block text-[10px] text-[#949BA8] mb-0.5">Código</label>
-                        <input
-                          type="text"
-                          value={qtCode}
-                          onChange={(e) => setQtCode(e.target.value)}
-                          className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] text-[#949BA8] mb-0.5">Nome</label>
-                        <input
-                          type="text"
-                          value={qtName}
-                          onChange={(e) => setQtName(e.target.value)}
-                          className="w-full px-2 py-1 text-xs rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-3 gap-2.5">
-                      <div>
-                        <label className="block text-[10px] text-[#949BA8] mb-0.5">
-                          Largura (m) <span className="text-[#64748B]">(mín 2,8)</span>
-                        </label>
-                        <NumericInput
-                          min={2.8}
-                          max={20}
-                          value={qtWidth}
-                          onCommit={setQtWidth}
-                          className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] text-[#949BA8] mb-0.5">
-                          Profundidade (m) <span className="text-[#64748B]">(mín 3,6)</span>
-                        </label>
-                        <NumericInput
-                          min={3.6}
-                          max={25}
-                          value={qtDepth}
-                          onCommit={setQtDepth}
-                          className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] text-[#949BA8] mb-0.5">
-                          Pé-Direito (m) <span className="text-[#64748B]">(mín 2,4)</span>
-                        </label>
-                        <NumericInput
-                          min={2.4}
-                          max={6.0}
-                          value={qtCeiling}
-                          onCommit={(v) => {
-                            setQtCeiling(v);
-                            if (v < 3.0) setQtMezzanine(false);
-                          }}
-                          className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                      <div>
-                        <label className="block text-[10px] text-[#949BA8] mb-0.5">Quartos</label>
-                        <select
-                          value={qtBedrooms}
-                          onChange={(e) => {
-                            const val = Number(e.target.value);
-                            setQtBedrooms(val);
-                            if (val < 2) setQtSuites(0);
-                          }}
-                          className="w-full px-2 py-1 text-xs rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
-                        >
-                          {qtBuildingKind === 'kitnet' && <option value={0}>Studio (Integrado)</option>}
-                          <option value={1}>1 Quarto (Porta 70cm)</option>
-                          <option value={2}>2 Quartos (Casa)</option>
-                          <option value={3}>3 Quartos (Casa)</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-[10px] text-[#949BA8] mb-0.5">Entrada (P1)</label>
-                        <select
-                          value={qtEntrySide}
-                          onChange={(e) => setQtEntrySide(e.target.value as EntrySide)}
-                          className="w-full px-2 py-1 text-xs rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
-                        >
-                          <option value="frente">Pela Frente (80cm)</option>
-                          <option value="lateral_direita">Lateral Dir. (80cm)</option>
-                          <option value="lateral_esquerda">Lateral Esq. (80cm)</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-[10px] text-[#949BA8] mb-0.5">Divisórias</label>
-                        <select
-                          value={qtPartition}
-                          onChange={(e) =>
-                            setQtPartition(e.target.value as InternalPartitionType)
-                          }
-                          className="w-full px-2 py-1 text-xs rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
-                        >
-                          <option value="alvenaria">Alvenaria</option>
-                          <option value="drywall">Drywall (9,5cm)</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-[10px] text-[#949BA8] mb-0.5">Instalações</label>
-                        <select
-                          value={qtMepProfile}
-                          onChange={(e) =>
-                            setQtMepProfile(e.target.value as 'simples' | 'completo')
-                          }
-                          className="w-full px-2 py-1 text-xs rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
-                        >
-                          <option value="simples">Simples (Enxuto)</option>
-                          <option value="completo">Completo (AQ/AC)</option>
-                        </select>
-                      </div>
-                    </div>
-
-                    {qtBedrooms >= 1 && (qtWidth < 3.6 || qtDepth < 4.5) && (
-                      <div className="rounded border border-amber-500/40 bg-amber-950/25 px-2.5 py-1.5 text-[11px] text-amber-200">
-                        Para separar 1 Quarto com parede e porta de 70cm, recomenda-se largura ≥ 3,60 m e profundidade ≥ 4,50 m.
-                      </div>
-                    )}
-
-                    <div className="flex flex-wrap items-center gap-4 text-xs text-[#C4C9D4]">
-                      <label className="inline-flex items-center gap-1.5 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={qtLaundry}
-                          onChange={(e) => setQtLaundry(e.target.checked)}
-                        />
-                        Área de Serviço (Máq. Lavar)
-                      </label>
-                      <label className="inline-flex items-center gap-1.5 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={qtBalcony}
-                          onChange={(e) => setQtBalcony(e.target.checked)}
-                        />
-                        Varanda
-                      </label>
-                      <label className="inline-flex items-center gap-1.5 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={qtAccessible}
-                          onChange={(e) => setQtAccessible(e.target.checked)}
-                        />
-                        Acessível NBR 9050
-                      </label>
-                      {qtBedrooms >= 2 && (
-                        <label className="inline-flex items-center gap-1.5 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={qtSuites >= 1}
-                            onChange={(e) => setQtSuites(e.target.checked ? 1 : 0)}
-                          />
-                          Suíte Privativa (2º BWC)
-                        </label>
-                      )}
-                      {qtBuildingKind === 'casa_sobrado' && !editingUnitTypeId && (
-                        <label className="inline-flex items-center gap-1.5 text-sky-300 font-medium">
-                          <span>Pavimentos:</span>
-                          <select
-                            value={qtTotalStories}
-                            onChange={(e) => setQtTotalStories(Number(e.target.value))}
-                            className="px-1.5 py-0.5 text-xs rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
-                          >
-                            <option value={2}>2 Pav. (Térreo+Sup)</option>
-                            <option value={3}>3 Pav. (+Ático)</option>
-                          </select>
-                        </label>
-                      )}
-                      {qtBuildingKind === 'kitnet' && qtCeiling >= 3.0 && (
-                        <label className="inline-flex items-center gap-2 text-xs text-sky-300 cursor-pointer font-medium">
-                          <input
-                            type="checkbox"
-                            checked={qtMezzanine}
-                            onChange={(e) => setQtMezzanine(e.target.checked)}
-                          />
-                          Incluir Mezanino 100% Interno
-                        </label>
-                      )}
-                    </div>
-
-                    {qtCeiling >= 3.0 && qtMezzanine && (() => {
-                      const qb = computeMezzanineInteriorBounds(
-                        qtWidth,
-                        qtDepth,
-                        project.constructionMethod.externalWallThickness,
-                        qtBalcony,
-                      );
-                      return (
-                        <div className="rounded border border-sky-500/40 bg-[#1B1E24] p-3 space-y-2.5">
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                            <div>
-                              <label className="block text-[10px] font-semibold text-sky-200 mb-0.5">
-                                Altura do chão até o mezanino (m)
-                              </label>
-                              <div className="flex items-center gap-2">
-                                <NumericInput
-                                  min={2.0}
-                                  max={round2(Math.max(2.05, qtCeiling - 1.05))}
-                                  value={qtMezzElev}
-                                  onCommit={setQtMezzElev}
-                                  className="w-20 px-2 py-1 text-xs font-mono rounded bg-[#14161A] border border-[#2F7CF6] text-white"
-                                />
-                                <span className="text-[10px] font-mono text-[#949BA8]">
-                                  PD sup.: {round2(Math.max(0.8, qtCeiling - qtMezzElev - 0.12)).toFixed(2)}m
-                                </span>
-                              </div>
-                            </div>
-                            <div>
-                              <label className="block text-[10px] text-[#949BA8] mb-0.5">
-                                Estrutura do Mezanino
-                              </label>
-                              <select
-                                value={qtMezzStruct}
-                                onChange={(e) => setQtMezzStruct(e.target.value as MezzanineStructureType)}
-                                className="w-full px-2 py-1 text-xs rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                              >
-                                <option value="metalica_madeira">Estrutura Metálica + Deck Madeira</option>
-                                <option value="madeira_estrutural">Estrutura de Madeira Maciça</option>
-                                <option value="steel_deck">Metálica Steel Deck</option>
-                                <option value="concreto_armado">Concreto Armado</option>
-                              </select>
-                            </div>
-                          </div>
-
-                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                            <div>
-                              <label className="block text-[10px] text-[#949BA8] mb-0.5">Localização</label>
-                              <select
-                                value={qtMezzZone}
-                                onChange={(e) => setQtMezzZone(e.target.value as MezzanineZone)}
-                                className="w-full px-1.5 py-1 text-[11px] rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                              >
-                                <option value="sobre_banho_cozinha">Sobre BWC + Coz.</option>
-                                <option value="fundos">Fundos</option>
-                                <option value="lateral_esquerda">Lat. Esquerda</option>
-                                <option value="lateral_direita">Lat. Direita</option>
-                              </select>
-                            </div>
-                            <div>
-                              <label className="block text-[10px] text-[#949BA8] mb-0.5">Uso Superior</label>
-                              <select
-                                value={qtMezzUsage}
-                                onChange={(e) => setQtMezzUsage(e.target.value as MezzanineUsage)}
-                                className="w-full px-1.5 py-1 text-[11px] rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                              >
-                                <option value="dormitorio">Dormitório</option>
-                                <option value="dormitorio_home_office">Dorm. + Office</option>
-                                <option value="home_office">Home Office</option>
-                                <option value="deposito_estar">Depósito / Estar</option>
-                              </select>
-                            </div>
-                            <div>
-                              <label className="block text-[10px] text-[#949BA8] mb-0.5">Escada</label>
-                              <select
-                                value={qtMezzStairLayout}
-                                onChange={(e) => setQtMezzStairLayout(e.target.value as MezzanineStairLayout)}
-                                className="w-full px-1.5 py-1 text-[11px] rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                              >
-                                <option value="reta">Lance Reto</option>
-                                <option value="em_l">Em L</option>
-                                <option value="caracol_compacta">Helicoidal</option>
-                              </select>
-                            </div>
-                            <div>
-                              <label className="block text-[10px] text-[#949BA8] mb-0.5">Lado Escada</label>
-                              <select
-                                value={qtMezzStairSide}
-                                onChange={(e) => setQtMezzStairSide(e.target.value as 'esquerda' | 'direita')}
-                                className="w-full px-1.5 py-1 text-[11px] rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                              >
-                                <option value="direita">Direita</option>
-                                <option value="esquerda">Esquerda</option>
-                              </select>
-                            </div>
-                          </div>
-
-                          <div className="space-y-1.5">
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="text-[10px] text-[#C4C9D4]">
-                                Área interna útil: {qb.innerW.toFixed(2)}×{qb.innerD.toFixed(2)}m ({qb.innerAreaM2} m²)
-                              </span>
-                              <div className="inline-flex rounded border border-[#2A2F38] bg-[#14161A] p-0.5 text-[10px]">
-                                <button
-                                  type="button"
-                                  onClick={() => setQtMezzSizingMode('percent')}
-                                  className={`px-2 py-0.5 rounded ${qtMezzSizingMode === 'percent' ? 'bg-[#2F7CF6] text-white' : 'text-[#949BA8]'}`}
-                                >
-                                  Por %
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setQtMezzSizingMode('dimensions')}
-                                  className={`px-2 py-0.5 rounded ${qtMezzSizingMode === 'dimensions' ? 'bg-[#2F7CF6] text-white' : 'text-[#949BA8]'}`}
-                                >
-                                  Dimensões (m)
-                                </button>
-                              </div>
-                            </div>
-
-                            {qtMezzSizingMode === 'percent' ? (
-                              <div className="flex flex-wrap items-center gap-1.5">
-                                {[10, 20, 30, 40, 50].map((pct) => (
-                                  <button
-                                    key={pct}
-                                    type="button"
-                                    onClick={() => setQtMezzPct(pct)}
-                                    className={`px-2 py-0.5 text-[10px] font-mono rounded border ${
-                                      qtMezzPct === pct
-                                        ? 'border-[#2F7CF6] bg-[#2F7CF6]/25 text-white font-semibold'
-                                        : 'border-[#2A2F38] bg-[#14161A] text-[#949BA8]'
-                                    }`}
-                                  >
-                                    {pct}%
-                                  </button>
-                                ))}
-                                <span className="text-[10px] font-mono text-cyan-300 ml-1">
-                                  ≈ {round2((qb.innerAreaM2 * qtMezzPct) / 100)} m²
-                                </span>
-                              </div>
-                            ) : (
-                              <div className="grid grid-cols-2 gap-2">
-                                <NumericInput
-                                  min={1.0}
-                                  max={qb.innerW}
-                                  value={qtMezzCustomW}
-                                  onCommit={setQtMezzCustomW}
-                                  aria-label="Largura mezanino"
-                                  className="px-2 py-1 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                                />
-                                <NumericInput
-                                  min={1.0}
-                                  max={qb.innerD}
-                                  value={qtMezzCustomD}
-                                  onCommit={setQtMezzCustomD}
-                                  aria-label="Profundidade mezanino"
-                                  className="px-2 py-1 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                                />
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })()}
-
-                    <div className="flex items-center justify-between gap-2 pt-1">
-                      <span className="text-[11px] font-mono text-[#949BA8]">
-                        Área bruta: {round2(Math.max(2.8, qtWidth) * Math.max(3.6, qtDepth))} m²
-                      </span>
-                      <button
-                        type="submit"
-                        className="px-3.5 py-1.5 text-xs font-semibold rounded bg-[#2F7CF6] text-white hover:bg-[#2567d4]"
-                      >
-                        {editingUnitTypeId
-                          ? 'Salvar Alterações no Modelo'
-                          : 'Salvar Tipologia e Usar na Implantação'}
-                      </button>
-                    </div>
-                  </form>
-                )}
-
-                {project.unitTypes.length > 0 && (
-                  <div className="space-y-2">
-                    {project.unitTypes.map((ut) => {
-                      const isPrimary =
-                        (impConfig.primaryUnitTypeId || project.unitTypes[0]?.id) === ut.id;
-                      const isEditing = editingUnitTypeId === ut.id && showQuickTypeForm;
-                      const placedCount = project.floors.reduce(
-                        (s, f) => s + f.units.filter((u) => u.unitTypeId === ut.id).length,
-                        0,
-                      );
-                      const entryLabel =
-                        ut.entrySide === 'frente'
-                          ? 'Frente'
-                          : ut.entrySide === 'lateral_esquerda'
-                            ? 'Lat. Esq.'
-                            : 'Lat. Dir.';
-                      return (
-                        <div
-                          key={ut.id}
-                          className={`rounded border p-2.5 transition ${
-                            isEditing
-                              ? 'border-sky-400 bg-sky-500/10'
-                              : isPrimary
-                                ? 'border-[#2F7CF6] bg-[#2F7CF6]/15'
-                                : 'border-[#2A2F38] bg-[#14161A]'
-                          }`}
-                        >
-                          <div className="flex flex-wrap items-start justify-between gap-2">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                updateImplantation((c) => ({ ...c, primaryUnitTypeId: ut.id }));
-                                onSelectUnitType?.(ut.id);
-                              }}
-                              className="text-left min-w-0 flex-1"
-                            >
-                              <div className="flex flex-wrap items-center gap-1.5">
-                                <span className="text-xs font-mono font-semibold text-white">
-                                  {ut.code}
-                                </span>
-                                <span className="text-xs text-[#C4C9D4] truncate">
-                                  — {ut.name}
-                                </span>
-                                {isPrimary && (
-                                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[#2F7CF6]/30 text-sky-200 border border-[#2F7CF6]/50">
-                                    Principal
-                                  </span>
-                                )}
-                              </div>
-                              <div className="text-[11px] font-mono text-[#949BA8] mt-1">
-                                {ut.buildingKind === 'casa_sobrado'
-                                  ? `Sobrado ${(ut.storyIndex ?? 0) === 0 ? 'Térreo' : `${ut.storyIndex}º Pav.`}`
-                                  : ut.buildingKind === 'casa_terrea'
-                                    ? 'Casa Térrea'
-                                    : 'Kitnet'}{' '}
-                                · {ut.width}×{ut.depth}m ({round2(ut.width * ut.depth)}m²) · PD{' '}
-                                {ut.ceilingHeight}m · Entrada: {entryLabel} ·{' '}
-                                {ut.bedrooms > 0 ? `${ut.bedrooms}Q` : 'Studio'}
-                                {(ut.suites ?? 0) > 0 ? ' (c/ Suíte)' : ''}
-                                {ut.hasLaundry ? ' · A.S.' : ''}
-                                {ut.hasMezzanine ? ' · Mezanino' : ''} · {placedCount} unid.
-                              </div>
-                            </button>
-
-                            <div className="flex items-center gap-1 shrink-0">
-                              <button
-                                type="button"
-                                onClick={() => openEditQuickTypeForm(ut)}
-                                className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded border border-[#323844] bg-[#1B1E24] text-sky-200 hover:border-[#2F7CF6] hover:text-white"
-                              >
-                                <Pencil className="w-3 h-3" />
-                                Editar
-                              </button>
-                              {onNavigateModule && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    onSelectUnitType?.(ut.id);
-                                    onNavigateModule('planta2d');
-                                  }}
-                                  className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded border border-[#323844] bg-[#1B1E24] text-[#C4C9D4] hover:border-[#2F7CF6] hover:text-white"
-                                >
-                                  <PenTool className="w-3 h-3 text-[#2F7CF6]" />
-                                  Planta 2D
-                                </button>
-                              )}
-                              {confirmDeleteUtId === ut.id ? (
-                                <div className="inline-flex items-center gap-1">
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      if (editingUnitTypeId === ut.id) {
-                                        setEditingUnitTypeId(null);
-                                        setShowQuickTypeForm(false);
-                                      }
-                                      onUpdateProject(
-                                        (prev) => deleteUnitTypeFromProject(prev, ut.id),
-                                        `Exclusão do modelo ${ut.code}`,
-                                      );
-                                      setConfirmDeleteUtId(null);
-                                    }}
-                                    className="px-2 py-1 text-[10px] font-semibold rounded bg-red-600 text-white hover:bg-red-500"
-                                  >
-                                    Confirmar
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setConfirmDeleteUtId(null)}
-                                    className="px-1.5 py-1 text-[10px] rounded border border-[#323844] text-[#949BA8]"
-                                  >
-                                    Não
-                                  </button>
-                                </div>
-                              ) : (
-                                <button
-                                  type="button"
-                                  aria-label={`Excluir modelo ${ut.code}`}
-                                  onClick={() => {
-                                    if (placedCount > 0) {
-                                      setConfirmDeleteUtId(ut.id);
-                                    } else {
-                                      if (editingUnitTypeId === ut.id) {
-                                        setEditingUnitTypeId(null);
-                                        setShowQuickTypeForm(false);
-                                      }
-                                      onUpdateProject(
-                                        (prev) => deleteUnitTypeFromProject(prev, ut.id),
-                                        `Exclusão do modelo ${ut.code}`,
-                                      );
-                                    }
-                                  }}
-                                  className="p-1 text-red-400 hover:text-red-300"
-                                  title="Excluir modelo"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
                 )}
               </div>
 
-              {/* 2A–D Implantation Strategy */}
-              <div className="rounded-lg border border-[#2A2F38] bg-[#1B1E24] p-4 space-y-3.5">
-                <h2 className="text-sm font-semibold text-white">
-                  2A–2D. Posição, Quantidade, Repetição e Andares
-                </h2>
+              {stage2SubTab === 'modelos' && (
+                <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-3">
+                  {showQuickTypeForm ? (
+                    <form
+                      onSubmit={handleQuickSaveTypology}
+                      className="flex min-h-0 flex-1 flex-col overflow-hidden rounded border border-[#2F7CF6]/40 bg-[#14161A]"
+                    >
+                      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-[#2A2F38] px-3 py-1.5">
+                        <span className="text-xs font-semibold text-sky-300">
+                          {editingUnitTypeId
+                            ? `Editando Modelo (${qtCode})`
+                            : 'Novo Modelo de Edificação'}
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <div className="inline-flex rounded border border-[#2A2F38] bg-[#1B1E24] p-0.5 text-[10px]">
+                            <button
+                              type="button"
+                              onClick={() => setQuickFormStep('basico')}
+                              className={`px-2 py-0.5 rounded ${
+                                quickFormStep === 'basico'
+                                  ? 'bg-[#2F7CF6] text-white font-semibold'
+                                  : 'text-[#949BA8]'
+                              }`}
+                            >
+                              1. Medidas
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setQuickFormStep('config')}
+                              className={`px-2 py-0.5 rounded ${
+                                quickFormStep === 'config'
+                                  ? 'bg-[#2F7CF6] text-white font-semibold'
+                                  : 'text-[#949BA8]'
+                              }`}
+                            >
+                              2. Acesso/Mez.
+                            </button>
+                          </div>
+                          {editingUnitTypeId && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingUnitTypeId(null);
+                                setShowQuickTypeForm(false);
+                              }}
+                              className="text-[11px] text-[#949BA8] hover:text-white"
+                            >
+                              Cancelar
+                            </button>
+                          )}
+                        </div>
+                      </div>
 
-                {/* Quantidade de Andares (Pavimentos) & Resumo Total */}
-                <div className="rounded border border-[#2F7CF6]/40 bg-[#14161A] p-3 space-y-2.5">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="text-xs font-semibold text-white">
-                      Quantidade de Andares (Pavimentos)
-                    </span>
-                    <span className="text-[11px] font-mono text-sky-300">
-                      {activeFloor?.units.length ?? 0} kitnets neste andar ·{' '}
-                      {project.floors.reduce((s, f) => s + f.units.length, 0)} no total
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-[10px] text-[#949BA8] mb-1">
-                        Total de Pavimentos (1 a 20)
-                      </label>
-                      <div className="flex items-center gap-1">
+                      <div className="min-h-0 flex-1 overflow-hidden p-2.5 space-y-2.5">
+                        {quickFormStep === 'basico' ? (
+                          <>
+                            {!editingUnitTypeId && (
+                              <div className="grid grid-cols-3 gap-1 rounded border border-[#2A2F38] bg-[#1B1E24] p-1">
+                                {(
+                                  [
+                                    ['kitnet', 'Kitnet / Studio'],
+                                    ['casa_terrea', 'Casa Térrea'],
+                                    ['casa_sobrado', 'Sobrado'],
+                                  ] as const
+                                ).map(([kv, kl]) => (
+                                  <button
+                                    key={kv}
+                                    type="button"
+                                    onClick={() => openNewQuickTypeForm(kv)}
+                                    className={`px-2 py-1 text-[11px] font-medium rounded transition-colors ${
+                                      qtBuildingKind === kv
+                                        ? 'bg-[#2F7CF6] text-white font-semibold'
+                                        : 'text-[#949BA8] hover:text-white'
+                                    }`}
+                                  >
+                                    {kl}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <label className="block text-[10px] text-[#949BA8] mb-0.5">Código</label>
+                                <input
+                                  type="text"
+                                  value={qtCode}
+                                  onChange={(e) => setQtCode(e.target.value)}
+                                  className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[10px] text-[#949BA8] mb-0.5">Nome</label>
+                                <input
+                                  type="text"
+                                  value={qtName}
+                                  onChange={(e) => setQtName(e.target.value)}
+                                  className="w-full px-2 py-1 text-xs rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                                />
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-3 gap-2">
+                              <div>
+                                <label className="block text-[10px] text-[#949BA8] mb-0.5">
+                                  Largura (m)
+                                </label>
+                                <NumericInput
+                                  min={2.8}
+                                  max={20}
+                                  value={qtWidth}
+                                  onCommit={setQtWidth}
+                                  className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[10px] text-[#949BA8] mb-0.5">
+                                  Profundidade (m)
+                                </label>
+                                <NumericInput
+                                  min={3.6}
+                                  max={25}
+                                  value={qtDepth}
+                                  onCommit={setQtDepth}
+                                  className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[10px] text-[#949BA8] mb-0.5">
+                                  Pé-Direito (m)
+                                </label>
+                                <NumericInput
+                                  min={2.4}
+                                  max={6.0}
+                                  value={qtCeiling}
+                                  onCommit={(v) => {
+                                    setQtCeiling(v);
+                                    if (v < 3.0) setQtMezzanine(false);
+                                  }}
+                                  className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                                />
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <label className="block text-[10px] text-[#949BA8] mb-0.5">Quartos</label>
+                                <select
+                                  value={qtBedrooms}
+                                  onChange={(e) => {
+                                    const val = Number(e.target.value);
+                                    setQtBedrooms(val);
+                                    if (val < 2) setQtSuites(0);
+                                  }}
+                                  className="w-full px-2 py-1 text-xs rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                                >
+                                  {qtBuildingKind === 'kitnet' && <option value={0}>Studio (Integrado)</option>}
+                                  <option value={1}>1 Quarto (Porta 70cm)</option>
+                                  <option value={2}>2 Quartos (Casa)</option>
+                                  <option value={3}>3 Quartos (Casa)</option>
+                                </select>
+                              </div>
+                              <div>
+                                <label className="block text-[10px] text-[#949BA8] mb-0.5">Entrada (P1)</label>
+                                <select
+                                  value={qtEntrySide}
+                                  onChange={(e) => setQtEntrySide(e.target.value as EntrySide)}
+                                  className="w-full px-2 py-1 text-xs rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                                >
+                                  <option value="frente">Pela Frente (80cm)</option>
+                                  <option value="lateral_direita">Lateral Dir. (80cm)</option>
+                                  <option value="lateral_esquerda">Lateral Esq. (80cm)</option>
+                                </select>
+                              </div>
+                            </div>
+
+                            {qtBedrooms >= 1 && (qtWidth < 3.6 || qtDepth < 4.5) && (
+                              <div className="rounded border border-amber-500/40 bg-amber-950/25 px-2.5 py-1 text-[10.5px] text-amber-200">
+                                Para separar 1 Quarto com parede e porta de 70cm, recomenda-se largura ≥ 3,60 m e profundidade ≥ 4,50 m.
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <label className="block text-[10px] text-[#949BA8] mb-0.5">Divisórias</label>
+                                <select
+                                  value={qtPartition}
+                                  onChange={(e) =>
+                                    setQtPartition(e.target.value as InternalPartitionType)
+                                  }
+                                  className="w-full px-2 py-1 text-xs rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                                >
+                                  <option value="alvenaria">Alvenaria</option>
+                                  <option value="drywall">Drywall (9,5cm)</option>
+                                </select>
+                              </div>
+                              <div>
+                                <label className="block text-[10px] text-[#949BA8] mb-0.5">Instalações</label>
+                                <select
+                                  value={qtMepProfile}
+                                  onChange={(e) =>
+                                    setQtMepProfile(e.target.value as 'simples' | 'completo')
+                                  }
+                                  className="w-full px-2 py-1 text-xs rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                                >
+                                  <option value="simples">Simples (Enxuto)</option>
+                                  <option value="completo">Completo (AQ/AC)</option>
+                                </select>
+                              </div>
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-3 text-[11px] text-[#C4C9D4]">
+                              <label className="inline-flex items-center gap-1.5 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={qtLaundry}
+                                  onChange={(e) => setQtLaundry(e.target.checked)}
+                                />
+                                Área de Serviço
+                              </label>
+                              <label className="inline-flex items-center gap-1.5 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={qtBalcony}
+                                  onChange={(e) => setQtBalcony(e.target.checked)}
+                                />
+                                Varanda
+                              </label>
+                              <label className="inline-flex items-center gap-1.5 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={qtAccessible}
+                                  onChange={(e) => setQtAccessible(e.target.checked)}
+                                />
+                                Acessível NBR 9050
+                              </label>
+                              {qtBedrooms >= 2 && (
+                                <label className="inline-flex items-center gap-1.5 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={qtSuites >= 1}
+                                    onChange={(e) => setQtSuites(e.target.checked ? 1 : 0)}
+                                  />
+                                  Suíte (2º BWC)
+                                </label>
+                              )}
+                              {qtBuildingKind === 'casa_sobrado' && !editingUnitTypeId && (
+                                <label className="inline-flex items-center gap-1.5 text-sky-300 font-medium">
+                                  <span>Pavimentos:</span>
+                                  <select
+                                    value={qtTotalStories}
+                                    onChange={(e) => setQtTotalStories(Number(e.target.value))}
+                                    className="px-1.5 py-0.5 text-xs rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                                  >
+                                    <option value={2}>2 Pav.</option>
+                                    <option value={3}>3 Pav.</option>
+                                  </select>
+                                </label>
+                              )}
+                              {qtBuildingKind === 'kitnet' && qtCeiling >= 3.0 && (
+                                <label className="inline-flex items-center gap-1.5 text-sky-300 cursor-pointer font-medium">
+                                  <input
+                                    type="checkbox"
+                                    checked={qtMezzanine}
+                                    onChange={(e) => setQtMezzanine(e.target.checked)}
+                                  />
+                                  Incluir Mezanino
+                                </label>
+                              )}
+                            </div>
+
+                            {qtCeiling >= 3.0 && qtMezzanine && (() => {
+                              const qb = computeMezzanineInteriorBounds(
+                                qtWidth,
+                                qtDepth,
+                                project.constructionMethod.externalWallThickness,
+                                qtBalcony,
+                              );
+                              return (
+                                <div className="rounded border border-sky-500/40 bg-[#1B1E24] p-2 space-y-2">
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <div>
+                                      <label className="block text-[10px] font-semibold text-sky-200 mb-0.5">
+                                        Elevação Mezanino (m)
+                                      </label>
+                                      <div className="flex items-center gap-1.5">
+                                        <NumericInput
+                                          min={2.0}
+                                          max={round2(Math.max(2.05, qtCeiling - 1.05))}
+                                          value={qtMezzElev}
+                                          onCommit={setQtMezzElev}
+                                          className="w-16 px-1.5 py-0.5 text-xs font-mono rounded bg-[#14161A] border border-[#2F7CF6] text-white"
+                                        />
+                                        <span className="text-[10px] font-mono text-[#949BA8]">
+                                          PD sup: {round2(Math.max(0.8, qtCeiling - qtMezzElev - 0.12)).toFixed(2)}m
+                                        </span>
+                                      </div>
+                                    </div>
+                                    <div>
+                                      <label className="block text-[10px] text-[#949BA8] mb-0.5">
+                                        Estrutura
+                                      </label>
+                                      <select
+                                        value={qtMezzStruct}
+                                        onChange={(e) => setQtMezzStruct(e.target.value as MezzanineStructureType)}
+                                        className="w-full px-1.5 py-0.5 text-[11px] rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                                      >
+                                        <option value="metalica_madeira">Metálica + Deck</option>
+                                        <option value="madeira_estrutural">Madeira Maciça</option>
+                                        <option value="steel_deck">Steel Deck</option>
+                                        <option value="concreto_armado">Concreto Armado</option>
+                                      </select>
+                                    </div>
+                                  </div>
+
+                                  <div className="grid grid-cols-4 gap-1.5">
+                                    <select
+                                      aria-label="Localização do mezanino"
+                                      value={qtMezzZone}
+                                      onChange={(e) => setQtMezzZone(e.target.value as MezzanineZone)}
+                                      className="px-1 py-0.5 text-[10px] rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                                    >
+                                      <option value="sobre_banho_cozinha">BWC+Coz.</option>
+                                      <option value="fundos">Fundos</option>
+                                      <option value="lateral_esquerda">Lat. Esq.</option>
+                                      <option value="lateral_direita">Lat. Dir.</option>
+                                    </select>
+                                    <select
+                                      aria-label="Uso do mezanino"
+                                      value={qtMezzUsage}
+                                      onChange={(e) => setQtMezzUsage(e.target.value as MezzanineUsage)}
+                                      className="px-1 py-0.5 text-[10px] rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                                    >
+                                      <option value="dormitorio">Dormitório</option>
+                                      <option value="dormitorio_home_office">Dorm+Office</option>
+                                      <option value="home_office">Office</option>
+                                      <option value="deposito_estar">Estar</option>
+                                    </select>
+                                    <select
+                                      aria-label="Escada do mezanino"
+                                      value={qtMezzStairLayout}
+                                      onChange={(e) => setQtMezzStairLayout(e.target.value as MezzanineStairLayout)}
+                                      className="px-1 py-0.5 text-[10px] rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                                    >
+                                      <option value="reta">Reta</option>
+                                      <option value="em_l">Em L</option>
+                                      <option value="caracol_compacta">Helicoidal</option>
+                                    </select>
+                                    <select
+                                      aria-label="Lado da escada"
+                                      value={qtMezzStairSide}
+                                      onChange={(e) => setQtMezzStairSide(e.target.value as 'esquerda' | 'direita')}
+                                      className="px-1 py-0.5 text-[10px] rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                                    >
+                                      <option value="direita">Esc. Dir.</option>
+                                      <option value="esquerda">Esc. Esq.</option>
+                                    </select>
+                                  </div>
+
+                                  <div className="flex items-center justify-between gap-2">
+                                    <div className="inline-flex rounded border border-[#2A2F38] bg-[#14161A] p-0.5 text-[10px]">
+                                      <button
+                                        type="button"
+                                        onClick={() => setQtMezzSizingMode('percent')}
+                                        className={`px-1.5 py-0.5 rounded ${qtMezzSizingMode === 'percent' ? 'bg-[#2F7CF6] text-white' : 'text-[#949BA8]'}`}
+                                      >
+                                        %
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setQtMezzSizingMode('dimensions')}
+                                        className={`px-1.5 py-0.5 rounded ${qtMezzSizingMode === 'dimensions' ? 'bg-[#2F7CF6] text-white' : 'text-[#949BA8]'}`}
+                                      >
+                                        m
+                                      </button>
+                                    </div>
+                                    {qtMezzSizingMode === 'percent' ? (
+                                      <div className="flex items-center gap-1">
+                                        {[10, 20, 30, 40, 50].map((pct) => (
+                                          <button
+                                            key={pct}
+                                            type="button"
+                                            onClick={() => setQtMezzPct(pct)}
+                                            className={`px-1.5 py-0.5 text-[10px] font-mono rounded border ${
+                                              qtMezzPct === pct
+                                                ? 'border-[#2F7CF6] bg-[#2F7CF6]/25 text-white'
+                                                : 'border-[#2A2F38] bg-[#14161A] text-[#949BA8]'
+                                            }`}
+                                          >
+                                            {pct}%
+                                          </button>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <div className="flex items-center gap-1.5">
+                                        <NumericInput
+                                          min={1.0}
+                                          max={qb.innerW}
+                                          value={qtMezzCustomW}
+                                          onCommit={setQtMezzCustomW}
+                                          aria-label="Largura mezanino"
+                                          className="w-14 px-1.5 py-0.5 text-[11px] font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                                        />
+                                        <NumericInput
+                                          min={1.0}
+                                          max={qb.innerD}
+                                          value={qtMezzCustomD}
+                                          onCommit={setQtMezzCustomD}
+                                          aria-label="Profundidade mezanino"
+                                          className="w-14 px-1.5 py-0.5 text-[11px] font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                                        />
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })()}
+                          </>
+                        )}
+                      </div>
+
+                      <div className="flex shrink-0 items-center justify-between gap-2 border-t border-[#2A2F38] bg-[#171A20] px-3 py-1.5">
+                        <span className="text-[11px] font-mono text-[#949BA8]">
+                          Área bruta: {round2(Math.max(2.8, qtWidth) * Math.max(3.6, qtDepth))} m²
+                        </span>
                         <button
-                          type="button"
-                          onClick={() => handleSetFloorCount(project.floors.length - 1)}
-                          disabled={project.floors.length <= 1}
-                          aria-label="Diminuir quantidade de andares"
-                          className="p-1.5 rounded border border-[#2A2F38] bg-[#1B1E24] text-slate-200 hover:border-[#2F7CF6] disabled:opacity-35"
+                          type="submit"
+                          className="px-3 py-1 text-xs font-semibold rounded bg-[#2F7CF6] text-white hover:bg-[#2567d4]"
                         >
-                          <Minus className="w-3.5 h-3.5" />
-                        </button>
-                        <input
-                          type="number"
-                          min={1}
-                          max={20}
-                          value={project.floors.length}
-                          aria-label="Quantidade de andares"
-                          onChange={(e) => handleSetFloorCount(Number(e.target.value))}
-                          className="w-full px-2 py-1 text-center text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => handleSetFloorCount(project.floors.length + 1)}
-                          disabled={project.floors.length >= 20}
-                          aria-label="Aumentar quantidade de andares"
-                          className="p-1.5 rounded border border-[#2A2F38] bg-[#1B1E24] text-slate-200 hover:border-[#2F7CF6] disabled:opacity-35"
-                        >
-                          <Plus className="w-3.5 h-3.5" />
+                          {editingUnitTypeId ? 'Salvar Modelo' : 'Salvar Tipologia'}
                         </button>
                       </div>
-                    </div>
-                    <div>
-                      <label className="block text-[10px] text-[#949BA8] mb-1">
-                        Altura piso-a-piso ({activeFloor?.name ?? 'Térreo'})
-                      </label>
-                      <input
-                        type="number"
-                        step="0.05"
-                        min={2.3}
-                        max={6.0}
-                        value={activeFloor?.floorToFloorHeight ?? 2.95}
-                        onChange={(e) => handleActiveFloorHeightChange(Number(e.target.value))}
-                        className="w-full px-2.5 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
-                      />
-                    </div>
-                  </div>
-                </div>
+                    </form>
+                  ) : (
+                    <>
+                      <div className="min-h-0 flex-1 space-y-2 overflow-hidden">
+                        {project.unitTypes.length === 0 ? (
+                          <div className="rounded border border-dashed border-[#2A2F38] p-4 text-center text-xs text-[#949BA8]">
+                            Nenhum modelo cadastrado ainda. Clique em &quot;+ Novo Modelo&quot; acima.
+                          </div>
+                        ) : (
+                          modelsPager.slice.map((ut) => {
+                            const isPrimary =
+                              (impConfig.primaryUnitTypeId || project.unitTypes[0]?.id) === ut.id;
+                            const placedCount = project.floors.reduce(
+                              (s, f) => s + f.units.filter((u) => u.unitTypeId === ut.id).length,
+                              0,
+                            );
+                            const entryLabel =
+                              ut.entrySide === 'frente'
+                                ? 'Frente'
+                                : ut.entrySide === 'lateral_esquerda'
+                                  ? 'Lat. Esq.'
+                                  : 'Lat. Dir.';
+                            return (
+                              <div
+                                key={ut.id}
+                                className={`rounded border p-2 transition ${
+                                  isPrimary
+                                    ? 'border-[#2F7CF6] bg-[#2F7CF6]/15'
+                                    : 'border-[#2A2F38] bg-[#14161A]'
+                                }`}
+                              >
+                                <div className="flex items-start justify-between gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      updateImplantation((c) => ({ ...c, primaryUnitTypeId: ut.id }));
+                                      onSelectUnitType?.(ut.id);
+                                    }}
+                                    className="text-left min-w-0 flex-1"
+                                  >
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="text-xs font-mono font-semibold text-white">
+                                        {ut.code}
+                                      </span>
+                                      <span className="text-xs text-[#C4C9D4] truncate">
+                                        — {ut.name}
+                                      </span>
+                                      {isPrimary && (
+                                        <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-[#2F7CF6]/30 text-sky-200 border border-[#2F7CF6]/50">
+                                          Principal
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="text-[10.5px] font-mono text-[#949BA8] mt-0.5 truncate">
+                                      {ut.buildingKind === 'casa_sobrado'
+                                        ? `Sobrado ${(ut.storyIndex ?? 0) === 0 ? 'Térreo' : `${ut.storyIndex}º Pav.`}`
+                                        : ut.buildingKind === 'casa_terrea'
+                                          ? 'Casa Térrea'
+                                          : 'Kitnet'}{' '}
+                                      · {ut.width}×{ut.depth}m · Ent.: {entryLabel} ·{' '}
+                                      {ut.bedrooms > 0 ? `${ut.bedrooms}Q` : 'Studio'} · {placedCount} unid.
+                                    </div>
+                                  </button>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[11px] text-[#949BA8] mb-1">
-                      Localização (vista a partir da rua)
-                    </label>
-                    <select
-                      value={impConfig.primaryZone}
-                      onChange={(e) => {
-                        const z = e.target.value as ImplantationZone;
-                        updateImplantation((c) => ({
-                          ...c,
-                          primaryZone: z,
-                          layoutPattern:
-                            z === 'ambos_lados'
-                              ? 'ambos_lados'
-                              : z === 'fundos'
-                                ? 'conjunto_fundos'
-                                : z === 'personalizada'
-                                  ? 'personalizada'
-                                  : c.totalUnitsTarget === 1
-                                    ? 'isolada'
-                                    : 'sequencia',
-                        }));
-                      }}
-                      className="w-full px-2.5 py-1.5 text-xs rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                    >
-                      <option value="frontal">Parte Frontal do Terreno</option>
-                      <option value="central">Parte Central</option>
-                      <option value="fundos">Nos Fundos</option>
-                      <option value="lado_esquerdo">Lado Esquerdo (vista da rua)</option>
-                      <option value="lado_direito">Lado Direito (vista da rua)</option>
-                      <option value="ambos_lados">Nos Dois Lados</option>
-                      <option value="centralizada">Centralizada no Lote</option>
-                      <option value="personalizada">Personalizada (Arraste na planta)</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] text-[#949BA8] mb-1">
-                      Arranjo / Distribuição Espacial
-                    </label>
-                    <select
-                      value={impConfig.layoutPattern}
-                      onChange={(e) => {
-                        const pat = e.target.value as ImplantationLayoutPattern;
-                        updateImplantation((c) => ({
-                          ...c,
-                          layoutPattern: pat,
-                          totalUnitsTarget:
-                            pat === 'isolada'
-                              ? 1
-                              : pat === 'duas_lado_a_lado'
-                                ? 2
-                                : Math.max(1, c.totalUnitsTarget || 4),
-                        }));
-                      }}
-                      className="w-full px-2.5 py-1.5 text-xs rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                    >
-                      <option value="isolada">1 Kitnet Isolada</option>
-                      <option value="duas_lado_a_lado">2 Kitnets Lado a Lado</option>
-                      <option value="sequencia">Sequência de Unidades</option>
-                      <option value="duas_fileiras">Duas Fileiras</option>
-                      <option value="ambos_lados">Lado Esquerdo + Direito (Independentes)</option>
-                      <option value="conjunto_fundos">Conjunto nos Fundos</option>
-                      <option value="personalizada">Implantação Personalizada / Mista</option>
-                    </select>
-                  </div>
-                </div>
-
-                {/* Quantities: asymmetric sides allowed! */}
-                {(impConfig.primaryZone === 'ambos_lados' ||
-                  impConfig.layoutPattern === 'ambos_lados' ||
-                  impConfig.layoutPattern === 'duas_fileiras') ? (
-                  <div className="space-y-2.5">
-                    <div className="rounded border border-[#2A2F38] bg-[#14161A] p-3 space-y-2">
-                      <div className="text-[11px] text-slate-300 font-medium">
-                        Distribuição por Setor (informe 0 onde não houver unidades — nunca é obrigatório simetria)
+                                  <div className="flex items-center gap-1 shrink-0">
+                                    <button
+                                      type="button"
+                                      onClick={() => openEditQuickTypeForm(ut)}
+                                      className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded border border-[#323844] bg-[#1B1E24] text-sky-200 hover:border-[#2F7CF6]"
+                                    >
+                                      <Pencil className="w-3 h-3" />
+                                      Editar
+                                    </button>
+                                    {onNavigateModule && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          onSelectUnitType?.(ut.id);
+                                          onNavigateModule('planta2d');
+                                        }}
+                                        className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded border border-[#323844] bg-[#1B1E24] text-[#C4C9D4] hover:border-[#2F7CF6]"
+                                      >
+                                        <PenTool className="w-3 h-3 text-[#2F7CF6]" />
+                                        2D
+                                      </button>
+                                    )}
+                                    {confirmDeleteUtId === ut.id ? (
+                                      <div className="inline-flex items-center gap-1">
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            if (editingUnitTypeId === ut.id) {
+                                              setEditingUnitTypeId(null);
+                                              setShowQuickTypeForm(false);
+                                            }
+                                            onUpdateProject(
+                                              (prev) => deleteUnitTypeFromProject(prev, ut.id),
+                                              `Exclusão do modelo ${ut.code}`,
+                                            );
+                                            setConfirmDeleteUtId(null);
+                                          }}
+                                          className="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-red-600 text-white"
+                                        >
+                                          Sim
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => setConfirmDeleteUtId(null)}
+                                          className="px-1.5 py-0.5 text-[10px] rounded border border-[#323844] text-[#949BA8]"
+                                        >
+                                          Não
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        aria-label={`Excluir modelo ${ut.code}`}
+                                        onClick={() => {
+                                          if (placedCount > 0) {
+                                            setConfirmDeleteUtId(ut.id);
+                                          } else {
+                                            onUpdateProject(
+                                              (prev) => deleteUnitTypeFromProject(prev, ut.id),
+                                              `Exclusão do modelo ${ut.code}`,
+                                            );
+                                          }
+                                        }}
+                                        className="p-1 text-red-400 hover:text-red-300"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })
+                        )}
                       </div>
-                      <div className="grid grid-cols-4 gap-2">
+                      <PaginationBar
+                        compact
+                        page={modelsPager.safePage}
+                        totalPages={modelsPager.totalPages}
+                        totalItems={project.unitTypes.length}
+                        startIndex={modelsPager.start}
+                        endIndex={modelsPager.end}
+                        onPageChange={setModelsPage}
+                        itemLabel="modelos"
+                      />
+                    </>
+                  )}
+                </div>
+              )}
+
+              {stage2SubTab === 'implantacao' && (
+                <div className="flex min-h-0 flex-1 flex-col justify-between overflow-hidden p-3 gap-2">
+                  <div className="space-y-2.5 overflow-hidden">
+                    {/* Quantidade de Andares (Pavimentos) & Resumo Total */}
+                    <div className="rounded border border-[#2F7CF6]/40 bg-[#14161A] p-2.5 space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-semibold text-white">
+                          Andares (Pavimentos)
+                        </span>
+                        <span className="text-[11px] font-mono text-sky-300">
+                          {activeFloor?.units.length ?? 0} neste andar ·{' '}
+                          {project.floors.reduce((s, f) => s + f.units.length, 0)} total
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2.5">
                         <div>
-                          <label className="block text-[10px] text-[#949BA8] mb-0.5">Lado Esq.</label>
-                          <input
-                            type="number"
-                            min={0}
-                            max={30}
-                            value={impConfig.leftCount}
-                            onChange={(e) => {
-                              const v = Math.max(0, Number(e.target.value));
-                              updateImplantation((c) => ({
-                                ...c,
-                                leftCount: v,
-                                totalUnitsTarget: v + c.rightCount + c.frontCount + c.backCount,
-                              }));
-                            }}
-                            className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
-                          />
+                          <label className="block text-[10px] text-[#949BA8] mb-0.5">
+                            Total de Pavimentos (1 a 20)
+                          </label>
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => handleSetFloorCount(project.floors.length - 1)}
+                              disabled={project.floors.length <= 1}
+                              aria-label="Diminuir quantidade de andares"
+                              className="p-1 rounded border border-[#2A2F38] bg-[#1B1E24] text-slate-200 hover:border-[#2F7CF6] disabled:opacity-35"
+                            >
+                              <Minus className="w-3.5 h-3.5" />
+                            </button>
+                            <input
+                              type="number"
+                              min={1}
+                              max={20}
+                              value={project.floors.length}
+                              aria-label="Quantidade de andares"
+                              onChange={(e) => handleSetFloorCount(Number(e.target.value))}
+                              className="w-full px-2 py-0.5 text-center text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleSetFloorCount(project.floors.length + 1)}
+                              disabled={project.floors.length >= 20}
+                              aria-label="Aumentar quantidade de andares"
+                              className="p-1 rounded border border-[#2A2F38] bg-[#1B1E24] text-slate-200 hover:border-[#2F7CF6] disabled:opacity-35"
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         </div>
                         <div>
-                          <label className="block text-[10px] text-[#949BA8] mb-0.5">Lado Dir.</label>
+                          <label className="block text-[10px] text-[#949BA8] mb-0.5">
+                            Piso-a-piso ({activeFloor?.name ?? 'Térreo'})
+                          </label>
                           <input
                             type="number"
-                            min={0}
-                            max={30}
-                            value={impConfig.rightCount}
-                            onChange={(e) => {
-                              const v = Math.max(0, Number(e.target.value));
-                              updateImplantation((c) => ({
-                                ...c,
-                                rightCount: v,
-                                totalUnitsTarget: c.leftCount + v + c.frontCount + c.backCount,
-                              }));
-                            }}
-                            className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[10px] text-[#949BA8] mb-0.5">Frente</label>
-                          <input
-                            type="number"
-                            min={0}
-                            max={30}
-                            value={impConfig.frontCount}
-                            onChange={(e) => {
-                              const v = Math.max(0, Number(e.target.value));
-                              updateImplantation((c) => ({
-                                ...c,
-                                frontCount: v,
-                                totalUnitsTarget: c.leftCount + c.rightCount + v + c.backCount,
-                              }));
-                            }}
-                            className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[10px] text-[#949BA8] mb-0.5">Fundos</label>
-                          <input
-                            type="number"
-                            min={0}
-                            max={30}
-                            value={impConfig.backCount}
-                            onChange={(e) => {
-                              const v = Math.max(0, Number(e.target.value));
-                              updateImplantation((c) => ({
-                                ...c,
-                                backCount: v,
-                                totalUnitsTarget: c.leftCount + c.rightCount + c.frontCount + v,
-                              }));
-                            }}
-                            className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                            step="0.05"
+                            min={2.3}
+                            max={6.0}
+                            value={activeFloor?.floorToFloorHeight ?? 2.95}
+                            onChange={(e) => handleActiveFloorHeightChange(Number(e.target.value))}
+                            className="w-full px-2 py-0.5 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
                           />
                         </div>
                       </div>
                     </div>
-                    <div>
-                      <label className="block text-[11px] text-[#949BA8] mb-1">
-                        Repetição das Unidades
-                      </label>
-                      <select
-                        value={impConfig.modelMode}
-                        onChange={(e) =>
-                          updateImplantation((c) => ({
-                            ...c,
-                            modelMode: e.target.value as ImplantationModelMode,
-                          }))
-                        }
-                        className="w-full px-2.5 py-1.5 text-xs rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                      >
-                        <option value="todas_iguais">Sim, todas iguais (mesmo modelo)</option>
-                        <option value="modelos_diferentes">Não, modelos diferentes (alternar tipologias)</option>
-                        <option value="misto_repeticao">Misto (grupos + distintas)</option>
-                      </select>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-[11px] text-[#949BA8] mb-1">
-                        Quantas kitnets neste pavimento?
-                      </label>
-                      <input
-                        type="number"
-                        min={0}
-                        max={40}
-                        value={impConfig.totalUnitsTarget}
-                        onChange={(e) =>
-                          updateImplantation((c) => ({
-                            ...c,
-                            totalUnitsTarget: Math.max(0, Number(e.target.value)),
-                          }))
-                        }
-                        className="w-full px-2.5 py-1.5 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[11px] text-[#949BA8] mb-1">
-                        Repetição das Unidades
-                      </label>
-                      <select
-                        value={impConfig.modelMode}
-                        onChange={(e) =>
-                          updateImplantation((c) => ({
-                            ...c,
-                            modelMode: e.target.value as ImplantationModelMode,
-                          }))
-                        }
-                        className="w-full px-2.5 py-1.5 text-xs rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                      >
-                        <option value="todas_iguais">Sim, todas iguais</option>
-                        <option value="modelos_diferentes">Não, modelos diferentes</option>
-                        <option value="misto_repeticao">Misto (grupos + distintas)</option>
-                      </select>
-                    </div>
-                  </div>
-                )}
 
-                {/* Coupling: Geminadas vs Separadas vs Mista */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[11px] text-[#949BA8] mb-1">
-                      Tipo de Implantação entre Unidades
-                    </label>
-                    <select
-                      value={impConfig.couplingMode}
-                      onChange={(e) => {
-                        const cm = e.target.value as ImplantationCouplingMode;
-                        updateImplantation((c) => ({
-                          ...c,
-                          couplingMode: cm,
-                          shareWallsWhenPossible: cm === 'geminadas',
-                        }));
-                      }}
-                      className="w-full px-2.5 py-1.5 text-xs rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                    >
-                      <option value="geminadas">Geminadas (parede compartilhada, 0 m)</option>
-                      <option value="separadas">Separadas (com afastamento entre elas)</option>
-                      <option value="mista">Implantação Mista (por grupos)</option>
-                      <option value="personalizada">Personalizada (livre na planta)</option>
-                    </select>
-                  </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[10px] text-[#949BA8] mb-0.5">
+                          Localização (da rua)
+                        </label>
+                        <select
+                          value={impConfig.primaryZone}
+                          onChange={(e) => {
+                            const z = e.target.value as ImplantationZone;
+                            updateImplantation((c) => ({
+                              ...c,
+                              primaryZone: z,
+                              layoutPattern:
+                                z === 'ambos_lados'
+                                  ? 'ambos_lados'
+                                  : z === 'fundos'
+                                    ? 'conjunto_fundos'
+                                    : z === 'personalizada'
+                                      ? 'personalizada'
+                                      : c.totalUnitsTarget === 1
+                                        ? 'isolada'
+                                        : 'sequencia',
+                            }));
+                          }}
+                          className="w-full px-2 py-1 text-xs rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                        >
+                          <option value="frontal">Parte Frontal do Terreno</option>
+                          <option value="central">Parte Central</option>
+                          <option value="fundos">Nos Fundos</option>
+                          <option value="lado_esquerdo">Lado Esquerdo (vista da rua)</option>
+                          <option value="lado_direito">Lado Direito (vista da rua)</option>
+                          <option value="ambos_lados">Nos Dois Lados</option>
+                          <option value="centralizada">Centralizada no Lote</option>
+                          <option value="personalizada">Personalizada (Arraste na planta)</option>
+                        </select>
+                      </div>
 
-                  <div>
-                    <label className="block text-[11px] text-[#949BA8] mb-1">
-                      {impConfig.couplingMode === 'separadas'
-                        ? `Afastamento entre Unidades (${unit}) *`
-                        : `Espaço Livre / Corredor (${unit})`}
-                    </label>
-                    {impConfig.couplingMode === 'separadas' ? (
-                      <input
-                        type="number"
-                        step={unit === 'cm' ? 10 : 0.1}
-                        min={unit === 'cm' ? 30 : 0.3}
-                        value={toDisplay(impConfig.interUnitSpacingM)}
-                        onChange={(e) =>
-                          updateImplantation((c) => ({
-                            ...c,
-                            interUnitSpacingM: Math.max(0.1, fromDisplay(Number(e.target.value))),
-                          }))
-                        }
-                        className="w-full px-2.5 py-1.5 text-xs font-mono rounded bg-[#14161A] border border-[#2F7CF6] text-white"
-                      />
+                      <div>
+                        <label className="block text-[10px] text-[#949BA8] mb-0.5">
+                          Distribuição Espacial
+                        </label>
+                        <select
+                          value={impConfig.layoutPattern}
+                          onChange={(e) => {
+                            const pat = e.target.value as ImplantationLayoutPattern;
+                            updateImplantation((c) => ({
+                              ...c,
+                              layoutPattern: pat,
+                              totalUnitsTarget:
+                                pat === 'isolada'
+                                  ? 1
+                                  : pat === 'duas_lado_a_lado'
+                                    ? 2
+                                    : Math.max(1, c.totalUnitsTarget || 4),
+                            }));
+                          }}
+                          className="w-full px-2 py-1 text-xs rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                        >
+                          <option value="isolada">1 Kitnet Isolada</option>
+                          <option value="duas_lado_a_lado">2 Kitnets Lado a Lado</option>
+                          <option value="sequencia">Sequência de Unidades</option>
+                          <option value="duas_fileiras">Duas Fileiras</option>
+                          <option value="ambos_lados">Lado Esquerdo + Direito</option>
+                          <option value="conjunto_fundos">Conjunto nos Fundos</option>
+                          <option value="personalizada">Personalizada / Mista</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {(impConfig.primaryZone === 'ambos_lados' ||
+                      impConfig.layoutPattern === 'ambos_lados' ||
+                      impConfig.layoutPattern === 'duas_fileiras') ? (
+                      <div className="space-y-2">
+                        <div className="rounded border border-[#2A2F38] bg-[#14161A] p-2">
+                          <div className="text-[10px] text-slate-300 font-medium mb-1">
+                            Unidades por Setor (informe 0 onde não houver — sem simetria obrigatória)
+                          </div>
+                          <div className="grid grid-cols-4 gap-1.5">
+                            <div>
+                              <label className="block text-[10px] text-[#949BA8]">Lat. Esq.</label>
+                              <input
+                                type="number"
+                                min={0}
+                                max={30}
+                                value={impConfig.leftCount}
+                                onChange={(e) => {
+                                  const v = Math.max(0, Number(e.target.value));
+                                  updateImplantation((c) => ({
+                                    ...c,
+                                    leftCount: v,
+                                    totalUnitsTarget: v + c.rightCount + c.frontCount + c.backCount,
+                                  }));
+                                }}
+                                className="w-full px-1.5 py-0.5 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] text-[#949BA8]">Lat. Dir.</label>
+                              <input
+                                type="number"
+                                min={0}
+                                max={30}
+                                value={impConfig.rightCount}
+                                onChange={(e) => {
+                                  const v = Math.max(0, Number(e.target.value));
+                                  updateImplantation((c) => ({
+                                    ...c,
+                                    rightCount: v,
+                                    totalUnitsTarget: c.leftCount + v + c.frontCount + c.backCount,
+                                  }));
+                                }}
+                                className="w-full px-1.5 py-0.5 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] text-[#949BA8]">Frente</label>
+                              <input
+                                type="number"
+                                min={0}
+                                max={30}
+                                value={impConfig.frontCount}
+                                onChange={(e) => {
+                                  const v = Math.max(0, Number(e.target.value));
+                                  updateImplantation((c) => ({
+                                    ...c,
+                                    frontCount: v,
+                                    totalUnitsTarget: c.leftCount + c.rightCount + v + c.backCount,
+                                  }));
+                                }}
+                                className="w-full px-1.5 py-0.5 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] text-[#949BA8]">Fundos</label>
+                              <input
+                                type="number"
+                                min={0}
+                                max={30}
+                                value={impConfig.backCount}
+                                onChange={(e) => {
+                                  const v = Math.max(0, Number(e.target.value));
+                                  updateImplantation((c) => ({
+                                    ...c,
+                                    backCount: v,
+                                    totalUnitsTarget: c.leftCount + c.rightCount + c.frontCount + v,
+                                  }));
+                                }}
+                                className="w-full px-1.5 py-0.5 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-[10px] text-[#949BA8] mb-0.5">
+                            Repetição das Unidades
+                          </label>
+                          <select
+                            value={impConfig.modelMode}
+                            onChange={(e) =>
+                              updateImplantation((c) => ({
+                                ...c,
+                                modelMode: e.target.value as ImplantationModelMode,
+                              }))
+                            }
+                            className="w-full px-2 py-1 text-xs rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                          >
+                            <option value="todas_iguais">Sim, todas iguais (mesmo modelo)</option>
+                            <option value="modelos_diferentes">Não, modelos diferentes (alternar)</option>
+                            <option value="misto_repeticao">Misto (grupos + distintas)</option>
+                          </select>
+                        </div>
+                      </div>
                     ) : (
-                      <input
-                        type="number"
-                        step={unit === 'cm' ? 10 : 0.1}
-                        min={unit === 'cm' ? 90 : 0.9}
-                        value={toDisplay(impConfig.circulation.corridorWidthM)}
-                        onChange={(e) =>
-                          updateImplantation((c) => ({
-                            ...c,
-                            circulation: {
-                              ...c.circulation,
-                              corridorWidthM: Math.max(0.9, fromDisplay(Number(e.target.value))),
-                            },
-                          }))
-                        }
-                        className="w-full px-2.5 py-1.5 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                      />
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-[10px] text-[#949BA8] mb-0.5">
+                            Qtd. no pavimento
+                          </label>
+                          <input
+                            type="number"
+                            min={0}
+                            max={40}
+                            value={impConfig.totalUnitsTarget}
+                            onChange={(e) =>
+                              updateImplantation((c) => ({
+                                ...c,
+                                totalUnitsTarget: Math.max(0, Number(e.target.value)),
+                              }))
+                            }
+                            className="w-full px-2 py-1 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] text-[#949BA8] mb-0.5">
+                            Repetição das Unidades
+                          </label>
+                          <select
+                            value={impConfig.modelMode}
+                            onChange={(e) =>
+                              updateImplantation((c) => ({
+                                ...c,
+                                modelMode: e.target.value as ImplantationModelMode,
+                              }))
+                            }
+                            className="w-full px-2 py-1 text-xs rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                          >
+                            <option value="todas_iguais">Sim, todas iguais</option>
+                            <option value="modelos_diferentes">Não, modelos diferentes</option>
+                            <option value="misto_repeticao">Misto (grupos + distintas)</option>
+                          </select>
+                        </div>
+                      </div>
                     )}
-                  </div>
-                </div>
 
-                {/* Mixed groups builder */}
-                {(impConfig.couplingMode === 'mista' ||
-                  impConfig.modelMode === 'misto_repeticao') && (
-                  <div className="rounded border border-[#2A2F38] bg-[#14161A] p-3 space-y-2.5">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-medium text-white">
-                        Blocos / Grupos de Repetição ({impConfig.groups.length})
-                      </span>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[10px] text-[#949BA8] mb-0.5">
+                          Acoplamento entre Unidades
+                        </label>
+                        <select
+                          value={impConfig.couplingMode}
+                          onChange={(e) => {
+                            const cm = e.target.value as ImplantationCouplingMode;
+                            updateImplantation((c) => ({
+                              ...c,
+                              couplingMode: cm,
+                              shareWallsWhenPossible: cm === 'geminadas',
+                            }));
+                          }}
+                          className="w-full px-2 py-1 text-xs rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                        >
+                          <option value="geminadas">Geminadas (0 m)</option>
+                          <option value="separadas">Separadas (afastamento)</option>
+                          <option value="mista">Mista (por grupos)</option>
+                          <option value="personalizada">Personalizada (livre)</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] text-[#949BA8] mb-0.5">
+                          {impConfig.couplingMode === 'separadas'
+                            ? `Afastamento (${unit})`
+                            : `Corredor (${unit})`}
+                        </label>
+                        {impConfig.couplingMode === 'separadas' ? (
+                          <input
+                            type="number"
+                            step={unit === 'cm' ? 10 : 0.1}
+                            min={unit === 'cm' ? 30 : 0.3}
+                            value={toDisplay(impConfig.interUnitSpacingM)}
+                            onChange={(e) =>
+                              updateImplantation((c) => ({
+                                ...c,
+                                interUnitSpacingM: Math.max(0.1, fromDisplay(Number(e.target.value))),
+                              }))
+                            }
+                            className="w-full px-2 py-1 text-xs font-mono rounded bg-[#14161A] border border-[#2F7CF6] text-white"
+                          />
+                        ) : (
+                          <input
+                            type="number"
+                            step={unit === 'cm' ? 10 : 0.1}
+                            min={unit === 'cm' ? 90 : 0.9}
+                            value={toDisplay(impConfig.circulation.corridorWidthM)}
+                            onChange={(e) =>
+                              updateImplantation((c) => ({
+                                ...c,
+                                circulation: {
+                                  ...c.circulation,
+                                  corridorWidthM: Math.max(0.9, fromDisplay(Number(e.target.value))),
+                                },
+                              }))
+                            }
+                            className="w-full px-2 py-1 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                          />
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
+                      <label className="inline-flex items-center gap-1.5 text-[11px] text-slate-300 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={impConfig.mirrorAlternate}
+                          onChange={(e) =>
+                            updateImplantation((c) => ({ ...c, mirrorAlternate: e.target.checked }))
+                          }
+                        />
+                        Espelhar opostas / alternadas
+                      </label>
+
+                      <label className="inline-flex items-center gap-1.5 text-[11px] text-slate-300 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={applyToAllFloors}
+                          onChange={(e) => setApplyToAllFloors(e.target.checked)}
+                        />
+                        Replicar nos {project.floors.length} pavimentos
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="flex shrink-0 items-center gap-2 pt-2 border-t border-[#2A2F38]">
+                    <button
+                      type="button"
+                      disabled={project.unitTypes.length === 0}
+                      onClick={handleApplyImplantation}
+                      className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-md bg-[#2F7CF6] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#2567d4] disabled:opacity-40"
+                    >
+                      <Wand2 className="w-3.5 h-3.5" />
+                      Gerar / Atualizar Implantação
+                    </button>
+                    {hasMixedGroups && (
                       <button
                         type="button"
-                        onClick={handleAddGroupSpec}
-                        className="inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded bg-[#22262E] border border-[#323844] text-white hover:border-[#2F7CF6]"
+                        onClick={() => setStage2SubTab('grupos')}
+                        className="px-2.5 py-1.5 text-xs rounded border border-sky-500/40 bg-sky-500/10 text-sky-200"
                       >
-                        <Plus className="w-3 h-3" /> Adicionar Grupo
+                        Grupos ({impConfig.groups.length})
                       </button>
-                    </div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setActiveStage(3)}
+                      className="inline-flex items-center gap-1 rounded-md border border-[#323844] bg-[#14161A] px-2.5 py-1.5 text-xs text-slate-200 hover:border-slate-500"
+                    >
+                      Etapa 3
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              )}
 
-                    {impConfig.groups.map((grp) => (
+              {stage2SubTab === 'grupos' && hasMixedGroups && (
+                <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-3">
+                  <div className="flex shrink-0 items-center justify-between pb-2">
+                    <span className="text-xs font-medium text-white">
+                      Blocos / Grupos de Repetição ({impConfig.groups.length})
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleAddGroupSpec}
+                      className="inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded bg-[#22262E] border border-[#323844] text-white hover:border-[#2F7CF6]"
+                    >
+                      <Plus className="w-3 h-3" /> Adicionar Grupo
+                    </button>
+                  </div>
+                  <div className="min-h-0 flex-1 space-y-2 overflow-hidden">
+                    {groupsPager.slice.map((grp) => (
                       <div
                         key={grp.id}
-                        className="rounded border border-[#2A2F38] bg-[#1B1E24] p-2 space-y-2 text-xs"
+                        className="rounded border border-[#2A2F38] bg-[#14161A] p-2 space-y-1.5 text-xs"
                       >
                         <div className="flex items-center justify-between gap-2">
                           <input
@@ -2333,7 +2616,7 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
                                 ),
                               }))
                             }
-                            className="w-28 px-1.5 py-0.5 text-xs rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                            className="w-28 px-1.5 py-0.5 text-xs rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
                           />
                           <select
                             value={grp.zone}
@@ -2350,7 +2633,7 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
                                 ),
                               }))
                             }
-                            className="px-1.5 py-0.5 text-xs rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                            className="px-1.5 py-0.5 text-xs rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
                           >
                             <option value="lado_esquerdo">Lat. Esq.</option>
                             <option value="lado_direito">Lat. Dir.</option>
@@ -2374,7 +2657,7 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
                                 ),
                               }))
                             }
-                            className="w-14 px-1.5 py-0.5 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                            className="w-14 px-1.5 py-0.5 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
                           />
                           <button
                             type="button"
@@ -2401,7 +2684,7 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
                                 ),
                               }))
                             }
-                            className="px-1.5 py-0.5 text-[11px] rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                            className="px-1.5 py-0.5 text-[11px] rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
                           >
                             {project.unitTypes.map((ut) => (
                               <option key={ut.id} value={ut.id}>
@@ -2424,7 +2707,7 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
                                 ),
                               }))
                             }
-                            className="px-1.5 py-0.5 text-[11px] rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                            className="px-1.5 py-0.5 text-[11px] rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
                           >
                             <option value="geminadas">Geminadas</option>
                             <option value="separadas">Separadas</option>
@@ -2445,366 +2728,335 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
                                 ),
                               }))
                             }
-                            className="px-1.5 py-0.5 text-[11px] font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white disabled:opacity-40"
+                            className="px-1.5 py-0.5 text-[11px] font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white disabled:opacity-40"
                           />
                         </div>
                       </div>
                     ))}
                   </div>
-                )}
-
-                <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-                  <label className="inline-flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={impConfig.mirrorAlternate}
-                      onChange={(e) =>
-                        updateImplantation((c) => ({ ...c, mirrorAlternate: e.target.checked }))
-                      }
-                    />
-                    Espelhar unidades opostas / alternadas
-                  </label>
-
-                  <label className="inline-flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={applyToAllFloors}
-                      onChange={(e) => setApplyToAllFloors(e.target.checked)}
-                    />
-                    Replicar nos {project.floors.length} pavimentos
-                  </label>
+                  <PaginationBar
+                    compact
+                    page={groupsPager.safePage}
+                    totalPages={groupsPager.totalPages}
+                    totalItems={impConfig.groups.length}
+                    startIndex={groupsPager.start}
+                    endIndex={groupsPager.end}
+                    onPageChange={setGroupsPage}
+                    itemLabel="grupos"
+                  />
                 </div>
-
-                <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-[#2A2F38]">
-                  <button
-                    type="button"
-                    disabled={project.unitTypes.length === 0}
-                    onClick={handleApplyImplantation}
-                    className="flex-1 inline-flex items-center justify-center gap-2 rounded-md bg-[#2F7CF6] px-4 py-2 text-xs font-semibold text-white hover:bg-[#2567d4] disabled:opacity-40"
-                  >
-                    <Wand2 className="w-3.5 h-3.5" />
-                    Gerar / Atualizar Implantação na Planta
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setActiveStage(3)}
-                    className="inline-flex items-center gap-1 rounded-md border border-[#323844] bg-[#14161A] px-3 py-2 text-xs text-slate-200 hover:border-slate-500"
-                  >
-                    Etapa 3
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
+              )}
             </div>
           )}
 
           {/* ==================== ETAPA 3 ==================== */}
           {activeStage === 3 && (
-            <div className="space-y-4">
-              <div className="rounded-lg border border-[#2A2F38] bg-[#1B1E24] p-4 space-y-3.5">
-                <h2 className="text-sm font-semibold text-white">
-                  3A. Recuos &amp; Afastamentos do Terreno ({unit})
-                </h2>
-
-                <div className="grid grid-cols-4 gap-2.5">
-                  <div>
-                    <label className="block text-[11px] text-[#949BA8] mb-1">
-                      Frontal ({unit})
-                    </label>
-                    <input
-                      type="number"
-                      step={unit === 'cm' ? 10 : 0.25}
-                      min={0}
-                      value={toDisplay(site.setbacks.front)}
-                      onChange={(e) =>
-                        updateSite((s) => ({
-                          ...s,
-                          setbacks: {
-                            ...s.setbacks,
-                            front: Math.max(0, fromDisplay(Number(e.target.value))),
-                          },
-                        }))
-                      }
-                      className="w-full px-2 py-1.5 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] text-[#949BA8] mb-1">
-                      Fundos ({unit})
-                    </label>
-                    <input
-                      type="number"
-                      step={unit === 'cm' ? 10 : 0.25}
-                      min={0}
-                      value={toDisplay(site.setbacks.back)}
-                      onChange={(e) =>
-                        updateSite((s) => ({
-                          ...s,
-                          setbacks: {
-                            ...s.setbacks,
-                            back: Math.max(0, fromDisplay(Number(e.target.value))),
-                          },
-                        }))
-                      }
-                      className="w-full px-2 py-1.5 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] text-[#949BA8] mb-1">
-                      Lat. Esq. ({unit})
-                    </label>
-                    <input
-                      type="number"
-                      step={unit === 'cm' ? 10 : 0.25}
-                      min={0}
-                      value={toDisplay(site.setbacks.left)}
-                      onChange={(e) =>
-                        updateSite((s) => ({
-                          ...s,
-                          setbacks: {
-                            ...s.setbacks,
-                            left: Math.max(0, fromDisplay(Number(e.target.value))),
-                          },
-                        }))
-                      }
-                      className="w-full px-2 py-1.5 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] text-[#949BA8] mb-1">
-                      Lat. Dir. ({unit})
-                    </label>
-                    <input
-                      type="number"
-                      step={unit === 'cm' ? 10 : 0.25}
-                      min={0}
-                      value={toDisplay(site.setbacks.right)}
-                      onChange={(e) =>
-                        updateSite((s) => ({
-                          ...s,
-                          setbacks: {
-                            ...s.setbacks,
-                            right: Math.max(0, fromDisplay(Number(e.target.value))),
-                          },
-                        }))
-                      }
-                      className="w-full px-2 py-1.5 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-lg border border-[#2A2F38] bg-[#1B1E24] p-4 space-y-3.5">
-                <h2 className="text-sm font-semibold text-white">
-                  3B. Circulação, Corredores &amp; Áreas Externas
-                </h2>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[11px] text-[#949BA8] mb-1">
-                      Largura do Corredor / Circulação ({unit})
-                    </label>
-                    <input
-                      type="number"
-                      step={unit === 'cm' ? 10 : 0.1}
-                      min={unit === 'cm' ? 90 : 0.9}
-                      value={toDisplay(impConfig.circulation.corridorWidthM)}
-                      onChange={(e) => {
-                        const val = Math.max(0.9, fromDisplay(Number(e.target.value)));
-                        onUpdateProject((prev) => {
-                          const base = prev.implantation ?? createDefaultImplantationConfig(prev);
-                          return {
-                            ...prev,
-                            implantation: {
-                              ...base,
-                              circulation: { ...base.circulation, corridorWidthM: val },
+            <div className="flex min-h-0 flex-1 flex-col justify-between overflow-hidden p-3 gap-2">
+              <div className="space-y-3 overflow-hidden">
+                <div className="rounded border border-[#2A2F38] bg-[#14161A] p-2.5 space-y-2">
+                  <h2 className="text-xs font-semibold text-white">
+                    3A. Recuos &amp; Afastamentos do Terreno ({unit})
+                  </h2>
+                  <div className="grid grid-cols-4 gap-2">
+                    <div>
+                      <label className="block text-[10px] text-[#949BA8] mb-0.5">
+                        Frontal ({unit})
+                      </label>
+                      <input
+                        type="number"
+                        step={unit === 'cm' ? 10 : 0.25}
+                        min={0}
+                        value={toDisplay(site.setbacks.front)}
+                        onChange={(e) =>
+                          updateSite((s) => ({
+                            ...s,
+                            setbacks: {
+                              ...s.setbacks,
+                              front: Math.max(0, fromDisplay(Number(e.target.value))),
                             },
-                            floors: prev.floors.map((f) =>
-                              f.id === activeFloor?.id ? { ...f, corridorWidth: val } : f,
-                            ),
-                          };
-                        });
-                      }}
-                      className="w-full px-2.5 py-1.5 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] text-[#949BA8] mb-1">
-                      Afastamento Mín. (apenas p/ Separadas) ({unit})
-                    </label>
-                    <input
-                      type="number"
-                      step={unit === 'cm' ? 10 : 0.1}
-                      min={0}
-                      value={toDisplay(impConfig.circulation.minInterUnitSpacingM)}
-                      onChange={(e) => {
-                        const val = Math.max(0, fromDisplay(Number(e.target.value)));
-                        updateImplantation((c) => ({
-                          ...c,
-                          interUnitSpacingM:
-                            c.couplingMode === 'separadas' ? val : c.interUnitSpacingM,
-                          circulation: { ...c.circulation, minInterUnitSpacingM: val },
-                        }));
-                      }}
-                      className="w-full px-2.5 py-1.5 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-3 gap-2.5">
-                  <div>
-                    <label className="block text-[11px] text-[#949BA8] mb-1">Tipo de Acesso</label>
-                    <select
-                      value={impConfig.circulation.accessMode}
-                      onChange={(e) =>
-                        updateImplantation((c) => ({
-                          ...c,
-                          circulation: {
-                            ...c.circulation,
-                            accessMode: e.target.value as ImplantationAccessMode,
-                          },
-                        }))
-                      }
-                      className="w-full px-2 py-1.5 text-xs rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                    >
-                      <option value="compartilhado">Compartilhado (Corredor)</option>
-                      <option value="independente">Independente (Rua)</option>
-                      <option value="misto">Misto</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-[11px] text-[#949BA8] mb-1">
-                      Área Serviço Ext. (m²)
-                    </label>
-                    <input
-                      type="number"
-                      step="0.5"
-                      min={0}
-                      value={impConfig.circulation.serviceAreaM2}
-                      onChange={(e) =>
-                        updateImplantation((c) => ({
-                          ...c,
-                          circulation: {
-                            ...c.circulation,
-                            serviceAreaM2: Math.max(0, Number(e.target.value)),
-                          },
-                        }))
-                      }
-                      className="w-full px-2 py-1.5 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] text-[#949BA8] mb-1">
-                      Área Descoberta Real (m²)
-                    </label>
-                    <div className="px-2 py-1.5 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-emerald-300">
-                      {validation.metrics.uncoveredAreaM2.toFixed(2)} m²
+                          }))
+                        }
+                        className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-[#949BA8] mb-0.5">
+                        Fundos ({unit})
+                      </label>
+                      <input
+                        type="number"
+                        step={unit === 'cm' ? 10 : 0.25}
+                        min={0}
+                        value={toDisplay(site.setbacks.back)}
+                        onChange={(e) =>
+                          updateSite((s) => ({
+                            ...s,
+                            setbacks: {
+                              ...s.setbacks,
+                              back: Math.max(0, fromDisplay(Number(e.target.value))),
+                            },
+                          }))
+                        }
+                        className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-[#949BA8] mb-0.5">
+                        Lat. Esq. ({unit})
+                      </label>
+                      <input
+                        type="number"
+                        step={unit === 'cm' ? 10 : 0.25}
+                        min={0}
+                        value={toDisplay(site.setbacks.left)}
+                        onChange={(e) =>
+                          updateSite((s) => ({
+                            ...s,
+                            setbacks: {
+                              ...s.setbacks,
+                              left: Math.max(0, fromDisplay(Number(e.target.value))),
+                            },
+                          }))
+                        }
+                        className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-[#949BA8] mb-0.5">
+                        Lat. Dir. ({unit})
+                      </label>
+                      <input
+                        type="number"
+                        step={unit === 'cm' ? 10 : 0.25}
+                        min={0}
+                        value={toDisplay(site.setbacks.right)}
+                        onChange={(e) =>
+                          updateSite((s) => ({
+                            ...s,
+                            setbacks: {
+                              ...s.setbacks,
+                              right: Math.max(0, fromDisplay(Number(e.target.value))),
+                            },
+                          }))
+                        }
+                        className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                      />
                     </div>
                   </div>
                 </div>
 
-                <div className="rounded border border-slate-700/70 bg-[#14161A] p-3 text-[11px] text-[#949BA8] leading-relaxed">
-                  {validation.municipalValidationNote}
+                <div className="rounded border border-[#2A2F38] bg-[#14161A] p-2.5 space-y-2.5">
+                  <h2 className="text-xs font-semibold text-white">
+                    3B. Circulação, Corredores &amp; Áreas Externas
+                  </h2>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[10px] text-[#949BA8] mb-0.5">
+                        Largura Corredor ({unit})
+                      </label>
+                      <input
+                        type="number"
+                        step={unit === 'cm' ? 10 : 0.1}
+                        min={unit === 'cm' ? 90 : 0.9}
+                        value={toDisplay(impConfig.circulation.corridorWidthM)}
+                        onChange={(e) => {
+                          const val = Math.max(0.9, fromDisplay(Number(e.target.value)));
+                          onUpdateProject((prev) => {
+                            const base = prev.implantation ?? createDefaultImplantationConfig(prev);
+                            return {
+                              ...prev,
+                              implantation: {
+                                ...base,
+                                circulation: { ...base.circulation, corridorWidthM: val },
+                              },
+                              floors: prev.floors.map((f) =>
+                                f.id === activeFloor?.id ? { ...f, corridorWidth: val } : f,
+                              ),
+                            };
+                          });
+                        }}
+                        className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] text-[#949BA8] mb-0.5">
+                        Afast. Mín. Separadas ({unit})
+                      </label>
+                      <input
+                        type="number"
+                        step={unit === 'cm' ? 10 : 0.1}
+                        min={0}
+                        value={toDisplay(impConfig.circulation.minInterUnitSpacingM)}
+                        onChange={(e) => {
+                          const val = Math.max(0, fromDisplay(Number(e.target.value)));
+                          updateImplantation((c) => ({
+                            ...c,
+                            interUnitSpacingM:
+                              c.couplingMode === 'separadas' ? val : c.interUnitSpacingM,
+                            circulation: { ...c.circulation, minInterUnitSpacingM: val },
+                          }));
+                        }}
+                        className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="block text-[10px] text-[#949BA8] mb-0.5">Acesso</label>
+                      <select
+                        value={impConfig.circulation.accessMode}
+                        onChange={(e) =>
+                          updateImplantation((c) => ({
+                            ...c,
+                            circulation: {
+                              ...c.circulation,
+                              accessMode: e.target.value as ImplantationAccessMode,
+                            },
+                          }))
+                        }
+                        className="w-full px-2 py-1 text-xs rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                      >
+                        <option value="compartilhado">Compartilhado</option>
+                        <option value="independente">Independente</option>
+                        <option value="misto">Misto</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-[#949BA8] mb-0.5">
+                        Serv. Ext. (m²)
+                      </label>
+                      <input
+                        type="number"
+                        step="0.5"
+                        min={0}
+                        value={impConfig.circulation.serviceAreaM2}
+                        onChange={(e) =>
+                          updateImplantation((c) => ({
+                            ...c,
+                            circulation: {
+                              ...c.circulation,
+                              serviceAreaM2: Math.max(0, Number(e.target.value)),
+                            },
+                          }))
+                        }
+                        className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-[#949BA8] mb-0.5">
+                        Área Descoberta
+                      </label>
+                      <div className="px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-emerald-300">
+                        {validation.metrics.uncoveredAreaM2.toFixed(2)} m²
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
-                <div className="flex justify-end">
-                  <button
-                    type="button"
-                    onClick={() => setActiveStage(4)}
-                    className="inline-flex items-center gap-2 rounded-md bg-[#2F7CF6] px-4 py-2 text-xs font-semibold text-white hover:bg-[#2567d4]"
-                  >
-                    Avançar para Etapa 4: Validação &amp; Edição Fina
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  </button>
+                <div className="rounded border border-slate-700/70 bg-[#14161A] p-2.5 text-[11px] text-[#949BA8] leading-snug">
+                  {validation.municipalValidationNote}
                 </div>
+              </div>
+
+              <div className="flex shrink-0 justify-end pt-2 border-t border-[#2A2F38]">
+                <button
+                  type="button"
+                  onClick={() => setActiveStage(4)}
+                  className="inline-flex items-center gap-1.5 rounded-md bg-[#2F7CF6] px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-[#2567d4]"
+                >
+                  Avançar para Etapa 4: Validação
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
               </div>
             </div>
           )}
 
           {/* ==================== ETAPA 4 ==================== */}
           {activeStage === 4 && (
-            <div className="space-y-4">
-              <div className="rounded-lg border border-[#2A2F38] bg-[#1B1E24] p-4 space-y-3">
-                <div className="flex items-center justify-between gap-2">
-                  <h2 className="text-sm font-semibold text-white">
-                    4A. Indicadores Reais da Implantação
-                  </h2>
-                  <span
-                    className={`inline-flex items-center gap-1 text-xs font-semibold ${
-                      validation.isValid ? 'text-emerald-400' : 'text-red-400'
-                    }`}
-                  >
-                    {validation.isValid ? (
-                      <>
-                        <CheckCircle2 className="w-4 h-4" /> Implantação Válida
-                      </>
-                    ) : (
-                      <>
-                        <AlertTriangle className="w-4 h-4" /> {validation.criticalCount} conflito(s)
-                      </>
-                    )}
-                  </span>
-                </div>
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-3 gap-2">
+              <div className="flex shrink-0 items-center justify-between gap-2">
+                <h2 className="text-xs font-semibold text-white">
+                  4A. Indicadores Reais da Implantação
+                </h2>
+                <span
+                  className={`inline-flex items-center gap-1 text-xs font-semibold ${
+                    validation.isValid ? 'text-emerald-400' : 'text-red-400'
+                  }`}
+                >
+                  {validation.isValid ? (
+                    <>
+                      <CheckCircle2 className="w-3.5 h-3.5" /> Implantação Válida
+                    </>
+                  ) : (
+                    <>
+                      <AlertTriangle className="w-3.5 h-3.5" /> {validation.criticalCount} conflito(s)
+                    </>
+                  )}
+                </span>
+              </div>
 
-                <div className="grid grid-cols-3 gap-2.5 text-xs font-mono tabular-nums">
-                  <div className="rounded bg-[#14161A] border border-[#2A2F38] p-2.5">
-                    <div className="text-[10px] text-[#949BA8]">Taxa Ocupação</div>
-                    <div className="text-white font-semibold mt-0.5">
-                      {validation.metrics.occupancyRatePercent}%
-                    </div>
-                  </div>
-                  <div className="rounded bg-[#14161A] border border-[#2A2F38] p-2.5">
-                    <div className="text-[10px] text-[#949BA8]">Área Implantada</div>
-                    <div className="text-white font-semibold mt-0.5">
-                      {validation.metrics.footprintAreaM2} m²
-                    </div>
-                  </div>
-                  <div className="rounded bg-[#14161A] border border-[#2A2F38] p-2.5">
-                    <div className="text-[10px] text-[#949BA8]">Paredes Geminadas</div>
-                    <div className="text-amber-300 font-semibold mt-0.5">
-                      {validation.metrics.sharedWallsCount} unid.
-                    </div>
+              <div className="grid shrink-0 grid-cols-3 gap-2 text-xs font-mono tabular-nums">
+                <div className="rounded bg-[#14161A] border border-[#2A2F38] p-2">
+                  <div className="text-[10px] text-[#949BA8]">Taxa Ocupação</div>
+                  <div className="text-white font-semibold mt-0.5">
+                    {validation.metrics.occupancyRatePercent}%
                   </div>
                 </div>
-
-                {validation.metrics.realSetbacksMeasured.front !== null && (
-                  <div className="grid grid-cols-4 gap-2 text-[11px] font-mono tabular-nums rounded bg-[#14161A] border border-[#2A2F38] p-2.5">
-                    <div>
-                      <span className="text-[#949BA8] block">Rec. Real Fr.</span>
-                      <span className="text-white">
-                        {formatLengthInUnit(validation.metrics.realSetbacksMeasured.front ?? 0, unit)}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-[#949BA8] block">Rec. Real Fd.</span>
-                      <span className="text-white">
-                        {formatLengthInUnit(validation.metrics.realSetbacksMeasured.back ?? 0, unit)}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-[#949BA8] block">Rec. Real Esq.</span>
-                      <span className="text-white">
-                        {formatLengthInUnit(validation.metrics.realSetbacksMeasured.left ?? 0, unit)}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-[#949BA8] block">Rec. Real Dir.</span>
-                      <span className="text-white">
-                        {formatLengthInUnit(validation.metrics.realSetbacksMeasured.right ?? 0, unit)}
-                      </span>
-                    </div>
+                <div className="rounded bg-[#14161A] border border-[#2A2F38] p-2">
+                  <div className="text-[10px] text-[#949BA8]">Área Implantada</div>
+                  <div className="text-white font-semibold mt-0.5">
+                    {validation.metrics.footprintAreaM2} m²
                   </div>
-                )}
+                </div>
+                <div className="rounded bg-[#14161A] border border-[#2A2F38] p-2">
+                  <div className="text-[10px] text-[#949BA8]">Paredes Geminadas</div>
+                  <div className="text-amber-300 font-semibold mt-0.5">
+                    {validation.metrics.sharedWallsCount} unid.
+                  </div>
+                </div>
+              </div>
 
-                {/* Live Validation Issues List */}
-                <div className="space-y-2 max-h-64 overflow-y-auto">
+              {validation.metrics.realSetbacksMeasured.front !== null && (
+                <div className="grid shrink-0 grid-cols-4 gap-2 text-[10.5px] font-mono tabular-nums rounded bg-[#14161A] border border-[#2A2F38] p-2">
+                  <div>
+                    <span className="text-[#949BA8] block">Rec. Fr.</span>
+                    <span className="text-white">
+                      {formatLengthInUnit(validation.metrics.realSetbacksMeasured.front ?? 0, unit)}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[#949BA8] block">Rec. Fd.</span>
+                    <span className="text-white">
+                      {formatLengthInUnit(validation.metrics.realSetbacksMeasured.back ?? 0, unit)}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[#949BA8] block">Rec. Esq.</span>
+                    <span className="text-white">
+                      {formatLengthInUnit(validation.metrics.realSetbacksMeasured.left ?? 0, unit)}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[#949BA8] block">Rec. Dir.</span>
+                    <span className="text-white">
+                      {formatLengthInUnit(validation.metrics.realSetbacksMeasured.right ?? 0, unit)}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* Live Paginated Validation Issues List */}
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                <div className="min-h-0 flex-1 space-y-1.5 overflow-hidden">
                   {validation.issues.length === 0 ? (
                     <div className="rounded border border-emerald-500/30 bg-emerald-950/20 p-3 text-xs text-emerald-200">
                       Nenhuma colisão, invasão de recuo ou bloqueio de acesso detectado neste pavimento.
                     </div>
                   ) : (
-                    validation.issues.map((issue) => (
+                    issuesPager.slice.map((issue) => (
                       <div
                         key={issue.id}
                         onClick={() => {
@@ -2812,327 +3064,185 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
                             setSelectedUnitId(issue.affectedUnitIds[0]);
                           }
                         }}
-                        className={`rounded border p-2.5 text-xs space-y-1 ${
+                        className={`rounded border p-2 text-xs space-y-0.5 ${
                           issue.severity === 'CRITICO'
                             ? 'border-red-500/40 bg-red-950/25 text-red-200'
                             : 'border-amber-500/40 bg-amber-950/25 text-amber-200'
                         } ${issue.affectedUnitIds.length > 0 ? 'cursor-pointer hover:brightness-110' : ''}`}
                       >
                         <div className="font-semibold flex items-center justify-between gap-2">
-                          <span>{issue.title}</span>
-                          <span className="font-mono text-[10px] opacity-80">{issue.severity}</span>
+                          <span className="truncate">{issue.title}</span>
+                          <span className="font-mono text-[10px] opacity-80 shrink-0">{issue.severity}</span>
                         </div>
-                        <p className="text-[11px] opacity-90">{issue.detail}</p>
+                        <p className="text-[11px] opacity-90 line-clamp-2">{issue.detail}</p>
                       </div>
                     ))
                   )}
                 </div>
-
-                {onNavigateModule && (
-                  <div className="flex flex-wrap gap-2 pt-2 border-t border-[#2A2F38]">
-                    <button
-                      type="button"
-                      onClick={() => onNavigateModule('planta2d')}
-                      className="flex-1 inline-flex items-center justify-center gap-1.5 rounded border border-[#323844] bg-[#14161A] px-3 py-2 text-xs font-medium text-white hover:border-[#2F7CF6]"
-                    >
-                      <PenTool className="w-3.5 h-3.5 text-[#2F7CF6]" />
-                      Abrir Editor CAD 2D
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onNavigateModule('bim3d')}
-                      className="flex-1 inline-flex items-center justify-center gap-1.5 rounded bg-[#2F7CF6] px-3 py-2 text-xs font-semibold text-white hover:bg-[#2567d4]"
-                    >
-                      <Box className="w-3.5 h-3.5" />
-                      Ver Modelo BIM 3D
-                    </button>
-                  </div>
+                {validation.issues.length > 0 && (
+                  <PaginationBar
+                    compact
+                    page={issuesPager.safePage}
+                    totalPages={issuesPager.totalPages}
+                    totalItems={validation.issues.length}
+                    startIndex={issuesPager.start}
+                    endIndex={issuesPager.end}
+                    onPageChange={setIssuesPage}
+                    itemLabel="alertas"
+                  />
                 )}
               </div>
-            </div>
-          )}
 
-          {/* Selected Unit Individual Inspector / Dimension Customizer */}
-          {selectedInstance && selectedInstanceType && activeFloor && (
-            <div className="rounded-lg border border-[#2F7CF6]/50 bg-[#1B1E24] p-4 space-y-3">
-              <div className="flex items-center justify-between gap-2">
-                <div>
-                  <h3 className="text-sm font-semibold text-white">
-                    Unidade Selecionada: {selectedInstance.unitNumber} ({selectedInstanceType.code})
-                  </h3>
-                  <p className="text-[11px] text-[#949BA8] font-mono">
-                    {selectedInstanceType.width}×{selectedInstanceType.depth}m ·{' '}
-                    {selectedInstance.couplingType ?? 'isolada'}
-                  </p>
+              {onNavigateModule && (
+                <div className="flex shrink-0 gap-2 pt-2 border-t border-[#2A2F38]">
+                  <button
+                    type="button"
+                    onClick={() => onNavigateModule('planta2d')}
+                    className="flex-1 inline-flex items-center justify-center gap-1.5 rounded border border-[#323844] bg-[#14161A] px-3 py-1.5 text-xs font-medium text-white hover:border-[#2F7CF6]"
+                  >
+                    <PenTool className="w-3.5 h-3.5 text-[#2F7CF6]" />
+                    Editor CAD 2D
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onNavigateModule('bim3d')}
+                    className="flex-1 inline-flex items-center justify-center gap-1.5 rounded bg-[#2F7CF6] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#2567d4]"
+                  >
+                    <Box className="w-3.5 h-3.5" />
+                    Modelo BIM 3D
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => handleCustomizeUnitDimensions(selectedInstance)}
-                  className="px-2.5 py-1 text-[11px] font-medium rounded border border-[#2F7CF6] bg-[#2F7CF6]/15 text-sky-200 hover:bg-[#2F7CF6]/30"
-                >
-                  Personalizar Medidas
-                </button>
-              </div>
-
-              {customizingUnitId === selectedInstance.id && (
-                <form
-                  onSubmit={handleSaveCustomUnitDimensions}
-                  className="rounded border border-[#2A2F38] bg-[#14161A] p-3 space-y-2.5"
-                >
-                  <div className="text-[11px] text-sky-300 font-medium">
-                    Editar dimensões e entrada da Kitnet {selectedInstance.unitNumber}
-                  </div>
-                  <div className="grid grid-cols-3 gap-2">
-                    <div>
-                      <label className="block text-[10px] text-[#949BA8]">Largura (m)</label>
-                      <NumericInput
-                        min={2.8}
-                        max={20}
-                        value={customW}
-                        onCommit={setCustomW}
-                        className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[10px] text-[#949BA8]">Profund. (m)</label>
-                      <NumericInput
-                        min={3.6}
-                        max={25}
-                        value={customD}
-                        onCommit={setCustomD}
-                        className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[10px] text-[#949BA8]">Entrada (modelo)</label>
-                      <select
-                        value={customEntry}
-                        onChange={(e) => setCustomEntry(e.target.value as EntrySide)}
-                        className="w-full px-1.5 py-1 text-xs rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
-                      >
-                        <option value="frente">Frente</option>
-                        <option value="lateral_direita">Lat. Dir.</option>
-                        <option value="lateral_esquerda">Lat. Esq.</option>
-                      </select>
-                    </div>
-                  </div>
-                  <div className="rounded bg-[#1B1E24] border border-emerald-500/30 px-2 py-1 text-[10.5px] text-emerald-300">
-                    Porta P1 no lote:{' '}
-                    <span className="font-semibold">
-                      {formatWorldEntrySideLabel(
-                        getEffectiveWorldEntrySide(
-                          customEntry,
-                          selectedInstance.rotationDeg,
-                          selectedInstance.mirrored,
-                        ),
-                      )}
-                    </span>
-                    {selectedInstance.mirrored && ' (unidade espelhada: Esq. ↔ Dir.)'}
-                  </div>
-                  {project.floors.length > 1 && (
-                    <label className="inline-flex items-center gap-1.5 text-[11px] text-slate-300 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={applyToAllFloors}
-                        onChange={(e) => setApplyToAllFloors(e.target.checked)}
-                      />
-                      Aplicar também nos {project.floors.length} pavimentos (ex.: {selectedInstance.unitNumber} e equivalentes)
-                    </label>
-                  )}
-                  <div className="flex justify-end gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setCustomizingUnitId(null)}
-                      className="px-2.5 py-1 text-[11px] rounded border border-[#323844] text-slate-300"
-                    >
-                      Cancelar
-                    </button>
-                    <button
-                      type="submit"
-                      className="px-3 py-1 text-[11px] font-semibold rounded bg-[#2F7CF6] text-white"
-                    >
-                      {applyToAllFloors && project.floors.length > 1
-                        ? 'Aplicar nos Pavimentos'
-                        : 'Aplicar nesta Kitnet'}
-                    </button>
-                  </div>
-                </form>
               )}
-            </div>
-          )}
-
-          {/* Polygon Vertices Collapsible Editor (for irregular / polygonal lots) */}
-          {(site.shapeType === 'irregular' || site.shapeType === 'poligonal') && (
-            <div className="rounded-lg border border-[#2A2F38] bg-[#1B1E24] p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <h2 className="text-sm font-semibold text-white">
-                  Vértices do Polígono ({site.vertices.length})
-                </h2>
-                <button
-                  type="button"
-                  onClick={() =>
-                    onUpdateProject((prev) => {
-                      const last =
-                        prev.site.vertices[prev.site.vertices.length - 1] ?? { x: 0, y: 0 };
-                      return {
-                        ...prev,
-                        site: {
-                          ...prev.site,
-                          shapeType: 'poligonal',
-                          vertices: [
-                            ...prev.site.vertices,
-                            { x: round2(last.x - 1), y: round2(last.y + 1) },
-                          ],
-                        },
-                      };
-                    })
-                  }
-                  className="inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded bg-[#22262E] border border-[#323844] text-white hover:border-[#2F7CF6]"
-                >
-                  <Plus className="w-3 h-3" /> Vértice
-                </button>
-              </div>
-              <div className="max-h-36 overflow-y-auto space-y-1.5">
-                {site.vertices.map((v, idx) => (
-                  <div key={idx} className="flex items-center gap-2 text-xs">
-                    <span className="font-mono text-[#949BA8] w-7">V{idx + 1}</span>
-                    <input
-                      type="number"
-                      step="0.25"
-                      value={v.x}
-                      aria-label={`Vértice ${idx + 1} X`}
-                      onChange={(e) => {
-                        const val = Number(e.target.value);
-                        onUpdateProject((prev) => ({
-                          ...prev,
-                          site: {
-                            ...prev.site,
-                            shapeType: 'poligonal',
-                            vertices: prev.site.vertices.map((pt, i) =>
-                              i === idx ? { ...pt, x: val } : pt,
-                            ),
-                          },
-                        }));
-                      }}
-                      className="w-24 px-2 py-1 font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                    />
-                    <input
-                      type="number"
-                      step="0.25"
-                      value={v.y}
-                      aria-label={`Vértice ${idx + 1} Y`}
-                      onChange={(e) => {
-                        const val = Number(e.target.value);
-                        onUpdateProject((prev) => ({
-                          ...prev,
-                          site: {
-                            ...prev.site,
-                            shapeType: 'poligonal',
-                            vertices: prev.site.vertices.map((pt, i) =>
-                              i === idx ? { ...pt, y: val } : pt,
-                            ),
-                          },
-                        }));
-                      }}
-                      className="w-24 px-2 py-1 font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                    />
-                    {site.vertices.length > 3 && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          onUpdateProject((prev) => ({
-                            ...prev,
-                            site: {
-                              ...prev.site,
-                              shapeType: 'poligonal',
-                              vertices: prev.site.vertices.filter((_, i) => i !== idx),
-                            },
-                          }))
-                        }
-                        className="p-1 text-red-400"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
             </div>
           )}
         </div>
 
-        {/* RIGHT PANE: Always-Visible Interactive Scaled Top-Down Implantation Plan + Floor Table */}
-        <div className="xl:col-span-7 space-y-4">
-          <div className="rounded-lg border border-[#2A2F38] bg-[#1B1E24] p-4 space-y-3">
-            {/* Canvas Header & View Modes */}
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-2.5">
-                <h2 className="text-sm font-semibold text-white">
-                  Planta de Implantação em Escala Real
-                </h2>
-                <span className="text-xs text-[#949BA8] inline-flex items-center gap-1">
-                  <Compass className="w-3.5 h-3.5 text-amber-400" />
-                  Norte {site.orientationDeg}°
-                </span>
-              </div>
+        {/* RIGHT PANE: Zero-Scroll Interactive Plan / Paginated Units Table / Selected Unit */}
+        <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-[#2A2F38] bg-[#1B1E24] xl:col-span-7">
+          {/* Top Bar */}
+          <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-[#2A2F38] bg-[#171A20] px-3 py-1.5">
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setRightPaneTab('planta')}
+                className={`rounded px-2.5 py-1 text-[11px] font-medium transition ${
+                  rightPaneTab === 'planta'
+                    ? 'bg-[#2F7CF6] text-white'
+                    : 'text-[#949BA8] hover:text-white'
+                }`}
+              >
+                Planta do Lote
+              </button>
+              <button
+                type="button"
+                onClick={() => setRightPaneTab('tabela')}
+                className={`rounded px-2.5 py-1 text-[11px] font-medium transition ${
+                  rightPaneTab === 'tabela'
+                    ? 'bg-[#2F7CF6] text-white'
+                    : 'text-[#949BA8] hover:text-white'
+                }`}
+              >
+                Unidades ({activeFloor?.units.length ?? 0})
+              </button>
+              {selectedInstance && selectedInstanceType && (
+                <button
+                  type="button"
+                  onClick={() => setRightPaneTab('unidade')}
+                  className={`rounded px-2.5 py-1 text-[11px] font-medium transition ${
+                    rightPaneTab === 'unidade'
+                      ? 'bg-[#2F7CF6] text-white'
+                      : 'border border-[#2F7CF6]/40 bg-[#2F7CF6]/10 text-sky-200 hover:bg-[#2F7CF6]/20'
+                  }`}
+                >
+                  Unid. {selectedInstance.unitNumber}
+                </button>
+              )}
+            </div>
 
-              <div className="flex flex-wrap items-center gap-1 rounded border border-[#2A2F38] bg-[#14161A] p-0.5 text-[11px]">
-                {(
-                  [
-                    ['geral', 'Implantação Geral', Layers],
-                    ['zonas', 'Zonas', Move],
-                    ['cotas', 'Afastamentos & Cotas', Ruler],
-                    ['detalhe', 'Acessos & Portões', DoorOpen],
-                  ] as const
-                ).map(([id, label, Icon]) => (
+            {rightPaneTab === 'planta' ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-[#949BA8]">
+                  <Compass className="w-3 h-3 text-amber-400" />
+                  {site.orientationDeg}°
+                </span>
+                <div className="flex items-center gap-0.5 rounded border border-[#2A2F38] bg-[#14161A] p-0.5 text-[10.5px]">
+                  {(
+                    [
+                      ['geral', 'Geral', Layers],
+                      ['zonas', 'Zonas', Move],
+                      ['cotas', 'Cotas', Ruler],
+                      ['detalhe', 'Acessos', DoorOpen],
+                    ] as const
+                  ).map(([id, label, Icon]) => (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => setViewMode(id)}
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded transition ${
+                        viewMode === id
+                          ? 'bg-[#2F7CF6] text-white font-medium'
+                          : 'text-[#949BA8] hover:text-white'
+                      }`}
+                    >
+                      <Icon className="w-3 h-3" />
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1">
+                {project.floors.map((fl) => (
                   <button
-                    key={id}
+                    key={fl.id}
                     type="button"
-                    onClick={() => setViewMode(id)}
-                    className={`inline-flex items-center gap-1 px-2 py-1 rounded transition ${
-                      viewMode === id
-                        ? 'bg-[#2F7CF6] text-white font-medium'
-                        : 'text-[#949BA8] hover:text-white'
+                    onClick={() => setSelectedFloorId(fl.id)}
+                    className={`px-2 py-0.5 text-[11px] font-medium rounded transition ${
+                      activeFloor?.id === fl.id
+                        ? 'bg-[#2F7CF6] text-white'
+                        : 'bg-[#14161A] border border-[#2A2F38] text-[#949BA8] hover:text-white'
                     }`}
                   >
-                    <Icon className="w-3 h-3" />
-                    {label}
+                    {fl.name} ({fl.units.length})
                   </button>
                 ))}
               </div>
-            </div>
+            )}
+          </div>
 
-            {/* Summary Metrics Strip */}
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded bg-[#14161A] border border-[#2A2F38] px-3 py-2 text-[11px] font-mono tabular-nums">
-              <span className="text-slate-300">
-                Terreno: <strong className="text-white">{siteCheck.calculatedArea} m²</strong>
-              </span>
-              <span className="text-slate-300">
-                Área Edificável: <strong className="text-white">{siteCheck.buildableBox.area} m²</strong>
-              </span>
-              <span className="text-slate-300">
-                Unidades: <strong className="text-white">{activeFloor?.units.length ?? 0}</strong>
-              </span>
-              <span className="text-slate-300">
-                Ocupação: <strong className="text-white">{validation.metrics.occupancyRatePercent}%</strong>
-              </span>
-              <span className={validation.isValid ? 'text-emerald-400 font-semibold' : 'text-red-400 font-semibold'}>
-                {validation.isValid
-                  ? 'Integridade OK'
-                  : `${validation.criticalCount} alerta(s) crítico(s)`}
-              </span>
-            </div>
+          {rightPaneTab === 'planta' && (
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+              {/* Summary Metrics Strip */}
+              <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-[#2A2F38] bg-[#14161A] px-3 py-1.5 text-[11px] font-mono tabular-nums">
+                <span className="text-slate-300">
+                  Terreno: <strong className="text-white">{siteCheck.calculatedArea} m²</strong>
+                </span>
+                <span className="text-slate-300">
+                  Edificável: <strong className="text-white">{siteCheck.buildableBox.area} m²</strong>
+                </span>
+                <span className="text-slate-300">
+                  Unid.: <strong className="text-white">{activeFloor?.units.length ?? 0}</strong>
+                </span>
+                <span className="text-slate-300">
+                  Ocup.: <strong className="text-white">{validation.metrics.occupancyRatePercent}%</strong>
+                </span>
+                <span className={validation.isValid ? 'text-emerald-400 font-semibold' : 'text-red-400 font-semibold'}>
+                  {validation.isValid
+                    ? 'Integridade OK'
+                    : `${validation.criticalCount} alerta(s)`}
+                </span>
+              </div>
 
-            {/* Interactive SVG Plan */}
-            <div className="bg-[#0F1217] border border-[#2A2F38] rounded overflow-hidden">
-              <svg
-                ref={svgRef}
-                viewBox={`${minX} ${minY} ${viewW} ${viewH}`}
-                className="w-full h-[460px] select-none cursor-crosshair"
-                onPointerMove={handleSvgPointerMove}
-                onPointerUp={stopDragging}
-                onPointerLeave={stopDragging}
-              >
+              {/* Interactive SVG Plan */}
+              <div className="min-h-0 flex-1 bg-[#0F1217] overflow-hidden">
+                <svg
+                  ref={svgRef}
+                  viewBox={`${minX} ${minY} ${viewW} ${viewH}`}
+                  className="h-full w-full select-none cursor-crosshair"
+                  onPointerMove={handleSvgPointerMove}
+                  onPointerUp={stopDragging}
+                  onPointerLeave={stopDragging}
+                >
                 <defs>
                   <pattern id="siteGridImp" width="1" height="1" patternUnits="userSpaceOnUse">
                     <path d="M 1 0 L 0 0 0 1" fill="none" stroke="#1C212A" strokeWidth="0.04" />
@@ -3497,316 +3607,461 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
                     N
                   </text>
                 </g>
-              </svg>
-            </div>
+                </svg>
+              </div>
 
-            <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-[#949BA8]">
-              <span>
-                Arraste qualquer kitnet para ajustar a posição (snap 0,10 m) ou os vértices azuis para lotes irregulares.
-              </span>
-              <span className="font-mono text-amber-300">
-                Linha âmbar GEM = parede compartilhada sem conflito de sobreposição
-              </span>
-            </div>
-          </div>
-
-          {/* Floor Selector & Per-Unit Numerical Fine-Tuning Table */}
-          <div className="rounded-lg border border-[#2A2F38] bg-[#1B1E24] p-4 space-y-3.5">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-1.5 flex-wrap">
-                {project.floors.map((fl) => (
-                  <button
-                    key={fl.id}
-                    type="button"
-                    onClick={() => setSelectedFloorId(fl.id)}
-                    className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
-                      activeFloor?.id === fl.id
-                        ? 'bg-[#2F7CF6] text-white'
-                        : 'bg-[#14161A] border border-[#2A2F38] text-[#949BA8] hover:text-white'
-                    }`}
-                  >
-                    {fl.name} ({fl.units.length})
-                  </button>
-                ))}
-                <button
-                  type="button"
-                  onClick={handleAddFloor}
-                  className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs rounded border border-[#323844] text-[#C4C9D4] hover:text-white hover:border-[#2F7CF6]"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  Andar
-                </button>
-                {project.floors.length > 1 && (
-                  <>
+              <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-[#2A2F38] bg-[#171A20] px-3 py-1.5 text-[10.5px] text-[#949BA8]">
+                <span>
+                  Arraste qualquer unidade (snap 0,10 m) ou vértices azuis. Selecione para personalizar.
+                </span>
+                <div className="flex items-center gap-3">
+                  {selectedInstance && (
                     <button
                       type="button"
-                      onClick={() => handleSetFloorCount(project.floors.length - 1)}
-                      title="Remover último pavimento"
-                      className="inline-flex items-center gap-1 px-2 py-1.5 text-xs rounded border border-[#323844] text-red-300 hover:border-red-500/60"
+                      onClick={() => handleCustomizeUnitDimensions(selectedInstance)}
+                      className="rounded border border-[#2F7CF6] bg-[#2F7CF6]/15 px-2 py-0.5 text-[10.5px] font-medium text-sky-200 hover:bg-[#2F7CF6]/30"
                     >
-                      <Minus className="w-3.5 h-3.5" />
-                      Andar
+                      Editar {selectedInstance.unitNumber}
                     </button>
-                    {(project.floors[0]?.units.length ?? 0) > 0 && (
+                  )}
+                  <span className="font-mono text-amber-300">
+                    GEM = parede geminada
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {rightPaneTab === 'tabela' && (
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+              <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-[#2A2F38] bg-[#14161A] px-3 py-2">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={handleAddFloor}
+                    className="inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded border border-[#323844] text-[#C4C9D4] hover:text-white hover:border-[#2F7CF6]"
+                  >
+                    <Plus className="w-3 h-3" />
+                    Andar
+                  </button>
+                  {project.floors.length > 1 && (
+                    <>
                       <button
                         type="button"
-                        onClick={handleReplicateGroundToUpper}
-                        className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs rounded border border-emerald-500/40 bg-emerald-600/15 text-emerald-200 hover:bg-emerald-600/30"
+                        onClick={() => handleSetFloorCount(project.floors.length - 1)}
+                        title="Remover último pavimento"
+                        className="inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded border border-[#323844] text-red-300 hover:border-red-500/60"
                       >
-                        <Copy className="w-3 h-3" />
-                        Replicar Térreo nos {project.floors.length - 1} andares
+                        <Minus className="w-3 h-3" />
+                        Andar
                       </button>
-                    )}
-                  </>
-                )}
+                      {(project.floors[0]?.units.length ?? 0) > 0 && (
+                        <button
+                          type="button"
+                          onClick={handleReplicateGroundToUpper}
+                          className="inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded border border-emerald-500/40 bg-emerald-600/15 text-emerald-200 hover:bg-emerald-600/30"
+                        >
+                          <Copy className="w-3 h-3" />
+                          Replicar Térreo
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {project.unitTypes.slice(0, 4).map((ut) => (
+                    <button
+                      key={ut.id}
+                      type="button"
+                      onClick={() => handleAddUnitManual(ut.id)}
+                      className="inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded bg-[#1B1E24] border border-[#323844] text-white hover:border-[#2F7CF6]"
+                    >
+                      <Plus className="w-3 h-3 text-[#2F7CF6]" />
+                      +{ut.code}
+                    </button>
+                  ))}
+                  {project.floors.length > 1 && (
+                    <label className="inline-flex items-center gap-1 text-[10.5px] text-sky-200 cursor-pointer ml-1">
+                      <input
+                        type="checkbox"
+                        checked={applyToAllFloors}
+                        onChange={(e) => setApplyToAllFloors(e.target.checked)}
+                      />
+                      Sincronizar {project.floors.length} pav.
+                    </label>
+                  )}
+                </div>
               </div>
 
-              <div className="flex flex-wrap items-center gap-1.5">
-                {project.unitTypes.map((ut) => (
-                  <button
-                    key={ut.id}
-                    type="button"
-                    onClick={() => handleAddUnitManual(ut.id)}
-                    className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded bg-[#14161A] border border-[#323844] text-white hover:border-[#2F7CF6]"
-                  >
-                    <Plus className="w-3 h-3 text-[#2F7CF6]" />
-                    +{ut.code}
-                  </button>
-                ))}
-              </div>
-              {project.floors.length > 1 && (
-                <label className="inline-flex items-center gap-1.5 text-[11px] text-sky-200 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={applyToAllFloors}
-                    onChange={(e) => setApplyToAllFloors(e.target.checked)}
-                  />
-                  Sincronizar edições da tabela nos {project.floors.length} andares
-                </label>
-              )}
-            </div>
-
-            {activeFloor && (
-              <div className="max-h-64 overflow-y-auto border border-[#2A2F38] rounded">
-                <table className="w-full text-left text-xs border-collapse">
-                  <thead className="bg-[#181B20] text-[11px] text-[#949BA8]">
-                    <tr>
-                      <th className="py-2 px-2.5">Unid.</th>
-                      <th className="py-2 px-2.5">Modelo</th>
-                      <th className="py-2 px-2.5">Entrada (P1)</th>
-                      <th className="py-2 px-2.5">X (m)</th>
-                      <th className="py-2 px-2.5">Y (m)</th>
-                      <th className="py-2 px-2.5">Rot.</th>
-                      <th className="py-2 px-2.5">Esp.</th>
-                      <th className="py-2 px-2.5 text-right">Ações</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[#252A33]">
-                    {activeFloor.units.length === 0 ? (
-                      <tr>
-                        <td colSpan={8} className="py-6 text-center text-[#949BA8]">
-                          Nenhuma unidade implantada neste pavimento. Configure a Etapa 2 à esquerda e clique em &quot;Gerar / Atualizar Implantação&quot; ou insira manualmente acima.
-                        </td>
-                      </tr>
-                    ) : (
-                      activeFloor.units.map((inst) => {
-                        const isSel = selectedUnitId === inst.id;
-                        const utInst = project.unitTypes.find((t) => t.id === inst.unitTypeId);
-                        const currEntry: EntrySide = utInst?.entrySide ?? 'frente';
-                        const worldSideLabel = formatWorldEntrySideLabel(
-                          getEffectiveWorldEntrySide(currEntry, inst.rotationDeg, inst.mirrored),
-                        );
-                        return (
-                          <tr
-                            key={inst.id}
-                            onClick={() => setSelectedUnitId(inst.id)}
-                            className={isSel ? 'bg-[#2F7CF6]/15' : 'hover:bg-[#22262E]/40'}
-                          >
-                            <td className="py-1.5 px-2.5 font-mono font-semibold text-white">
-                              {inst.unitNumber}
-                            </td>
-                            <td className="py-1.5 px-2.5">
-                              <select
-                                value={inst.unitTypeId}
-                                onChange={(e) => {
-                                  const nextUtId = e.target.value;
-                                  onUpdateProject(
-                                    (prev) =>
-                                      updateFloorUnitInProject(
-                                        prev,
-                                        activeFloor.id,
-                                        inst.id,
-                                        { unitTypeId: nextUtId },
-                                        applyToAllFloors,
-                                      ),
-                                    `Troca de tipologia da unidade ${inst.unitNumber}`,
-                                  );
-                                }}
-                                className="px-1.5 py-0.5 text-xs rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                              >
-                                {project.unitTypes.map((t) => (
-                                  <option key={t.id} value={t.id}>
-                                    {t.code} ({t.width}×{t.depth})
-                                  </option>
-                                ))}
-                              </select>
-                            </td>
-                            <td className="py-1.5 px-2.5">
-                              <select
-                                value={currEntry}
-                                title={`Porta P1 no lote: ${worldSideLabel}`}
-                                onChange={(e) => {
-                                  const nextEntry = e.target.value as EntrySide;
-                                  onUpdateProject(
-                                    (prev) => {
-                                      const res = customizeUnitTypeForSlot(
-                                        prev,
-                                        activeFloor.id,
-                                        inst.id,
-                                        { entrySide: nextEntry },
-                                        applyToAllFloors,
-                                      );
-                                      return res ? res.project : prev;
-                                    },
-                                    `Entrada da unidade ${inst.unitNumber} alterada para ${nextEntry}`,
-                                  );
-                                }}
-                                className="px-1.5 py-0.5 text-xs rounded bg-[#14161A] border border-[#2A2F38] text-emerald-300"
-                              >
-                                <option value="frente">Frente</option>
-                                <option value="lateral_direita">Lat. Dir.</option>
-                                <option value="lateral_esquerda">Lat. Esq.</option>
-                              </select>
-                            </td>
-                            <td className="py-1.5 px-2.5">
-                              <input
-                                type="number"
-                                step="0.1"
-                                value={inst.x}
-                                onChange={(e) => {
-                                  const val = Number(e.target.value);
-                                  onUpdateProject((prev) =>
-                                    updateFloorUnitInProject(
-                                      prev,
-                                      activeFloor.id,
-                                      inst.id,
-                                      { x: val },
-                                      applyToAllFloors,
-                                    ),
-                                  );
-                                }}
-                                className="w-16 px-1.5 py-0.5 font-mono bg-[#14161A] border border-[#2A2F38] rounded text-white"
-                              />
-                            </td>
-                            <td className="py-1.5 px-2.5">
-                              <input
-                                type="number"
-                                step="0.1"
-                                value={inst.y}
-                                onChange={(e) => {
-                                  const val = Number(e.target.value);
-                                  onUpdateProject((prev) =>
-                                    updateFloorUnitInProject(
-                                      prev,
-                                      activeFloor.id,
-                                      inst.id,
-                                      { y: val },
-                                      applyToAllFloors,
-                                    ),
-                                  );
-                                }}
-                                className="w-16 px-1.5 py-0.5 font-mono bg-[#14161A] border border-[#2A2F38] rounded text-white"
-                              />
-                            </td>
-                            <td className="py-1.5 px-2.5">
-                              <select
-                                value={inst.rotationDeg}
-                                onChange={(e) => {
-                                  const nextRot = Number(e.target.value);
-                                  onUpdateProject(
-                                    (prev) =>
-                                      updateFloorUnitInProject(
-                                        prev,
-                                        activeFloor.id,
-                                        inst.id,
-                                        { rotationDeg: nextRot },
-                                        applyToAllFloors,
-                                      ),
-                                    `Rotação da unidade ${inst.unitNumber} para ${nextRot}°`,
-                                  );
-                                }}
-                                className="px-1 py-0.5 font-mono bg-[#14161A] border border-[#2A2F38] rounded text-white"
-                              >
-                                <option value={0}>0°</option>
-                                <option value={90}>90°</option>
-                                <option value={180}>180°</option>
-                                <option value={270}>270°</option>
-                              </select>
-                            </td>
-                            <td className="py-1.5 px-2.5">
-                              <input
-                                type="checkbox"
-                                checked={inst.mirrored}
-                                onChange={(e) => {
-                                  const val = e.target.checked;
-                                  onUpdateProject(
-                                    (prev) =>
-                                      updateFloorUnitInProject(
-                                        prev,
-                                        activeFloor.id,
-                                        inst.id,
-                                        { mirrored: val },
-                                        applyToAllFloors,
-                                      ),
-                                    `Espelhamento da unidade ${inst.unitNumber}`,
-                                  );
-                                }}
-                              />
-                            </td>
-                            <td className="py-1.5 px-2.5 text-right space-x-1 whitespace-nowrap">
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setSelectedUnitId(inst.id);
-                                  handleCustomizeUnitDimensions(inst);
-                                }}
-                                title="Personalizar dimensões e entrada desta unidade"
-                                className="px-1.5 py-0.5 text-[10px] rounded border border-[#323844] text-sky-300 hover:border-[#2F7CF6]"
-                              >
-                                Editar
-                              </button>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  onUpdateProject((prev) => ({
-                                    ...prev,
-                                    floors: prev.floors.map((f) =>
-                                      f.id === activeFloor.id
-                                        ? {
-                                            ...f,
-                                            units: f.units.filter((u) => u.id !== inst.id),
-                                          }
-                                        : f,
-                                    ),
-                                  }));
-                                }}
-                                aria-label={`Remover unidade ${inst.unitNumber}`}
-                                className="p-1 text-red-400 hover:text-red-300"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
+              {activeFloor && (
+                <>
+                  <div className="min-h-0 flex-1 overflow-hidden">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead className="bg-[#181B20] text-[11px] text-[#949BA8] border-b border-[#2A2F38]">
+                        <tr>
+                          <th className="py-1.5 px-2.5">Unid.</th>
+                          <th className="py-1.5 px-2.5">Modelo</th>
+                          <th className="py-1.5 px-2.5">Entrada (P1)</th>
+                          <th className="py-1.5 px-2">X (m)</th>
+                          <th className="py-1.5 px-2">Y (m)</th>
+                          <th className="py-1.5 px-2">Rot.</th>
+                          <th className="py-1.5 px-2">Esp.</th>
+                          <th className="py-1.5 px-2.5 text-right">Ações</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#252A33]">
+                        {activeFloor.units.length === 0 ? (
+                          <tr>
+                            <td colSpan={8} className="py-8 text-center text-[#949BA8]">
+                              Nenhuma unidade implantada neste pavimento. Configure a Etapa 2 à esquerda ou insira manualmente acima.
                             </td>
                           </tr>
-                        );
-                      })
+                        ) : (
+                          floorUnitsPager.slice.map((inst) => {
+                            const isSel = selectedUnitId === inst.id;
+                            const utInst = project.unitTypes.find((t) => t.id === inst.unitTypeId);
+                            const currEntry: EntrySide = utInst?.entrySide ?? 'frente';
+                            const worldSideLabel = formatWorldEntrySideLabel(
+                              getEffectiveWorldEntrySide(currEntry, inst.rotationDeg, inst.mirrored),
+                            );
+                            return (
+                              <tr
+                                key={inst.id}
+                                onClick={() => setSelectedUnitId(inst.id)}
+                                className={isSel ? 'bg-[#2F7CF6]/15' : 'hover:bg-[#22262E]/40'}
+                              >
+                                <td className="py-1 px-2.5 font-mono font-semibold text-white">
+                                  {inst.unitNumber}
+                                </td>
+                                <td className="py-1 px-2.5">
+                                  <select
+                                    value={inst.unitTypeId}
+                                    onChange={(e) => {
+                                      const nextUtId = e.target.value;
+                                      onUpdateProject(
+                                        (prev) =>
+                                          updateFloorUnitInProject(
+                                            prev,
+                                            activeFloor.id,
+                                            inst.id,
+                                            { unitTypeId: nextUtId },
+                                            applyToAllFloors,
+                                          ),
+                                        `Troca de tipologia da unidade ${inst.unitNumber}`,
+                                      );
+                                    }}
+                                    className="px-1.5 py-0.5 text-xs rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                                  >
+                                    {project.unitTypes.map((t) => (
+                                      <option key={t.id} value={t.id}>
+                                        {t.code} ({t.width}×{t.depth})
+                                      </option>
+                                    ))}
+                                  </select>
+                                </td>
+                                <td className="py-1 px-2.5">
+                                  <select
+                                    value={currEntry}
+                                    title={`Porta P1 no lote: ${worldSideLabel}`}
+                                    onChange={(e) => {
+                                      const nextEntry = e.target.value as EntrySide;
+                                      onUpdateProject(
+                                        (prev) => {
+                                          const res = customizeUnitTypeForSlot(
+                                            prev,
+                                            activeFloor.id,
+                                            inst.id,
+                                            { entrySide: nextEntry },
+                                            applyToAllFloors,
+                                          );
+                                          return res ? res.project : prev;
+                                        },
+                                        `Entrada da unidade ${inst.unitNumber} alterada para ${nextEntry}`,
+                                      );
+                                    }}
+                                    className="px-1.5 py-0.5 text-xs rounded bg-[#14161A] border border-[#2A2F38] text-emerald-300"
+                                  >
+                                    <option value="frente">Frente</option>
+                                    <option value="lateral_direita">Lat. Dir.</option>
+                                    <option value="lateral_esquerda">Lat. Esq.</option>
+                                  </select>
+                                </td>
+                                <td className="py-1 px-2">
+                                  <input
+                                    type="number"
+                                    step="0.1"
+                                    value={inst.x}
+                                    onChange={(e) => {
+                                      const val = Number(e.target.value);
+                                      onUpdateProject((prev) =>
+                                        updateFloorUnitInProject(
+                                          prev,
+                                          activeFloor.id,
+                                          inst.id,
+                                          { x: val },
+                                          applyToAllFloors,
+                                        ),
+                                      );
+                                    }}
+                                    className="w-14 px-1 py-0.5 font-mono bg-[#14161A] border border-[#2A2F38] rounded text-white"
+                                  />
+                                </td>
+                                <td className="py-1 px-2">
+                                  <input
+                                    type="number"
+                                    step="0.1"
+                                    value={inst.y}
+                                    onChange={(e) => {
+                                      const val = Number(e.target.value);
+                                      onUpdateProject((prev) =>
+                                        updateFloorUnitInProject(
+                                          prev,
+                                          activeFloor.id,
+                                          inst.id,
+                                          { y: val },
+                                          applyToAllFloors,
+                                        ),
+                                      );
+                                    }}
+                                    className="w-14 px-1 py-0.5 font-mono bg-[#14161A] border border-[#2A2F38] rounded text-white"
+                                  />
+                                </td>
+                                <td className="py-1 px-2">
+                                  <select
+                                    value={inst.rotationDeg}
+                                    onChange={(e) => {
+                                      const nextRot = Number(e.target.value);
+                                      onUpdateProject(
+                                        (prev) =>
+                                          updateFloorUnitInProject(
+                                            prev,
+                                            activeFloor.id,
+                                            inst.id,
+                                            { rotationDeg: nextRot },
+                                            applyToAllFloors,
+                                          ),
+                                        `Rotação da unidade ${inst.unitNumber} para ${nextRot}°`,
+                                      );
+                                    }}
+                                    className="px-1 py-0.5 font-mono bg-[#14161A] border border-[#2A2F38] rounded text-white"
+                                  >
+                                    <option value={0}>0°</option>
+                                    <option value={90}>90°</option>
+                                    <option value={180}>180°</option>
+                                    <option value={270}>270°</option>
+                                  </select>
+                                </td>
+                                <td className="py-1 px-2">
+                                  <input
+                                    type="checkbox"
+                                    checked={inst.mirrored}
+                                    onChange={(e) => {
+                                      const val = e.target.checked;
+                                      onUpdateProject(
+                                        (prev) =>
+                                          updateFloorUnitInProject(
+                                            prev,
+                                            activeFloor.id,
+                                            inst.id,
+                                            { mirrored: val },
+                                            applyToAllFloors,
+                                          ),
+                                        `Espelhamento da unidade ${inst.unitNumber}`,
+                                      );
+                                    }}
+                                  />
+                                </td>
+                                <td className="py-1 px-2.5 text-right space-x-1 whitespace-nowrap">
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setSelectedUnitId(inst.id);
+                                      handleCustomizeUnitDimensions(inst);
+                                    }}
+                                    title="Personalizar dimensões e entrada desta unidade"
+                                    className="px-1.5 py-0.5 text-[10px] rounded border border-[#323844] text-sky-300 hover:border-[#2F7CF6]"
+                                  >
+                                    Editar
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      onUpdateProject((prev) => ({
+                                        ...prev,
+                                        floors: prev.floors.map((f) =>
+                                          f.id === activeFloor.id
+                                            ? {
+                                                ...f,
+                                                units: f.units.filter((u) => u.id !== inst.id),
+                                              }
+                                            : f,
+                                        ),
+                                      }));
+                                    }}
+                                    aria-label={`Remover unidade ${inst.unitNumber}`}
+                                    className="p-1 text-red-400 hover:text-red-300"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                  <PaginationBar
+                    page={floorUnitsPager.safePage}
+                    totalPages={floorUnitsPager.totalPages}
+                    totalItems={activeFloor.units.length}
+                    startIndex={floorUnitsPager.start}
+                    endIndex={floorUnitsPager.end}
+                    onPageChange={setFloorUnitsPage}
+                    itemLabel="unidades"
+                  />
+                </>
+              )}
+            </div>
+          )}
+
+          {rightPaneTab === 'unidade' && (
+            <div className="flex min-h-0 flex-1 flex-col justify-between overflow-hidden p-4">
+              {selectedInstance && selectedInstanceType && activeFloor ? (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between gap-2 border-b border-[#2A2F38] pb-3">
+                    <div>
+                      <h3 className="text-sm font-semibold text-white">
+                        Unidade Selecionada: {selectedInstance.unitNumber} ({selectedInstanceType.code})
+                      </h3>
+                      <p className="text-[11px] text-[#949BA8] font-mono">
+                        {selectedInstanceType.width}×{selectedInstanceType.depth}m ·{' '}
+                        {selectedInstance.couplingType ?? 'isolada'} · Posição ({selectedInstance.x}m, {selectedInstance.y}m)
+                      </p>
+                    </div>
+                    {customizingUnitId !== selectedInstance.id && (
+                      <button
+                        type="button"
+                        onClick={() => handleCustomizeUnitDimensions(selectedInstance)}
+                        className="px-3 py-1.5 text-xs font-medium rounded border border-[#2F7CF6] bg-[#2F7CF6]/15 text-sky-200 hover:bg-[#2F7CF6]/30"
+                      >
+                        Personalizar Medidas
+                      </button>
                     )}
-                  </tbody>
-                </table>
+                  </div>
+
+                  {customizingUnitId === selectedInstance.id ? (
+                    <form
+                      onSubmit={handleSaveCustomUnitDimensions}
+                      className="rounded border border-[#2A2F38] bg-[#14161A] p-3.5 space-y-3"
+                    >
+                      <div className="text-xs text-sky-300 font-medium">
+                        Editar dimensões e entrada da unidade {selectedInstance.unitNumber}
+                      </div>
+                      <div className="grid grid-cols-3 gap-3">
+                        <div>
+                          <label className="block text-[10px] text-[#949BA8] mb-0.5">Largura (m)</label>
+                          <NumericInput
+                            min={2.8}
+                            max={20}
+                            value={customW}
+                            onCommit={setCustomW}
+                            className="w-full px-2 py-1.5 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] text-[#949BA8] mb-0.5">Profund. (m)</label>
+                          <NumericInput
+                            min={3.6}
+                            max={25}
+                            value={customD}
+                            onCommit={setCustomD}
+                            className="w-full px-2 py-1.5 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] text-[#949BA8] mb-0.5">Entrada (modelo)</label>
+                          <select
+                            value={customEntry}
+                            onChange={(e) => setCustomEntry(e.target.value as EntrySide)}
+                            className="w-full px-2 py-1.5 text-xs rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+                          >
+                            <option value="frente">Frente</option>
+                            <option value="lateral_direita">Lat. Dir.</option>
+                            <option value="lateral_esquerda">Lat. Esq.</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div className="rounded bg-[#1B1E24] border border-emerald-500/30 px-2.5 py-1.5 text-[11px] text-emerald-300">
+                        Porta P1 no lote:{' '}
+                        <span className="font-semibold">
+                          {formatWorldEntrySideLabel(
+                            getEffectiveWorldEntrySide(
+                              customEntry,
+                              selectedInstance.rotationDeg,
+                              selectedInstance.mirrored,
+                            ),
+                          )}
+                        </span>
+                        {selectedInstance.mirrored && ' (unidade espelhada: Esq. ↔ Dir.)'}
+                      </div>
+                      {project.floors.length > 1 && (
+                        <label className="inline-flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={applyToAllFloors}
+                            onChange={(e) => setApplyToAllFloors(e.target.checked)}
+                          />
+                          Aplicar também nos {project.floors.length} pavimentos (ex.: {selectedInstance.unitNumber} e equivalentes)
+                        </label>
+                      )}
+                      <div className="flex justify-end gap-2 pt-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCustomizingUnitId(null);
+                            setRightPaneTab('planta');
+                          }}
+                          className="px-3 py-1.5 text-xs rounded border border-[#323844] text-slate-300"
+                        >
+                          Voltar à Planta
+                        </button>
+                        <button
+                          type="submit"
+                          className="px-3.5 py-1.5 text-xs font-semibold rounded bg-[#2F7CF6] text-white"
+                        >
+                          {applyToAllFloors && project.floors.length > 1
+                            ? 'Aplicar nos Pavimentos'
+                            : 'Aplicar nesta Unidade'}
+                        </button>
+                      </div>
+                    </form>
+                  ) : (
+                    <div className="rounded border border-[#2A2F38] bg-[#14161A] p-3 text-xs text-[#949BA8]">
+                      Clique em &quot;Personalizar Medidas&quot; acima para criar ou ajustar dimensões exclusivas para esta unidade, ou volte para a Planta/Tabela.
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="rounded border border-[#2A2F38] bg-[#14161A] p-4 text-xs text-[#949BA8]">
+                  Nenhuma unidade selecionada. Selecione uma unidade na planta ou na tabela.
+                </div>
+              )}
+
+              <div className="flex justify-end pt-3 border-t border-[#2A2F38]">
+                <button
+                  type="button"
+                  onClick={() => setRightPaneTab('planta')}
+                  className="px-3 py-1.5 text-xs rounded border border-[#323844] text-slate-200 hover:border-[#2F7CF6]"
+                >
+                  Voltar para Planta do Lote
+                </button>
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

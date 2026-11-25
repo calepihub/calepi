@@ -8,12 +8,22 @@
     --font-mono: 'JetBrains Mono', ui-monospace, monospace;
   }
 
+  html,
+  body,
+  #root {
+    height: 100dvh;
+    width: 100vw;
+    overflow: hidden;
+    margin: 0;
+    padding: 0;
+  }
+
   body {
     font-family: var(--font-sans);
     background-color: #14161A;
     color: #E6E9EF;
-    font-size: 14px;
-    line-height: 1.5;
+    font-size: 13px;
+    line-height: 1.4;
   }
 
   h1, h2, h3, h4, .font-display {
@@ -23,20 +33,4 @@
   .font-mono, .tabular-nums {
     font-variant-numeric: tabular-nums;
   }
-}
-
-/* Custom thin scrollbars for technical CAD panels */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-::-webkit-scrollbar-track {
-  background: #14161A;
-}
-::-webkit-scrollbar-thumb {
-  background: #2D323B;
-  border-radius: 3px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: #3F4654;
 }

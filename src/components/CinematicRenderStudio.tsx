@@ -22,6 +22,7 @@ import {
   Trees,
   Waves,
 } from 'lucide-react';
+import { PaginationBar, paginateItems } from './PaginationBar';
 import {
   buildBotanicalPlant3D,
   buildGourmetArea3D,
@@ -274,6 +275,10 @@ export const CinematicRenderStudio: React.FC<CinematicRenderStudioProps> = ({
   const [notice, setNotice] = useState<string | null>(null);
   const [showAllSpecies, setShowAllSpecies] = useState<boolean>(false);
   const [botanicalPortraits, setBotanicalPortraits] = useState<Record<string, string>>({});
+  const [botanicalPage, setBotanicalPage] = useState<number>(0);
+  const [botanicalPerPage, setBotanicalPerPage] = useState<number>(() =>
+    typeof window !== 'undefined' && window.innerHeight >= 960 ? 8 : 4,
+  );
 
   const mountRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -306,6 +311,14 @@ export const CinematicRenderStudio: React.FC<CinematicRenderStudioProps> = ({
     () => LIGHTING_PRESETS.find((p) => p.id === lightingId) ?? LIGHTING_PRESETS[2],
     [lightingId],
   );
+
+  useEffect(() => {
+    const onResize = () => {
+      setBotanicalPerPage(window.innerHeight >= 960 ? 8 : 4);
+    };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
   // Keyboard H shortcut to toggle HUD cleanly for unobstructed cinematic framing
   useEffect(() => {
@@ -1677,78 +1690,101 @@ export const CinematicRenderStudio: React.FC<CinematicRenderStudioProps> = ({
           </div>
         </div>
       ) : (
-        /* Real Botanical Specimen Plates Gallery */
-        <div className="flex-1 overflow-y-auto p-6">
-          <div className="mx-auto max-w-[1440px] space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-800 bg-[#171A20] p-4">
-              <div>
-                <h2 className="flex items-center gap-2 text-base font-semibold text-white">
-                  <Leaf className="h-4 w-4 text-emerald-400" />
-                  Pranchas Botânicas Realistas — Espécies do Empreendimento
-                </h2>
-                <p className="mt-0.5 text-xs text-slate-400">
-                  Visualização 3D isolada em estúdio de cada árvore, palmeira e espécie frutífera exatamente como modelada no projeto, acompanhada de nome científico, porte adulto e recomendações de recuo radicular.
-                </p>
-              </div>
-              <label className="inline-flex items-center gap-2 rounded border border-slate-700 bg-[#14161A] px-3 py-1.5 text-xs text-slate-200 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={showAllSpecies || plantedSpeciesCounts.size === 0}
-                  onChange={(e) => setShowAllSpecies(e.target.checked)}
-                />
-                Exibir todas as 17 espécies do catálogo
-              </label>
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {botanicalPlateSpecies.map((sp) => {
-                const qty = plantedSpeciesCounts.get(sp.id) ?? 0;
-                const portrait = botanicalPortraits[sp.id];
-                return (
-                  <div
-                    key={sp.id}
-                    className="flex flex-col overflow-hidden rounded-lg border border-slate-800 bg-[#171A20]"
-                  >
-                    <div className="relative aspect-square bg-[#F3F1EB]">
-                      {portrait ? (
-                        <img
-                          src={portrait}
-                          alt={`${sp.commonName} (${sp.scientificName})`}
-                          className="h-full w-full object-contain"
-                        />
-                      ) : (
-                        <div className="flex h-full items-center justify-center text-xs text-slate-500">
-                          Renderizando modelo 3D...
-                        </div>
-                      )}
-                      <span className="absolute left-2.5 top-2.5 rounded bg-slate-900/85 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-300">
-                        {sp.categoryLabel}
-                      </span>
-                      {qty > 0 && (
-                        <span className="absolute right-2.5 top-2.5 rounded bg-emerald-600 px-2 py-0.5 font-mono text-[10.5px] font-bold text-white">
-                          {qty} un. no lote
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex-1 space-y-1.5 p-3.5 text-xs">
-                      <div className="font-semibold text-white">{sp.commonName}</div>
-                      <div className="italic text-[11px] text-emerald-400">{sp.scientificName}</div>
-                      <p className="text-[11px] text-slate-300 leading-relaxed">{sp.description}</p>
-                      <div className="border-t border-slate-800 pt-2 text-[10.5px] text-slate-400 space-y-0.5">
-                        <div>
-                          Porte adulto: <strong className="text-slate-200">{sp.matureHeightM}m alt.</strong> · Copa{' '}
-                          <strong className="text-slate-200">{sp.canopyDiameterM}m</strong>
-                        </div>
-                        <div>Exposição: {sp.sunExposure}</div>
-                        <div className="text-amber-300/90">{sp.rootNote}</div>
-                      </div>
-                    </div>
+        /* Real Botanical Specimen Plates Gallery (Zero-Scroll Studio Grid) */
+        (() => {
+          const pagedPlates = paginateItems(botanicalPlateSpecies, botanicalPage, botanicalPerPage);
+          const twoRows = botanicalPerPage > 4;
+          return (
+            <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden p-3">
+              <div className="mx-auto flex min-h-0 w-full max-w-[1520px] flex-1 flex-col gap-2.5">
+                <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-800 bg-[#171A20] px-3.5 py-2">
+                  <div>
+                    <h2 className="flex items-center gap-2 text-sm font-semibold text-white">
+                      <Leaf className="h-4 w-4 text-emerald-400" />
+                      Pranchas Botânicas Realistas — Espécies do Empreendimento ({botanicalPlateSpecies.length})
+                    </h2>
+                    <p className="text-[11px] text-slate-400">
+                      Estúdio 3D isolado por espécie, porte adulto, exposição solar e recuo radicular.
+                    </p>
                   </div>
-                );
-              })}
+                  <label className="inline-flex items-center gap-2 rounded border border-slate-700 bg-[#14161A] px-2.5 py-1 text-xs text-slate-200 cursor-pointer whitespace-nowrap shrink-0">
+                    <input
+                      type="checkbox"
+                      checked={showAllSpecies || plantedSpeciesCounts.size === 0}
+                      onChange={(e) => {
+                        setShowAllSpecies(e.target.checked);
+                        setBotanicalPage(0);
+                      }}
+                    />
+                    Exibir todas as 17 espécies
+                  </label>
+                </div>
+
+                <div
+                  className={`grid min-h-0 flex-1 grid-cols-2 lg:grid-cols-4 gap-2.5 overflow-hidden ${
+                    twoRows ? 'grid-rows-2' : 'grid-rows-1'
+                  }`}
+                >
+                  {pagedPlates.slice.map((sp) => {
+                    const qty = plantedSpeciesCounts.get(sp.id) ?? 0;
+                    const portrait = botanicalPortraits[sp.id];
+                    return (
+                      <div
+                        key={sp.id}
+                        className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-slate-800 bg-[#171A20]"
+                      >
+                        <div className="relative min-h-0 flex-1 bg-[#F3F1EB]">
+                          {portrait ? (
+                            <img
+                              src={portrait}
+                              alt={`${sp.commonName} (${sp.scientificName})`}
+                              className="h-full w-full object-contain"
+                            />
+                          ) : (
+                            <div className="flex h-full items-center justify-center text-xs text-slate-500">
+                              Renderizando modelo 3D...
+                            </div>
+                          )}
+                          <span className="absolute left-2 top-2 rounded bg-slate-900/85 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-300">
+                            {sp.categoryLabel}
+                          </span>
+                          {qty > 0 && (
+                            <span className="absolute right-2 top-2 rounded bg-emerald-600 px-1.5 py-0.5 font-mono text-[10px] font-bold text-white tabular-nums">
+                              {qty} un.
+                            </span>
+                          )}
+                        </div>
+                        <div className="shrink-0 space-y-1 p-2.5 text-[11px]">
+                          <div className="flex items-baseline justify-between gap-2">
+                            <span className="truncate font-semibold text-white">{sp.commonName}</span>
+                            <span className="shrink-0 font-mono text-[10px] text-slate-300 tabular-nums">
+                              {sp.matureHeightM}m × Ø{sp.canopyDiameterM}m
+                            </span>
+                          </div>
+                          <div className="truncate italic text-[10.5px] text-emerald-400">{sp.scientificName}</div>
+                          <p className="line-clamp-2 text-[10.5px] text-slate-300 leading-snug">{sp.description}</p>
+                          <div className="truncate border-t border-slate-800 pt-1 text-[10px] text-amber-300/90">
+                            {sp.sunExposure} · {sp.rootNote}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <PaginationBar
+                  page={pagedPlates.safePage}
+                  totalPages={pagedPlates.totalPages}
+                  totalItems={botanicalPlateSpecies.length}
+                  startIndex={pagedPlates.start}
+                  endIndex={pagedPlates.end}
+                  itemLabel="espécies"
+                  onPageChange={setBotanicalPage}
+                />
+              </div>
             </div>
-          </div>
-        </div>
+          );
+        })()
       )}
     </div>
   );

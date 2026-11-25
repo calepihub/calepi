@@ -15,6 +15,7 @@ import { analyzeSiteGeometry, round2 } from '../engine/geometry';
 import { generateProjectJSON, triggerBrowserDownload } from '../engine/exporters';
 import { sanitizeImportedProject } from '../engine/storage';
 import type { ConstructionMethodId, Project, ProjectStatus } from '../types/project';
+import { PaginationBar, paginateItems, useViewportPageSize } from './PaginationBar';
 
 interface ProjectHubProps {
   projects: Project[];
@@ -55,17 +56,18 @@ export const ProjectHub: React.FC<ProjectHubProps> = ({
   const [filterTab, setFilterTab] = useState<'todos' | ProjectStatus>('todos');
   const [searchQuery, setSearchQuery] = useState('');
   const [showNewModal, setShowNewModal] = useState(false);
+  const [page, setPage] = useState(0);
 
   React.useEffect(() => {
     if (openNewModalSignal && openNewModalSignal > 0) {
       setShowNewModal(true);
     }
   }, [openNewModalSignal]);
+
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // New project form state
   const [newName, setNewName] = useState('');
   const [newClient, setNewClient] = useState('');
   const [newMunicipality, setNewMunicipality] = useState('');
@@ -90,6 +92,9 @@ export const ProjectHub: React.FC<ProjectHubProps> = ({
     );
   });
 
+  const rowsPerPage = useViewportPageSize(340, 48, 3, 12);
+  const paged = paginateItems(filtered, page, rowsPerPage);
+
   const getProjectStats = (p: Project) => {
     const unitsCount = p.floors.reduce((s, fl) => s + fl.units.length, 0);
     const builtArea = p.floors.reduce((s, fl) => {
@@ -110,7 +115,7 @@ export const ProjectHub: React.FC<ProjectHubProps> = ({
       return;
     }
     if (newFront < 4 || newDepth < 6) {
-      setFormError('Dimensões mínimas do terreno para implantação: 4,0 m de frente × 6,0 m de profundidade.');
+      setFormError('Dimensões mínimas do terreno: 4,0 m de frente × 6,0 m de profundidade.');
       return;
     }
     setFormError(null);
@@ -155,19 +160,19 @@ export const ProjectHub: React.FC<ProjectHubProps> = ({
   const activeStats = activeProject ? getProjectStats(activeProject) : null;
 
   return (
-    <div className="p-6 max-w-[1400px] mx-auto space-y-6">
+    <div className="mx-auto flex h-full w-full max-w-[1440px] flex-col gap-3 overflow-hidden p-4">
       {/* Header Row */}
-      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 dark:border-[#2A2F38] pb-5">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-[#2A2F38] pb-3">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-900 dark:text-[#F1F4F9] tracking-tight">
+          <h1 className="text-lg font-semibold tracking-tight text-[#F1F4F9]">
             Central de Empreendimentos
           </h1>
-          <p className="text-sm text-slate-600 dark:text-[#949BA8] mt-1">
-            Gerenciamento de projetos BIM, terrenos, tipologias e revisões sincronizados na sua conta.
+          <p className="text-xs text-[#949BA8]">
+            Projetos BIM, terrenos, tipologias e revisões sincronizados na nuvem Firebase.
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5">
+        <div className="flex items-center gap-2">
           <input
             ref={fileInputRef}
             type="file"
@@ -178,70 +183,53 @@ export const ProjectHub: React.FC<ProjectHubProps> = ({
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-medium rounded-md border border-slate-300 dark:border-[#323844] bg-white dark:bg-[#1E222A] text-slate-800 dark:text-[#E6E9EF] hover:bg-slate-50 dark:hover:bg-[#262B35] transition-colors whitespace-nowrap shrink-0"
+            className="inline-flex items-center gap-1.5 rounded-md border border-[#323844] bg-[#1E222A] px-3 py-1.5 text-xs font-medium text-[#E6E9EF] hover:bg-[#262B35] whitespace-nowrap shrink-0"
           >
-            <Upload className="w-3.5 h-3.5" />
-            Importar Backup JSON
+            <Upload className="h-3.5 w-3.5" />
+            Importar JSON
           </button>
           <button
             type="button"
             onClick={() => setShowNewModal(true)}
-            className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-md bg-[#1D5B6E] dark:bg-[#2F7CF6] text-white hover:bg-[#164857] dark:hover:bg-[#2569D6] transition-colors whitespace-nowrap shrink-0"
+            className="inline-flex items-center gap-1.5 rounded-md bg-[#2F7CF6] px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-[#2569D6] whitespace-nowrap shrink-0"
           >
-            <Plus className="w-4 h-4" />
+            <Plus className="h-3.5 w-3.5" />
             Novo Empreendimento
           </button>
         </div>
       </div>
 
       {importError && (
-        <div className="p-3 rounded-md border border-red-300 dark:border-red-500/40 bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-200 text-xs">
+        <div className="shrink-0 rounded-md border border-red-500/40 bg-red-950/30 p-2.5 text-xs text-red-200">
           {importError}
         </div>
       )}
 
-      {/* Active Project Quick Access Banner */}
+      {/* Compact Active Project Bar */}
       {activeProject && activeStats && (
-        <div className="rounded-lg border border-slate-200 dark:border-[#2A2F38] bg-white dark:bg-[#1B1E24] p-5">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-[#949BA8] font-mono">
-                <span>EMPREENDIMENTO ATIVO</span>
-                <span aria-hidden="true">·</span>
-                <span>{activeProject.code}</span>
-                <span aria-hidden="true">·</span>
-                <span>{activeProject.revisions[activeProject.revisions.length - 1]?.revisionCode ?? 'R00'}</span>
-              </div>
-              <h2 className="text-lg font-semibold text-slate-900 dark:text-white mt-1">
-                {activeProject.name}
-              </h2>
-              <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600 dark:text-[#949BA8] mt-1.5 tabular-nums">
-                <span>Terreno: {activeStats.siteArea} m²</span>
-                <span aria-hidden="true">·</span>
-                <span>{activeProject.floors.length} pavimento(s)</span>
-                <span aria-hidden="true">·</span>
-                <span>{activeStats.unitsCount} unidade(s)</span>
-                <span aria-hidden="true">·</span>
-                <span>Área construída: {activeStats.builtArea} m²</span>
-                <span aria-hidden="true">·</span>
-                <span>Sistema: {activeProject.constructionMethod.name}</span>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => onNavigateModule('kitnets')}
-              className="px-3.5 py-1.5 text-xs font-medium rounded bg-[#1D5B6E] dark:bg-[#2F7CF6] text-white hover:bg-[#164857] dark:hover:bg-[#2569D6] transition-colors whitespace-nowrap shrink-0"
-            >
-              Abrir no Estúdio
-            </button>
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 rounded-lg border border-[#2A2F38] bg-[#1B1E24] px-4 py-2.5">
+          <div className="flex flex-wrap items-center gap-3 min-w-0">
+            <span className="font-mono text-[11px] text-sky-400">ATIVO · {activeProject.code}</span>
+            <span className="truncate text-sm font-semibold text-white">{activeProject.name}</span>
+            <span className="hidden text-xs text-[#949BA8] tabular-nums md:inline">
+              {activeStats.siteArea} m² lote · {activeProject.floors.length} pav. ·{' '}
+              {activeStats.unitsCount} un. · {activeStats.builtArea} m² constr. ·{' '}
+              {activeProject.constructionMethod.name}
+            </span>
           </div>
+          <button
+            type="button"
+            onClick={() => onNavigateModule('planta2d')}
+            className="rounded bg-[#2F7CF6] px-3 py-1 text-xs font-medium text-white hover:bg-[#2569D6] whitespace-nowrap shrink-0"
+          >
+            Abrir no Estúdio
+          </button>
         </div>
       )}
 
       {/* Filter & Search Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-1 p-1 rounded-md bg-slate-100 dark:bg-[#1B1E24] border border-slate-200 dark:border-[#2A2F38]">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-1 rounded-md border border-[#2A2F38] bg-[#1B1E24] p-0.5">
           {(
             [
               { id: 'todos', label: `Todos (${projects.length})` },
@@ -253,11 +241,14 @@ export const ProjectHub: React.FC<ProjectHubProps> = ({
             <button
               key={t.id}
               type="button"
-              onClick={() => setFilterTab(t.id)}
-              className={`px-3 py-1.5 text-xs font-medium rounded transition-colors whitespace-nowrap shrink-0 ${
+              onClick={() => {
+                setFilterTab(t.id);
+                setPage(0);
+              }}
+              className={`rounded px-2.5 py-1 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
                 filterTab === t.id
-                  ? 'bg-[#1D5B6E] dark:bg-[#2F7CF6] text-white'
-                  : 'text-slate-600 dark:text-[#949BA8] hover:text-slate-900 dark:hover:text-white'
+                  ? 'bg-[#2F7CF6] text-white'
+                  : 'text-[#949BA8] hover:text-white'
               }`}
             >
               {t.label}
@@ -265,251 +256,248 @@ export const ProjectHub: React.FC<ProjectHubProps> = ({
           ))}
         </div>
 
-        <div className="relative w-full sm:w-72">
-          <Search className="w-3.5 h-3.5 text-slate-400 dark:text-[#949BA8] absolute left-3 top-1/2 -translate-y-1/2" />
+        <div className="relative w-64">
+          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[#949BA8]" />
           <input
             type="text"
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Buscar por nome, código ou cidade..."
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              setPage(0);
+            }}
+            placeholder="Buscar nome, código ou cidade..."
             aria-label="Buscar empreendimento"
-            className="w-full pl-9 pr-3 py-1.5 text-xs rounded-md bg-white dark:bg-[#1B1E24] border border-slate-300 dark:border-[#2A2F38] text-slate-900 dark:text-[#E6E9EF] placeholder-slate-400 dark:placeholder-[#6B7280] focus:outline-none focus:border-[#1D5B6E] dark:focus:border-[#2F7CF6]"
+            className="w-full rounded-md border border-[#2A2F38] bg-[#1B1E24] py-1 pl-8 pr-3 text-xs text-[#E6E9EF] placeholder-[#6B7280] focus:border-[#2F7CF6] focus:outline-none"
           />
         </div>
       </div>
 
-      {/* Projects Table */}
-      <div className="rounded-lg border border-slate-200 dark:border-[#2A2F38] bg-white dark:bg-[#1B1E24] overflow-x-auto">
+      {/* Paginated Fixed-Table Viewport */}
+      <div className="flex min-h-0 flex-1 flex-col justify-between overflow-hidden rounded-lg border border-[#2A2F38] bg-[#1B1E24]">
         {filtered.length === 0 ? (
-          <div className="p-10 text-center space-y-3">
-            <Building2 className="w-8 h-8 text-slate-400 dark:text-[#6B7280] mx-auto" />
-            <p className="text-sm text-slate-800 dark:text-[#E6E9EF] font-medium">
+          <div className="flex flex-1 flex-col items-center justify-center p-6 text-center space-y-2">
+            <Building2 className="h-7 w-7 text-[#6B7280]" />
+            <p className="text-sm font-medium text-[#E6E9EF]">
               Nenhum empreendimento encontrado neste filtro.
             </p>
-            <p className="text-xs text-slate-500 dark:text-[#949BA8]">
-              Clique em &quot;Novo Empreendimento&quot; para iniciar um projeto do zero ou importe um backup JSON.
+            <p className="text-xs text-[#949BA8]">
+              Clique em &quot;Novo Empreendimento&quot; ou importe um backup JSON.
             </p>
           </div>
         ) : (
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="border-b border-slate-200 dark:border-[#2A2F38] text-[11px] font-medium text-slate-500 dark:text-[#949BA8] bg-slate-50 dark:bg-[#181B20]">
-                <th className="py-3 px-4">Código / Empreendimento</th>
-                <th className="py-3 px-4">Localização</th>
-                <th className="py-3 px-4 text-right">Unidades</th>
-                <th className="py-3 px-4 text-right">Área Construída</th>
-                <th className="py-3 px-4">Situação / Etapa</th>
-                <th className="py-3 px-4">Última Alteração</th>
-                <th className="py-3 px-4 text-right">Ações</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-200 dark:divide-[#252A33] text-xs">
-              {filtered.map((p) => {
-                const st = getProjectStats(p);
-                const isSelected = p.id === activeProjectId;
-                return (
-                  <tr
-                    key={p.id}
-                    className={`hover:bg-slate-50 dark:hover:bg-[#22262E]/70 transition-colors ${
-                      isSelected ? 'bg-[#1D5B6E]/5 dark:bg-[#2F7CF6]/10' : ''
-                    }`}
-                  >
-                    <td className="py-3 px-4">
-                      <div className="font-medium text-slate-900 dark:text-[#F1F4F9] flex items-center gap-2">
-                        <span>{p.name}</span>
-                        {isSelected && (
-                          <span className="text-[11px] font-mono text-[#1D5B6E] dark:text-[#2F7CF6]">
-                            [Ativo]
+          <div className="min-h-0 flex-1 overflow-hidden">
+            <table className="w-full table-fixed border-collapse text-left">
+              <thead>
+                <tr className="border-b border-[#2A2F38] bg-[#181B20] text-[11px] font-medium text-[#949BA8]">
+                  <th className="w-[27%] px-3 py-2">Código / Empreendimento</th>
+                  <th className="w-[15%] px-3 py-2">Localização</th>
+                  <th className="w-[11%] px-3 py-2 text-right">Unidades</th>
+                  <th className="w-[12%] px-3 py-2 text-right">Área Constr.</th>
+                  <th className="w-[13%] px-3 py-2">Situação</th>
+                  <th className="w-[11%] px-3 py-2">Atualizado</th>
+                  <th className="w-[190px] px-3 py-2 text-right">Ações</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#252A33] text-xs">
+                {paged.slice.map((p) => {
+                  const st = getProjectStats(p);
+                  const isSelected = p.id === activeProjectId;
+                  return (
+                    <tr
+                      key={p.id}
+                      className={`hover:bg-[#22262E]/70 transition-colors ${
+                        isSelected ? 'bg-[#2F7CF6]/10' : ''
+                      }`}
+                    >
+                      <td className="px-3 py-2">
+                        <div className="flex items-center gap-1.5 font-medium text-[#F1F4F9]">
+                          <span className="truncate" title={p.name}>
+                            {p.name}
                           </span>
-                        )}
-                      </div>
-                      <div className="text-[11px] text-slate-500 dark:text-[#949BA8] font-mono mt-0.5">
-                        {p.code} · {p.client}
-                      </div>
-                    </td>
-                    <td className="py-3 px-4 text-slate-700 dark:text-[#C4C9D4]">
-                      {p.municipality} / {p.state}
-                    </td>
-                    <td className="py-3 px-4 text-right font-mono tabular-nums text-slate-800 dark:text-[#E6E9EF]">
-                      {st.unitsCount} ({p.unitTypes.length} tip.)
-                    </td>
-                    <td className="py-3 px-4 text-right font-mono tabular-nums text-slate-800 dark:text-[#E6E9EF]">
-                      {st.builtArea.toFixed(2)} m²
-                    </td>
-                    <td className="py-3 px-4 text-slate-700 dark:text-[#C4C9D4]">
-                      <div>
+                          {isSelected && (
+                            <span className="shrink-0 font-mono text-[10px] text-[#2F7CF6]">
+                              [Ativo]
+                            </span>
+                          )}
+                        </div>
+                        <div className="truncate font-mono text-[10px] text-[#949BA8]">
+                          {p.code} · {p.client || '—'}
+                        </div>
+                      </td>
+                      <td className="truncate px-3 py-2 text-[#C4C9D4]" title={`${p.municipality}/${p.state}`}>
+                        {p.municipality || '—'} {p.state ? `/ ${p.state}` : ''}
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono tabular-nums text-[#E6E9EF]">
+                        {st.unitsCount} ({p.unitTypes.length})
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono tabular-nums text-[#E6E9EF]">
+                        {st.builtArea.toFixed(1)} m²
+                      </td>
+                      <td className="truncate px-3 py-2 text-[#C4C9D4]">
                         {p.status === 'em_andamento'
                           ? 'Em andamento'
                           : p.status === 'concluido'
                             ? 'Concluído'
                             : 'Arquivado'}
-                      </div>
-                      <div className="text-[11px] text-slate-500 dark:text-[#949BA8]">
-                        {p.stage.replace(/_/g, ' ')}
-                      </div>
-                    </td>
-                    <td className="py-3 px-4 font-mono tabular-nums text-slate-500 dark:text-[#949BA8]">
-                      {new Date(p.updatedAt).toLocaleString('pt-BR')}
-                    </td>
-                    <td className="py-3 px-4 text-right">
-                      <div className="inline-flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            onOpenProject(p.id);
-                            onNavigateModule('kitnets');
-                          }}
-                          title={`Abrir "${p.name}"`}
-                          aria-label={`Abrir ${p.name}`}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-[#1D5B6E] dark:bg-[#2F7CF6] text-white hover:bg-[#164857] dark:hover:bg-[#2569D6] transition-colors whitespace-nowrap"
-                        >
-                          <FolderOpen className="w-3.5 h-3.5" />
-                          Abrir
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => onDuplicateProject(p.id)}
-                          title={`Duplicar "${p.name}"`}
-                          aria-label={`Duplicar ${p.name}`}
-                          className="p-1.5 rounded border border-slate-300 dark:border-[#323844] text-slate-600 dark:text-[#C4C9D4] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#2A2F38]"
-                        >
-                          <Copy className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            triggerBrowserDownload(
-                              generateProjectJSON(p),
-                              `${p.code}_backup.json`,
-                              'application/json',
-                            )
-                          }
-                          title={`Exportar backup JSON de "${p.name}"`}
-                          aria-label={`Exportar backup de ${p.name}`}
-                          className="p-1.5 rounded border border-slate-300 dark:border-[#323844] text-slate-600 dark:text-[#C4C9D4] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#2A2F38]"
-                        >
-                          <Download className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            onToggleArchiveProject(
-                              p.id,
-                              p.status === 'arquivado' ? 'em_andamento' : 'arquivado',
-                            )
-                          }
-                          title={p.status === 'arquivado' ? 'Recuperar projeto' : 'Arquivar projeto'}
-                          aria-label={
-                            p.status === 'arquivado'
-                              ? `Recuperar ${p.name}`
-                              : `Arquivar ${p.name}`
-                          }
-                          className="p-1.5 rounded border border-slate-300 dark:border-[#323844] text-slate-600 dark:text-[#C4C9D4] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#2A2F38]"
-                        >
-                          {p.status === 'arquivado' ? (
-                            <Layers className="w-3.5 h-3.5" />
-                          ) : (
-                            <Archive className="w-3.5 h-3.5" />
-                          )}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setConfirmDeleteId(p.id)}
-                          title={`Excluir "${p.name}"`}
-                          aria-label={`Excluir ${p.name}`}
-                          className="p-1.5 rounded border border-slate-300 dark:border-[#323844] text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/50"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                      </td>
+                      <td className="truncate px-3 py-2 font-mono text-[11px] tabular-nums text-[#949BA8]">
+                        {new Date(p.updatedAt).toLocaleDateString('pt-BR')}
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        <div className="inline-flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onOpenProject(p.id);
+                              onNavigateModule('planta2d');
+                            }}
+                            title={`Abrir "${p.name}"`}
+                            className="inline-flex items-center gap-1 rounded bg-[#2F7CF6] px-2 py-1 text-[11px] font-medium text-white hover:bg-[#2569D6] whitespace-nowrap"
+                          >
+                            <FolderOpen className="h-3 w-3" />
+                            Abrir
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onDuplicateProject(p.id)}
+                            title={`Duplicar "${p.name}"`}
+                            className="rounded border border-[#323844] p-1 text-[#C4C9D4] hover:bg-[#2A2F38] hover:text-white"
+                          >
+                            <Copy className="h-3 w-3" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              triggerBrowserDownload(
+                                generateProjectJSON(p),
+                                `${p.code}_backup.json`,
+                                'application/json',
+                              )
+                            }
+                            title={`Exportar backup JSON de "${p.name}"`}
+                            className="rounded border border-[#323844] p-1 text-[#C4C9D4] hover:bg-[#2A2F38] hover:text-white"
+                          >
+                            <Download className="h-3 w-3" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onToggleArchiveProject(
+                                p.id,
+                                p.status === 'arquivado' ? 'em_andamento' : 'arquivado',
+                              )
+                            }
+                            title={p.status === 'arquivado' ? 'Recuperar' : 'Arquivar'}
+                            className="rounded border border-[#323844] p-1 text-[#C4C9D4] hover:bg-[#2A2F38] hover:text-white"
+                          >
+                            {p.status === 'arquivado' ? (
+                              <Layers className="h-3 w-3" />
+                            ) : (
+                              <Archive className="h-3 w-3" />
+                            )}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteId(p.id)}
+                            title={`Excluir "${p.name}"`}
+                            className="rounded border border-[#323844] p-1 text-red-400 hover:bg-red-950/50"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
+
+        <PaginationBar
+          page={paged.safePage}
+          totalPages={paged.totalPages}
+          totalItems={filtered.length}
+          startIndex={paged.start}
+          endIndex={paged.end}
+          onPageChange={setPage}
+          itemLabel="empreendimentos"
+        />
       </div>
 
       {/* New Project Modal */}
       {showNewModal && (
         <div
-          className="fixed inset-0 z-50 bg-slate-900/50 dark:bg-black/70 flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="new-proj-title"
         >
-          <div className="w-full max-w-lg rounded-lg border border-slate-200 dark:border-[#323844] bg-white dark:bg-[#1B1E24] p-6 space-y-4">
-            <h3 id="new-proj-title" className="text-lg font-semibold text-slate-900 dark:text-white">
+          <div className="w-full max-w-lg rounded-lg border border-[#323844] bg-[#1B1E24] p-5 space-y-3">
+            <h3 id="new-proj-title" className="text-base font-semibold text-white">
               Criar Novo Empreendimento
             </h3>
 
             {formError && (
-              <div className="p-2.5 rounded border border-red-300 dark:border-red-500/40 bg-red-50 dark:bg-red-950/30 text-xs text-red-700 dark:text-red-200">
+              <div className="rounded border border-red-500/40 bg-red-950/30 p-2 text-xs text-red-200">
                 {formError}
               </div>
             )}
 
-            <form onSubmit={handleCreateSubmit} className="space-y-3.5">
+            <form onSubmit={handleCreateSubmit} className="space-y-2.5">
               <div>
-                <label className="block text-xs text-slate-600 dark:text-[#949BA8] mb-1">
-                  Nome do Empreendimento *
-                </label>
+                <label className="mb-1 block text-[11px] text-[#949BA8]">Nome do Empreendimento *</label>
                 <input
                   type="text"
                   required
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
                   placeholder="Ex.: Residencial Vila Nova — 8 Kitnets"
-                  className="w-full px-3 py-2 text-xs rounded bg-slate-50 dark:bg-[#14161A] border border-slate-300 dark:border-[#2A2F38] text-slate-900 dark:text-white focus:border-[#1D5B6E] dark:focus:border-[#2F7CF6] focus:outline-none"
+                  className="w-full rounded border border-[#2A2F38] bg-[#14161A] px-2.5 py-1.5 text-xs text-white focus:border-[#2F7CF6] focus:outline-none"
                 />
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="sm:col-span-2">
-                  <label className="block text-xs text-slate-600 dark:text-[#949BA8] mb-1">
-                    Contratante / Proprietário
-                  </label>
+              <div className="grid grid-cols-3 gap-2.5">
+                <div className="col-span-2">
+                  <label className="mb-1 block text-[11px] text-[#949BA8]">Contratante</label>
                   <input
                     type="text"
                     value={newClient}
                     onChange={(e) => setNewClient(e.target.value)}
                     placeholder="Nome do cliente"
-                    className="w-full px-3 py-2 text-xs rounded bg-slate-50 dark:bg-[#14161A] border border-slate-300 dark:border-[#2A2F38] text-slate-900 dark:text-white focus:border-[#1D5B6E] dark:focus:border-[#2F7CF6] focus:outline-none"
+                    className="w-full rounded border border-[#2A2F38] bg-[#14161A] px-2.5 py-1.5 text-xs text-white focus:border-[#2F7CF6] focus:outline-none"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-slate-600 dark:text-[#949BA8] mb-1">UF</label>
+                  <label className="mb-1 block text-[11px] text-[#949BA8]">UF</label>
                   <input
                     type="text"
                     maxLength={2}
-                    placeholder="Ex: RJ"
+                    placeholder="RJ"
                     value={newState}
                     onChange={(e) => setNewState(e.target.value.toUpperCase())}
-                    className="w-full px-3 py-2 text-xs rounded bg-slate-50 dark:bg-[#14161A] border border-slate-300 dark:border-[#2A2F38] text-slate-900 dark:text-white uppercase focus:border-[#1D5B6E] dark:focus:border-[#2F7CF6] focus:outline-none"
+                    className="w-full rounded border border-[#2A2F38] bg-[#14161A] px-2.5 py-1.5 text-xs uppercase text-white focus:border-[#2F7CF6] focus:outline-none"
                   />
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 gap-2.5">
                 <div>
-                  <label className="block text-xs text-slate-600 dark:text-[#949BA8] mb-1">Município</label>
+                  <label className="mb-1 block text-[11px] text-[#949BA8]">Município</label>
                   <input
                     type="text"
                     value={newMunicipality}
                     onChange={(e) => setNewMunicipality(e.target.value)}
                     placeholder="Ex.: Campinas"
-                    className="w-full px-3 py-2 text-xs rounded bg-slate-50 dark:bg-[#14161A] border border-slate-300 dark:border-[#2A2F38] text-slate-900 dark:text-white focus:border-[#1D5B6E] dark:focus:border-[#2F7CF6] focus:outline-none"
+                    className="w-full rounded border border-[#2A2F38] bg-[#14161A] px-2.5 py-1.5 text-xs text-white focus:border-[#2F7CF6] focus:outline-none"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-slate-600 dark:text-[#949BA8] mb-1">
-                    Método Construtivo
-                  </label>
+                  <label className="mb-1 block text-[11px] text-[#949BA8]">Sistema Construtivo</label>
                   <select
                     value={newMethod}
                     onChange={(e) => setNewMethod(e.target.value as ConstructionMethodId)}
-                    className="w-full px-3 py-2 text-xs rounded bg-slate-50 dark:bg-[#14161A] border border-slate-300 dark:border-[#2A2F38] text-slate-900 dark:text-white focus:border-[#1D5B6E] dark:focus:border-[#2F7CF6] focus:outline-none"
+                    className="w-full rounded border border-[#2A2F38] bg-[#14161A] px-2.5 py-1.5 text-xs text-white focus:border-[#2F7CF6] focus:outline-none"
                   >
                     <option value="alvenaria_convencional">Alvenaria Convencional</option>
                     <option value="alvenaria_estrutural">Alvenaria Estrutural</option>
@@ -521,70 +509,64 @@ export const ProjectHub: React.FC<ProjectHubProps> = ({
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-3 gap-2.5">
                 <div>
-                  <label className="block text-xs text-slate-600 dark:text-[#949BA8] mb-1">Frente (m)</label>
+                  <label className="mb-1 block text-[11px] text-[#949BA8]">Frente (m)</label>
                   <input
                     type="number"
                     step="0.5"
                     min={4}
                     value={newFront}
                     onChange={(e) => setNewFront(Number(e.target.value))}
-                    className="w-full px-3 py-2 text-xs font-mono rounded bg-slate-50 dark:bg-[#14161A] border border-slate-300 dark:border-[#2A2F38] text-slate-900 dark:text-white focus:border-[#1D5B6E] dark:focus:border-[#2F7CF6] focus:outline-none"
+                    className="w-full rounded border border-[#2A2F38] bg-[#14161A] px-2.5 py-1.5 font-mono text-xs text-white"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-slate-600 dark:text-[#949BA8] mb-1">
-                    Profundidade (m)
-                  </label>
+                  <label className="mb-1 block text-[11px] text-[#949BA8]">Profundidade (m)</label>
                   <input
                     type="number"
                     step="0.5"
                     min={6}
                     value={newDepth}
                     onChange={(e) => setNewDepth(Number(e.target.value))}
-                    className="w-full px-3 py-2 text-xs font-mono rounded bg-slate-50 dark:bg-[#14161A] border border-slate-300 dark:border-[#2A2F38] text-slate-900 dark:text-white focus:border-[#1D5B6E] dark:focus:border-[#2F7CF6] focus:outline-none"
+                    className="w-full rounded border border-[#2A2F38] bg-[#14161A] px-2.5 py-1.5 font-mono text-xs text-white"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-slate-600 dark:text-[#949BA8] mb-1">Pavimentos</label>
+                  <label className="mb-1 block text-[11px] text-[#949BA8]">Pavimentos</label>
                   <input
                     type="number"
                     min={1}
                     max={20}
                     value={newFloors}
                     onChange={(e) => setNewFloors(Number(e.target.value))}
-                    className="w-full px-3 py-2 text-xs font-mono rounded bg-slate-50 dark:bg-[#14161A] border border-slate-300 dark:border-[#2A2F38] text-slate-900 dark:text-white focus:border-[#1D5B6E] dark:focus:border-[#2F7CF6] focus:outline-none"
+                    className="w-full rounded border border-[#2A2F38] bg-[#14161A] px-2.5 py-1.5 font-mono text-xs text-white"
                   />
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 gap-2.5">
                 <div>
-                  <label className="block text-xs text-slate-600 dark:text-[#949BA8] mb-1">
-                    Unidade de Medida
-                  </label>
+                  <label className="mb-1 block text-[11px] text-[#949BA8]">Unidade</label>
                   <select
                     value={newUnit}
                     onChange={(e) => setNewUnit(e.target.value as 'm' | 'cm')}
-                    className="w-full px-3 py-2 text-xs rounded bg-slate-50 dark:bg-[#14161A] border border-slate-300 dark:border-[#2A2F38] text-slate-900 dark:text-white focus:border-[#1D5B6E] dark:focus:border-[#2F7CF6] focus:outline-none"
+                    className="w-full rounded border border-[#2A2F38] bg-[#14161A] px-2.5 py-1.5 text-xs text-white"
                   >
                     <option value="m">Metros (m)</option>
                     <option value="cm">Centímetros (cm)</option>
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs text-slate-600 dark:text-[#949BA8] mb-1">
-                    Localização da Rua (Frente)
-                  </label>
+                  <label className="mb-1 block text-[11px] text-[#949BA8]">Rua (Frente)</label>
                   <select
                     value={newStreetSide}
                     onChange={(e) =>
                       setNewStreetSide(e.target.value as 'baixo' | 'cima' | 'esquerda' | 'direita')
                     }
-                    className="w-full px-3 py-2 text-xs rounded bg-slate-50 dark:bg-[#14161A] border border-slate-300 dark:border-[#2A2F38] text-slate-900 dark:text-white focus:border-[#1D5B6E] dark:focus:border-[#2F7CF6] focus:outline-none"
+                    className="w-full rounded border border-[#2A2F38] bg-[#14161A] px-2.5 py-1.5 text-xs text-white"
                   >
-                    <option value="baixo">Borda Inferior (Padrão)</option>
+                    <option value="baixo">Borda Inferior</option>
                     <option value="cima">Borda Superior</option>
                     <option value="esquerda">Lateral Esquerda</option>
                     <option value="direita">Lateral Direita</option>
@@ -592,17 +574,17 @@ export const ProjectHub: React.FC<ProjectHubProps> = ({
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2 pt-3 border-t border-slate-200 dark:border-[#2A2F38]">
+              <div className="flex justify-end gap-2 border-t border-[#2A2F38] pt-2.5">
                 <button
                   type="button"
                   onClick={() => setShowNewModal(false)}
-                  className="px-4 py-2 text-xs rounded border border-slate-300 dark:border-[#323844] text-slate-700 dark:text-[#C4C9D4] hover:text-slate-900 dark:hover:text-white"
+                  className="rounded border border-[#323844] px-3.5 py-1.5 text-xs text-[#C4C9D4] hover:text-white"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 text-xs font-semibold rounded bg-[#1D5B6E] dark:bg-[#2F7CF6] text-white hover:bg-[#164857] dark:hover:bg-[#2569D6]"
+                  className="rounded bg-[#2F7CF6] px-4 py-1.5 text-xs font-semibold text-white hover:bg-[#2569D6]"
                 >
                   Criar Empreendimento
                 </button>
@@ -615,20 +597,20 @@ export const ProjectHub: React.FC<ProjectHubProps> = ({
       {/* Delete Confirmation Modal */}
       {confirmDeleteId && (
         <div
-          className="fixed inset-0 z-50 bg-slate-900/50 dark:bg-black/70 flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
           role="dialog"
           aria-modal="true"
         >
-          <div className="w-full max-w-md rounded-lg border border-slate-200 dark:border-[#323844] bg-white dark:bg-[#1B1E24] p-6 space-y-4">
-            <h3 className="text-base font-semibold text-slate-900 dark:text-white">Confirmar Exclusão</h3>
-            <p className="text-xs text-slate-600 dark:text-[#C4C9D4]">
+          <div className="w-full max-w-md rounded-lg border border-[#323844] bg-[#1B1E24] p-5 space-y-3">
+            <h3 className="text-base font-semibold text-white">Confirmar Exclusão</h3>
+            <p className="text-xs text-[#C4C9D4]">
               Deseja excluir permanentemente o empreendimento selecionado do banco de dados? Esta ação não pode ser desfeita.
             </p>
             <div className="flex justify-end gap-2 pt-2">
               <button
                 type="button"
                 onClick={() => setConfirmDeleteId(null)}
-                className="px-4 py-2 text-xs rounded border border-slate-300 dark:border-[#323844] text-slate-700 dark:text-[#C4C9D4] hover:text-slate-900 dark:hover:text-white"
+                className="rounded border border-[#323844] px-3.5 py-1.5 text-xs text-[#C4C9D4] hover:text-white"
               >
                 Cancelar
               </button>
@@ -638,7 +620,7 @@ export const ProjectHub: React.FC<ProjectHubProps> = ({
                   onDeleteProject(confirmDeleteId);
                   setConfirmDeleteId(null);
                 }}
-                className="px-4 py-2 text-xs font-semibold rounded bg-red-600 text-white hover:bg-red-700"
+                className="rounded bg-red-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-red-700"
               >
                 Excluir Definitivamente
               </button>

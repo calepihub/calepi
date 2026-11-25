@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Trash2 } from 'lucide-react';
+import { PaginationBar, paginateItems } from './PaginationBar';
 import {
   buildElevationData,
   buildJoinerySchedule,
@@ -225,6 +226,7 @@ export const CadSheetPreview: React.FC<CadSheetPreviewProps> = ({
   onRemoveRender,
 }) => {
   const [enlargedUtIdx, setEnlargedUtIdx] = useState(0);
+  const [renderPage, setRenderPage] = useState(0);
   const pal = getCadPalette(cadTheme);
   const isLightPaper = cadTheme === 'plot_white';
   const specialStroke = isLightPaper ? '#6D28D9' : '#C084FC';
@@ -238,23 +240,21 @@ export const CadSheetPreview: React.FC<CadSheetPreviewProps> = ({
   if (sheetId === 'R01') {
     const renders = project.capturedRenders ?? [];
     const rs = project.renderSettings;
+    const pagedRenders = paginateItems(renders, renderPage, 2);
     return (
-      <div className="space-y-3 rounded border border-slate-300 bg-[#0F131A] p-4 text-slate-100">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-700 pb-2.5">
-          <div>
-            <div className="text-xs font-bold tracking-wide text-white uppercase">
+      <div className="flex h-full w-full flex-col justify-between gap-2 overflow-hidden rounded border border-slate-300 bg-[#0F131A] p-3 text-slate-100">
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-slate-700 pb-2">
+          <div className="min-w-0">
+            <div className="truncate text-xs font-bold tracking-wide text-white uppercase">
               PRANCHA R01 — PROJETO EXECUTIVO RENDERIZADO ({project.name})
             </div>
-            <div className="text-[11px] text-slate-400">
+            <div className="truncate text-[11px] text-slate-400">
               Acabamentos PBR: Parede Ext. {(rs.wallExteriorFinish || 'textura_acrilica').replace(/_/g, ' ')} · Piso{' '}
-              {rs.floorMaterial.replace(/_/g, ' ')} · Cobertura {rs.roofMaterial.replace(/_/g, ' ')} (
-              {(rs.roofShape || 'embutido_platibanda').replace(/_/g, ' ')}) · Esquadrias{' '}
-              {rs.windowFrameColor.replace(/_/g, ' ')} · Metais{' '}
-              {(project.hydraulicConfig?.sanitaryFixtures?.metalsFinish || 'cromado').replace(/_/g, ' ')}
+              {rs.floorMaterial.replace(/_/g, ' ')} · Cobertura {rs.roofMaterial.replace(/_/g, ' ')}
             </div>
           </div>
           <span
-            className="inline-flex items-center gap-1.5 rounded border border-slate-700 px-2 py-0.5 text-[10px] font-mono"
+            className="inline-flex shrink-0 items-center gap-1.5 rounded border border-slate-700 px-2 py-0.5 text-[10px] font-mono"
             style={{ backgroundColor: rs.facadeColor, color: '#111827' }}
           >
             Fachada {rs.facadeColor}
@@ -262,26 +262,32 @@ export const CadSheetPreview: React.FC<CadSheetPreviewProps> = ({
         </div>
 
         {renders.length === 0 ? (
-          <div className="flex min-h-[340px] flex-col items-center justify-center rounded border border-dashed border-slate-700 bg-[#141820] p-6 text-center">
+          <div className="flex min-h-0 flex-1 flex-col items-center justify-center rounded border border-dashed border-slate-700 bg-[#141820] p-4 text-center">
             <p className="text-sm font-semibold text-white">
               Nenhuma perspectiva 3D arquitetônica salva nesta prancha ainda
             </p>
-            <p className="mt-1.5 max-w-md text-xs text-slate-400 leading-relaxed">
-              Acesse a etapa <strong className="text-slate-200">5. Modelo BIM 3D</strong> ou <strong className="text-slate-200">6. Render Cinematográfico</strong>, escolha o ângulo de câmera (Perspectiva, Fachada, Aérea ou Interna) e clique em <strong className="text-emerald-300">&quot;Salvar na Prancha R01&quot;</strong> para compor automaticamente este caderno de apresentação executiva e o PDF/ZIP.
+            <p className="mt-1.5 max-w-md text-xs leading-relaxed text-slate-400">
+              Acesse a etapa <strong className="text-slate-200">5. Modelo BIM 3D</strong> ou{' '}
+              <strong className="text-slate-200">6. Render Cinematográfico</strong>, escolha o ângulo de câmera e clique em{' '}
+              <strong className="text-emerald-300">&quot;Salvar na Prancha R01&quot;</strong>.
             </p>
           </div>
         ) : (
-          <div className={`grid gap-3 ${renders.length === 1 ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2'}`}>
-            {renders.map((r, idx) => (
+          <div
+            className={`grid min-h-0 flex-1 gap-3 overflow-hidden ${
+              pagedRenders.slice.length === 1 ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2'
+            }`}
+          >
+            {pagedRenders.slice.map((r, idx) => (
               <div
                 key={r.id}
-                className="group relative overflow-hidden rounded border border-slate-700 bg-[#141820]"
+                className="flex min-h-0 flex-col overflow-hidden rounded border border-slate-700 bg-[#141820]"
               >
-                <img src={r.dataUrl} alt={r.title} className="h-56 w-full object-cover" />
-                <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 text-[11px]">
-                  <div>
+                <img src={r.dataUrl} alt={r.title} className="min-h-0 w-full flex-1 object-cover" />
+                <div className="flex shrink-0 items-center justify-between gap-2 px-2.5 py-1.5 text-[11px]">
+                  <div className="truncate">
                     <span className="font-mono font-semibold text-[#60A5FA]">
-                      VISTA {String(idx + 1).padStart(2, '0')}
+                      VISTA {String(pagedRenders.start + idx + 1).padStart(2, '0')}
                     </span>{' '}
                     <span className="text-slate-200">{r.title}</span>
                   </div>
@@ -289,7 +295,7 @@ export const CadSheetPreview: React.FC<CadSheetPreviewProps> = ({
                     <button
                       type="button"
                       onClick={() => onRemoveRender(r.id)}
-                      className="text-slate-500 hover:text-red-400"
+                      className="shrink-0 text-slate-500 hover:text-red-400"
                       title="Remover vista"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
@@ -299,6 +305,19 @@ export const CadSheetPreview: React.FC<CadSheetPreviewProps> = ({
               </div>
             ))}
           </div>
+        )}
+
+        {renders.length > 2 && (
+          <PaginationBar
+            page={pagedRenders.safePage}
+            totalPages={pagedRenders.totalPages}
+            totalItems={renders.length}
+            startIndex={pagedRenders.start}
+            endIndex={pagedRenders.end}
+            onPageChange={setRenderPage}
+            itemLabel="vistas"
+            compact
+          />
         )}
       </div>
     );
@@ -313,7 +332,7 @@ export const CadSheetPreview: React.FC<CadSheetPreviewProps> = ({
   }) => (
     <svg
       viewBox={`0 0 ${svgW} ${svgH}`}
-      className="w-full rounded border"
+      className="h-full max-h-full w-full rounded border"
       style={{ backgroundColor: pal.bg, borderColor: pal.paperBorder }}
     >
       <defs>

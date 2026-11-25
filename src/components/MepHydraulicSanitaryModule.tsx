@@ -1,5 +1,14 @@
 import React, { useRef, useState } from 'react';
-import { AlertTriangle, CloudRain, Droplets, Move, Plus, Trash2 } from 'lucide-react';
+import {
+  AlertTriangle,
+  CloudRain,
+  Droplets,
+  List,
+  Move,
+  Plus,
+  SlidersHorizontal,
+  Trash2,
+} from 'lucide-react';
 import {
   calculateDrainageSizing,
   calculateHydraulicSizing,
@@ -9,7 +18,15 @@ import { getOpeningWorldPosition, getWallAngleRad, round2 } from '../engine/geom
 import { computeDrainageRouting, computeHydraulicRouting } from '../engine/mepRouting';
 import { nextId } from '../engine/parametricGenerator';
 import { FurnitureCadBlock } from './CadArchitecturalSymbols';
-import type { DrainageCategory, DrainagePoint, Project, UnitType, WaterCategory, WaterPoint } from '../types/project';
+import { PaginationBar, paginateItems, useViewportPageSize } from './PaginationBar';
+import type {
+  DrainageCategory,
+  DrainagePoint,
+  Project,
+  UnitType,
+  WaterCategory,
+  WaterPoint,
+} from '../types/project';
 
 interface MepHydraulicSanitaryModuleProps {
   project: Project;
@@ -42,6 +59,13 @@ export const MepHydraulicSanitaryModule: React.FC<MepHydraulicSanitaryModuleProp
   onUpdateProject,
 }) => {
   const [subTab, setSubTab] = useState<'hidraulica' | 'sanitaria' | 'pluviais'>('hidraulica');
+  const [hydView, setHydView] = useState<'planta' | 'tabela' | 'parametros'>('planta');
+  const [sanView, setSanView] = useState<'planta' | 'tabela'>('planta');
+
+  const [wpPage, setWpPage] = useState(0);
+  const [dpPage, setDpPage] = useState(0);
+  const [rwPage, setRwPage] = useState(0);
+
   const activeUt =
     project.unitTypes.find((u) => u.id === selectedUnitTypeId) ?? project.unitTypes[0];
 
@@ -69,11 +93,29 @@ export const MepHydraulicSanitaryModule: React.FC<MepHydraulicSanitaryModuleProp
   const drainSvgRef = useRef<SVGSVGElement>(null);
   const [selectedWpId, setSelectedWpId] = useState<string | null>(null);
   const [selectedDpId, setSelectedDpId] = useState<string | null>(null);
-  const [draggingWp, setDraggingWp] = useState<{ id: string; offsetX: number; offsetY: number } | null>(null);
-  const [draggingDp, setDraggingDp] = useState<{ id: string; offsetX: number; offsetY: number } | null>(null);
+  const [draggingWp, setDraggingWp] = useState<{
+    id: string;
+    offsetX: number;
+    offsetY: number;
+  } | null>(null);
+  const [draggingDp, setDraggingDp] = useState<{
+    id: string;
+    offsetX: number;
+    offsetY: number;
+  } | null>(null);
 
   const hydRouting = activeUt ? computeHydraulicRouting(activeUt) : null;
   const drRouting = activeUt ? computeDrainageRouting(activeUt) : null;
+
+  const wpPerPage = useViewportPageSize(340, 42, 4, 14);
+  const dpPerPage = useViewportPageSize(340, 42, 4, 14);
+  const rwPerPage = useViewportPageSize(360, 40, 4, 12);
+
+  const waterPoints = activeUt?.waterPoints ?? [];
+  const drainagePoints = activeUt?.drainagePoints ?? [];
+  const pagedWp = paginateItems(waterPoints, wpPage, wpPerPage);
+  const pagedDp = paginateItems(drainagePoints, dpPage, dpPerPage);
+  const pagedRw = paginateItems(project.rainwaterElements, rwPage, rwPerPage);
 
   const snapCoord = (v: number) => Math.round(v / 0.05) * 0.05;
 
@@ -88,7 +130,11 @@ export const MepHydraulicSanitaryModule: React.FC<MepHydraulicSanitaryModuleProp
     return { x: world.x, y: world.y };
   };
 
-  const updateWaterPoint = (pointId: string, patch: Partial<WaterPoint>, autoDetectRoom = false) => {
+  const updateWaterPoint = (
+    pointId: string,
+    patch: Partial<WaterPoint>,
+    autoDetectRoom = false,
+  ) => {
     if (!activeUt) return;
     onUpdateProject((prev) => ({
       ...prev,
@@ -109,7 +155,11 @@ export const MepHydraulicSanitaryModule: React.FC<MepHydraulicSanitaryModuleProp
     }));
   };
 
-  const updateDrainagePoint = (pointId: string, patch: Partial<DrainagePoint>, autoDetectRoom = false) => {
+  const updateDrainagePoint = (
+    pointId: string,
+    patch: Partial<DrainagePoint>,
+    autoDetectRoom = false,
+  ) => {
     if (!activeUt) return;
     onUpdateProject((prev) => ({
       ...prev,
@@ -130,20 +180,95 @@ export const MepHydraulicSanitaryModule: React.FC<MepHydraulicSanitaryModuleProp
     }));
   };
 
+  const handleAddWaterPoint = () => {
+    if (!activeUt) return;
+    const newId = nextId('wp');
+    onUpdateProject((prev) => ({
+      ...prev,
+      unitTypes: prev.unitTypes.map((u) =>
+        u.id === activeUt.id
+          ? {
+              ...u,
+              waterPoints: [
+                ...u.waterPoints,
+                {
+                  id: newId,
+                  code: `${wType === 'quente' ? 'AQ' : 'AF'}-${u.waterPoints.length + 1}`,
+                  category: wCat,
+                  equipment: wCat.replace(/_/g, ' '),
+                  roomId: u.rooms[0]?.id ?? '',
+                  x: 0.5,
+                  y: 0.2,
+                  z: wZ,
+                  waterType: wType,
+                  diameterMm: wDiam,
+                  material:
+                    wType === 'quente'
+                      ? prev.hydraulicConfig.hotWaterMaterial
+                      : prev.hydraulicConfig.coldWaterMaterial,
+                  availablePressureMca: 5.0,
+                  supplySource: 'Coluna 01',
+                  branchName: 'Ramal Principal',
+                  weightHunter: 0.5,
+                  notes: '',
+                },
+              ],
+            }
+          : u,
+      ),
+    }));
+    setSelectedWpId(newId);
+  };
+
+  const handleAddDrainagePoint = () => {
+    if (!activeUt) return;
+    const tq = activeUt.drainagePoints.find((d) => d.category === 'tubo_queda');
+    const newId = nextId('dr');
+    onUpdateProject((prev) => ({
+      ...prev,
+      unitTypes: prev.unitTypes.map((u) =>
+        u.id === activeUt.id
+          ? {
+              ...u,
+              drainagePoints: [
+                ...u.drainagePoints,
+                {
+                  id: newId,
+                  code: `ES-${u.drainagePoints.length + 1}`,
+                  category: dCat,
+                  roomId: u.rooms[0]?.id ?? '',
+                  x: 0.4,
+                  y: 0.4,
+                  diameterMm: dDiam,
+                  material: 'PVC Esgoto SN',
+                  slopePercent: dSlope,
+                  uhc: dUhc,
+                  connectedToId: tq?.id ?? 'CI-GERAL',
+                  notes: '',
+                },
+              ],
+            }
+          : u,
+      ),
+    }));
+    setSelectedDpId(newId);
+  };
+
   return (
-    <div className="p-6 max-w-[1440px] mx-auto space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[#2A2F38] pb-4">
-        <div>
-          <h1 className="text-xl font-semibold text-white">
-            Instalações Hidráulicas, Sanitárias & Águas Pluviais
+    <div className="mx-auto flex h-full w-full max-w-[1440px] flex-col gap-2 overflow-hidden bg-[#14161A] p-3 text-slate-100">
+      {/* Compact Header */}
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-[#2A2F38] pb-2">
+        <div className="min-w-0">
+          <h1 className="truncate text-base font-semibold text-white">
+            Instalações Hidráulicas, Sanitárias &amp; Águas Pluviais
           </h1>
-          <p className="text-xs text-[#949BA8] mt-1">
-            Água fria, água quente, reservação, rede conectada de esgoto (UHC e declividades) e drenagem pluvial rastreável.
+          <p className="truncate text-[11px] text-[#949BA8]">
+            Água fria/quente, reservação, rede conectada de esgoto (UHC e declividades) e drenagem pluvial.
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          <div className="flex p-1 rounded bg-[#1B1E24] border border-[#2A2F38]">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex rounded border border-[#2A2F38] bg-[#1B1E24] p-0.5">
             {(
               [
                 ['hidraulica', 'Hidráulica (AF/AQ)'],
@@ -155,7 +280,7 @@ export const MepHydraulicSanitaryModule: React.FC<MepHydraulicSanitaryModuleProp
                 key={k}
                 type="button"
                 onClick={() => setSubTab(k)}
-                className={`px-3 py-1 text-xs font-medium rounded whitespace-nowrap ${
+                className={`rounded px-2.5 py-1 text-xs font-medium whitespace-nowrap ${
                   subTab === k ? 'bg-[#2F7CF6] text-white' : 'text-[#949BA8] hover:text-white'
                 }`}
               >
@@ -166,9 +291,15 @@ export const MepHydraulicSanitaryModule: React.FC<MepHydraulicSanitaryModuleProp
 
           <select
             value={activeUt?.id ?? ''}
-            onChange={(e) => onSelectUnitType(e.target.value)}
+            onChange={(e) => {
+              onSelectUnitType(e.target.value);
+              setWpPage(0);
+              setDpPage(0);
+              setSelectedWpId(null);
+              setSelectedDpId(null);
+            }}
             aria-label="Selecionar tipologia hidráulica"
-            className="px-3 py-1.5 text-xs rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
+            className="rounded border border-[#2A2F38] bg-[#1B1E24] px-2.5 py-1 text-xs text-white"
           >
             {project.unitTypes.map((ut) => (
               <option key={ut.id} value={ut.id}>
@@ -181,268 +312,959 @@ export const MepHydraulicSanitaryModule: React.FC<MepHydraulicSanitaryModuleProp
 
       {/* HIDRÁULICA TAB */}
       {subTab === 'hidraulica' && (
-        <div className="space-y-6">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <div className="rounded-lg border border-[#2A2F38] bg-[#1B1E24] p-4">
-              <div className="text-[11px] text-[#949BA8]">População Estimada</div>
-              <div className="text-xl font-mono font-semibold text-white mt-1 tabular-nums">
-                {hydReport.estimatedPopulation} hab.
+        <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
+          {/* Compact KPI Strip + Sub-View Tabs */}
+          <div className="flex shrink-0 flex-wrap items-center justify-between gap-2">
+            <div className="grid flex-1 grid-cols-2 gap-2 sm:grid-cols-4">
+              <div className="rounded border border-[#2A2F38] bg-[#1B1E24] px-3 py-1.5">
+                <div className="text-[10px] text-[#949BA8]">População</div>
+                <div className="font-mono text-sm font-semibold tabular-nums text-white">
+                  {hydReport.estimatedPopulation} hab.
+                </div>
+              </div>
+              <div className="rounded border border-[#2A2F38] bg-[#1B1E24] px-3 py-1.5">
+                <div className="text-[10px] text-[#949BA8]">Consumo Diário</div>
+                <div className="font-mono text-sm font-semibold tabular-nums text-[#60A5FA]">
+                  {hydReport.dailyConsumptionLiters} L/dia
+                </div>
+              </div>
+              <div className="rounded border border-[#2A2F38] bg-[#1B1E24] px-3 py-1.5">
+                <div className="text-[10px] text-[#949BA8]">
+                  Reserva ({project.hydraulicConfig.reserveDays}d)
+                </div>
+                <div className="font-mono text-sm font-semibold tabular-nums text-emerald-400">
+                  {hydReport.recommendedTotalReservoirLiters} L
+                </div>
+              </div>
+              <div className="rounded border border-[#2A2F38] bg-[#1B1E24] px-3 py-1.5">
+                <div className="text-[10px] text-[#949BA8]">Vazão ({activeUt?.code || '—'})</div>
+                <div className="font-mono text-sm font-semibold tabular-nums text-white">
+                  {unitHyd?.probableFlowColdLs ?? 0} L/s
+                </div>
               </div>
             </div>
-            <div className="rounded-lg border border-[#2A2F38] bg-[#1B1E24] p-4">
-              <div className="text-[11px] text-[#949BA8]">Consumo Diário Previsto</div>
-              <div className="text-xl font-mono font-semibold text-[#60A5FA] mt-1 tabular-nums">
-                {hydReport.dailyConsumptionLiters} L/dia
+
+            <div className="flex items-center gap-1 rounded border border-[#2A2F38] bg-[#1B1E24] p-0.5">
+              {(
+                [
+                  ['planta', 'Planta & Inspetor', Move],
+                  ['tabela', `Tabela (${waterPoints.length})`, List],
+                  ['parametros', 'Reserva & Novo Ponto', SlidersHorizontal],
+                ] as const
+              ).map(([id, lbl, Icon]) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setHydView(id)}
+                  className={`inline-flex items-center gap-1 rounded px-2.5 py-1 text-xs font-medium whitespace-nowrap ${
+                    hydView === id ? 'bg-[#2F7CF6] text-white' : 'text-[#949BA8] hover:text-white'
+                  }`}
+                >
+                  <Icon className="h-3.5 w-3.5" />
+                  {lbl}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {!activeUt ? (
+            <div className="flex min-h-0 flex-1 items-center justify-center rounded-lg border border-dashed border-[#323844] bg-[#1B1E24] p-6 text-center text-xs text-[#949BA8]">
+              Nenhuma tipologia criada ainda. Cadastre uma tipologia na etapa &quot;Planta 2D &amp; Tipologias&quot; para lançar pontos hidráulicos.
+            </div>
+          ) : (
+            <div className="min-h-0 flex-1 overflow-hidden">
+              {/* HYDRAULIC VIEW 1: PLANTA & INSPETOR */}
+              {hydView === 'planta' && (
+                <div className="grid h-full min-h-0 grid-cols-1 gap-3 overflow-hidden lg:grid-cols-12">
+                  <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-[#2A2F38] bg-[#111317] p-2.5 lg:col-span-7">
+                    <div className="mb-1.5 flex shrink-0 flex-wrap items-center justify-between gap-2 text-[11px]">
+                      <span className="inline-flex items-center gap-1.5 font-medium text-sky-300">
+                        <Move className="h-3.5 w-3.5" />
+                        Planta Hidráulica (AF/AQ) —{' '}
+                        {hydRouting
+                          ? `Prumada (${hydRouting.riser.x.toFixed(2)}, ${hydRouting.riser.y.toFixed(2)}) · MST: ${hydRouting.totalPipeM} m`
+                          : 'Arraste os pontos'}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onUpdateProject(
+                            (prev) => ({
+                              ...prev,
+                              hydraulicConfig: {
+                                ...prev.hydraulicConfig,
+                                hasHotWaterHeating: false,
+                                hotWaterMaterial: 'Sem Água Quente (Chuveiro Elétrico)',
+                                heatingSystem:
+                                  'Sem aquecimento central (kitnet simples: somente água fria + chuveiro elétrico)',
+                              },
+                              unitTypes: prev.unitTypes.map((u) =>
+                                u.id === activeUt.id
+                                  ? {
+                                      ...u,
+                                      mepProfile: 'simples',
+                                      waterPoints: u.waterPoints.filter(
+                                        (wp) => wp.waterType !== 'quente',
+                                      ),
+                                    }
+                                  : u,
+                              ),
+                            }),
+                            `Simplificação hidráulica (Só Água Fria) em ${activeUt.code}`,
+                          );
+                        }}
+                        className="rounded border border-emerald-500/40 bg-emerald-600/20 px-2 py-0.5 text-[10.5px] font-semibold text-emerald-200 hover:bg-emerald-600/35"
+                      >
+                        Modo Só Água Fria
+                      </button>
+                    </div>
+
+                    <svg
+                      ref={hydSvgRef}
+                      viewBox={`${-0.35} ${-0.35} ${activeUt.width + 0.7} ${activeUt.depth + 0.7}`}
+                      className="min-h-0 h-full w-full flex-1 select-none touch-none"
+                      onPointerMove={(e) => {
+                        if (!draggingWp) return;
+                        const pt = clientToUnitCoords(hydSvgRef.current, e.clientX, e.clientY);
+                        const nx = round2(
+                          Math.max(
+                            0.05,
+                            Math.min(activeUt.width - 0.05, snapCoord(pt.x - draggingWp.offsetX)),
+                          ),
+                        );
+                        const ny = round2(
+                          Math.max(
+                            0.05,
+                            Math.min(activeUt.depth - 0.05, snapCoord(pt.y - draggingWp.offsetY)),
+                          ),
+                        );
+                        updateWaterPoint(draggingWp.id, { x: nx, y: ny }, true);
+                      }}
+                      onPointerUp={() => setDraggingWp(null)}
+                      onPointerLeave={() => setDraggingWp(null)}
+                    >
+                      {activeUt.rooms
+                        .filter((r) => r.category !== 'mezanino')
+                        .map((rm) => (
+                          <g key={rm.id}>
+                            <rect
+                              x={rm.x}
+                              y={rm.y}
+                              width={rm.width}
+                              height={rm.depth}
+                              fill="#171A21"
+                              stroke="#262B35"
+                              strokeWidth={0.02}
+                            />
+                            <text
+                              x={rm.x + rm.width / 2}
+                              y={rm.y + rm.depth / 2}
+                              textAnchor="middle"
+                              fill="#4B5563"
+                              fontSize="0.18"
+                              fontWeight="bold"
+                            >
+                              {rm.code}
+                            </text>
+                          </g>
+                        ))}
+                      {activeUt.furniture
+                        .filter((f) => (f.elevationM ?? 0) < 0.8 && f.category !== 'luminaria')
+                        .map((fur) => (
+                          <g key={fur.id} opacity={0.38} pointerEvents="none">
+                            <FurnitureCadBlock
+                              category={fur.category}
+                              x={fur.x}
+                              y={fur.y}
+                              width={fur.width}
+                              depth={fur.depth}
+                              stroke="#64748B"
+                              fill="rgba(30,41,59,0.2)"
+                              strokeWidth={0.015}
+                              detailed={false}
+                              stairSpec={fur.stairSpec}
+                              rotationDeg={fur.rotationDeg}
+                            />
+                          </g>
+                        ))}
+                      {activeUt.walls.map((w) => (
+                        <line
+                          key={w.id}
+                          x1={w.start.x}
+                          y1={w.start.y}
+                          x2={w.end.x}
+                          y2={w.end.y}
+                          stroke={w.isExternal ? '#E2E8F0' : '#94A3B8'}
+                          strokeWidth={w.thickness}
+                          strokeLinecap="square"
+                          pointerEvents="none"
+                        />
+                      ))}
+                      {activeUt.openings.map((op) => {
+                        const wall = activeUt.walls.find((w) => w.id === op.wallId);
+                        if (!wall) return null;
+                        const { center } = getOpeningWorldPosition(wall, op);
+                        const deg = (getWallAngleRad(wall) * 180) / Math.PI;
+                        return (
+                          <g
+                            key={op.id}
+                            transform={`translate(${center.x}, ${center.y}) rotate(${deg})`}
+                            pointerEvents="none"
+                          >
+                            <rect
+                              x={-op.width / 2}
+                              y={-wall.thickness * 0.58}
+                              width={op.width}
+                              height={wall.thickness * 1.16}
+                              fill="#111317"
+                            />
+                            <line
+                              x1={-op.width / 2}
+                              y1={0}
+                              x2={op.width / 2}
+                              y2={0}
+                              stroke={op.type === 'janela' ? '#38BDF8' : '#F59E0B'}
+                              strokeWidth={0.03}
+                            />
+                          </g>
+                        );
+                      })}
+                      {hydRouting && (
+                        <g pointerEvents="none">
+                          {hydRouting.segments.map((seg) => {
+                            const pts = seg.elbow
+                              ? `${seg.from.x},${seg.from.y} ${seg.elbow.x},${seg.elbow.y} ${seg.to.x},${seg.to.y}`
+                              : `${seg.from.x},${seg.from.y} ${seg.to.x},${seg.to.y}`;
+                            return (
+                              <polyline
+                                key={`hyd-rt-${seg.id}`}
+                                points={pts}
+                                fill="none"
+                                stroke={seg.kind === 'hot_water' ? '#EF4444' : '#38BDF8'}
+                                strokeOpacity={0.75}
+                                strokeWidth={0.028}
+                                strokeDasharray={
+                                  seg.kind === 'hot_water' ? '0.07 0.04' : '0.09 0.03'
+                                }
+                              />
+                            );
+                          })}
+                          <circle
+                            cx={hydRouting.riser.x}
+                            cy={hydRouting.riser.y}
+                            r={0.09}
+                            fill="#0EA5E9"
+                            stroke="#FFFFFF"
+                            strokeWidth={0.02}
+                          />
+                          <text
+                            x={hydRouting.riser.x + 0.11}
+                            y={hydRouting.riser.y + 0.04}
+                            fill="#BAE6FD"
+                            fontSize="0.1"
+                            fontWeight="bold"
+                            fontFamily="JetBrains Mono, monospace"
+                          >
+                            PRUMADA AF
+                          </text>
+                        </g>
+                      )}
+                      {activeUt.waterPoints.map((wp) => {
+                        const isSel = selectedWpId === wp.id;
+                        const col = wp.waterType === 'quente' ? '#EF4444' : '#3B82F6';
+                        return (
+                          <g
+                            key={wp.id}
+                            transform={`translate(${wp.x}, ${wp.y})`}
+                            className="cursor-move"
+                            onPointerDown={(e) => {
+                              e.stopPropagation();
+                              setSelectedWpId(wp.id);
+                              const pt = clientToUnitCoords(hydSvgRef.current, e.clientX, e.clientY);
+                              setDraggingWp({
+                                id: wp.id,
+                                offsetX: pt.x - wp.x,
+                                offsetY: pt.y - wp.y,
+                              });
+                            }}
+                          >
+                            <circle
+                              r={0.15}
+                              fill={isSel ? 'rgba(59,130,246,0.28)' : 'transparent'}
+                              stroke={isSel ? '#60A5FA' : 'transparent'}
+                              strokeWidth={0.025}
+                            />
+                            <rect
+                              x={-0.08}
+                              y={-0.08}
+                              width={0.16}
+                              height={0.16}
+                              rx={0.025}
+                              fill={col}
+                              stroke={isSel ? '#FFFFFF' : '#0F1115'}
+                              strokeWidth={0.02}
+                            />
+                            <text
+                              x={0.12}
+                              y={0.04}
+                              fill={wp.waterType === 'quente' ? '#FCA5A5' : '#93C5FD'}
+                              fontSize="0.11"
+                              fontWeight={isSel ? 'bold' : undefined}
+                              fontFamily="JetBrains Mono, monospace"
+                            >
+                              {wp.code}
+                            </text>
+                          </g>
+                        );
+                      })}
+                    </svg>
+                  </div>
+
+                  {/* Right Inspector + Quick Add */}
+                  <div className="flex min-h-0 flex-col justify-between gap-2 overflow-hidden rounded-lg border border-[#2A2F38] bg-[#1B1E24] p-3 text-xs lg:col-span-5">
+                    <div className="space-y-2.5">
+                      <div className="flex items-center justify-between border-b border-[#2A2F38] pb-2">
+                        <span className="text-[11px] font-semibold uppercase tracking-wider text-sky-400">
+                          Ponto Hidráulico Selecionado
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setHydView('parametros')}
+                          className="inline-flex items-center gap-1 rounded bg-[#2F7CF6] px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-[#2569D6]"
+                        >
+                          <Plus className="h-3 w-3" /> Novo Ponto
+                        </button>
+                      </div>
+
+                      {(() => {
+                        const selWp = activeUt.waterPoints.find((p) => p.id === selectedWpId);
+                        if (!selWp) {
+                          return (
+                            <p className="rounded border border-dashed border-[#2A2F38] bg-[#14161A] p-3 text-[11px] text-[#949BA8]">
+                              Arraste qualquer ponto AF/AQ na planta ao lado (ou selecione na aba Tabela) para reposicionar e sincronizar com o Editor CAD 2D.
+                            </p>
+                          );
+                        }
+                        return (
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between">
+                              <span className="font-mono font-semibold text-white">
+                                {selWp.code} — {selWp.equipment}
+                              </span>
+                              <span
+                                className={
+                                  selWp.waterType === 'quente' ? 'text-red-400' : 'text-sky-400'
+                                }
+                              >
+                                {selWp.waterType === 'quente' ? 'Água Quente' : 'Água Fria'}
+                              </span>
+                            </div>
+                            <div>
+                              <label className="mb-0.5 block text-[10px] text-[#949BA8]">
+                                Ambiente
+                              </label>
+                              <select
+                                value={selWp.roomId}
+                                onChange={(e) =>
+                                  updateWaterPoint(selWp.id, { roomId: e.target.value })
+                                }
+                                className="w-full rounded border border-[#2A2F38] bg-[#14161A] px-2 py-1 text-xs text-white"
+                              >
+                                {activeUt.rooms.map((rm) => (
+                                  <option key={rm.id} value={rm.id}>
+                                    {rm.name} ({rm.code})
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <div className="grid grid-cols-3 gap-2">
+                              <div>
+                                <label className="mb-0.5 block text-[10px] text-[#949BA8]">
+                                  X (m)
+                                </label>
+                                <input
+                                  type="number"
+                                  step="0.05"
+                                  value={selWp.x}
+                                  onChange={(e) =>
+                                    updateWaterPoint(
+                                      selWp.id,
+                                      { x: round2(Number(e.target.value)) },
+                                      true,
+                                    )
+                                  }
+                                  className="w-full rounded border border-[#2A2F38] bg-[#14161A] px-2 py-1 font-mono text-xs text-white"
+                                />
+                              </div>
+                              <div>
+                                <label className="mb-0.5 block text-[10px] text-[#949BA8]">
+                                  Y (m)
+                                </label>
+                                <input
+                                  type="number"
+                                  step="0.05"
+                                  value={selWp.y}
+                                  onChange={(e) =>
+                                    updateWaterPoint(
+                                      selWp.id,
+                                      { y: round2(Number(e.target.value)) },
+                                      true,
+                                    )
+                                  }
+                                  className="w-full rounded border border-[#2A2F38] bg-[#14161A] px-2 py-1 font-mono text-xs text-white"
+                                />
+                              </div>
+                              <div>
+                                <label className="mb-0.5 block text-[10px] text-[#949BA8]">
+                                  Altura Z (m)
+                                </label>
+                                <input
+                                  type="number"
+                                  step="0.05"
+                                  value={selWp.z}
+                                  onChange={(e) =>
+                                    updateWaterPoint(selWp.id, {
+                                      z: round2(Number(e.target.value)),
+                                    })
+                                  }
+                                  className="w-full rounded border border-[#2A2F38] bg-[#14161A] px-2 py-1 font-mono text-xs text-white"
+                                />
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <label className="mb-0.5 block text-[10px] text-[#949BA8]">
+                                  Diâmetro (mm)
+                                </label>
+                                <input
+                                  type="number"
+                                  step="5"
+                                  value={selWp.diameterMm}
+                                  onChange={(e) =>
+                                    updateWaterPoint(selWp.id, {
+                                      diameterMm: Number(e.target.value),
+                                    })
+                                  }
+                                  className="w-full rounded border border-[#2A2F38] bg-[#14161A] px-2 py-1 font-mono text-xs text-white"
+                                />
+                              </div>
+                              <div>
+                                <label className="mb-0.5 block text-[10px] text-[#949BA8]">
+                                  Peso NBR
+                                </label>
+                                <input
+                                  type="number"
+                                  step="0.1"
+                                  value={selWp.weightHunter}
+                                  onChange={(e) =>
+                                    updateWaterPoint(selWp.id, {
+                                      weightHunter: Number(e.target.value),
+                                    })
+                                  }
+                                  className="w-full rounded border border-[#2A2F38] bg-[#14161A] px-2 py-1 font-mono text-xs text-white"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+
+                    {unitHyd && (
+                      <div className="truncate rounded border border-[#2A2F38] bg-[#14161A] px-2.5 py-1.5 font-mono text-[10.5px] text-[#949BA8]" title={unitHyd.methodology}>
+                        {unitHyd.methodology}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* HYDRAULIC VIEW 2: TABELA PAGINADA */}
+              {hydView === 'tabela' && (
+                <div className="flex h-full min-h-0 flex-col justify-between overflow-hidden rounded-lg border border-[#2A2F38] bg-[#1B1E24]">
+                  <div className="flex shrink-0 items-center justify-between border-b border-[#2A2F38] px-3 py-2">
+                    <h2 className="flex items-center gap-1.5 text-xs font-semibold text-white">
+                      <Droplets className="h-3.5 w-3.5 text-[#60A5FA]" />
+                      Pontos Hidráulicos — {activeUt.code} ({waterPoints.length})
+                    </h2>
+                    {unitHyd && (
+                      <span className="hidden truncate font-mono text-[10.5px] text-[#949BA8] lg:inline max-w-md" title={unitHyd.methodology}>
+                        {unitHyd.methodology}
+                      </span>
+                    )}
+                  </div>
+                  <div className="min-h-0 flex-1 overflow-hidden">
+                    <table className="w-full table-fixed border-collapse text-left text-xs">
+                      <thead className="bg-[#181B20] text-[11px] text-[#949BA8]">
+                        <tr>
+                          <th className="w-[9%] px-2.5 py-2">Código</th>
+                          <th className="w-[14%] px-2.5 py-2">Equipamento</th>
+                          <th className="w-[15%] px-2.5 py-2">Ambiente</th>
+                          <th className="w-[21%] px-2.5 py-2">X / Y / Z (m)</th>
+                          <th className="w-[10%] px-2.5 py-2">Tipo</th>
+                          <th className="w-[7%] px-2 py-2 text-right">Ø</th>
+                          <th className="w-[7%] px-2 py-2 text-right">Peso</th>
+                          <th className="w-[12%] px-2.5 py-2">Material</th>
+                          <th className="w-[46px] px-2 py-2 text-right">Del</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#252A33]">
+                        {pagedWp.slice.map((wp) => {
+                          const isSel = selectedWpId === wp.id;
+                          return (
+                            <tr
+                              key={wp.id}
+                              onClick={() => setSelectedWpId(wp.id)}
+                              className={`cursor-pointer ${
+                                isSel ? 'bg-[#2F7CF6]/15' : 'hover:bg-[#22262E]/50'
+                              }`}
+                            >
+                              <td className="truncate px-2.5 py-1.5 font-mono text-[#60A5FA]">
+                                {wp.code}
+                              </td>
+                              <td className="truncate px-2.5 py-1.5 text-white">{wp.equipment}</td>
+                              <td className="px-2.5 py-1.5">
+                                <select
+                                  value={wp.roomId}
+                                  aria-label={`Ambiente de ${wp.code}`}
+                                  onChange={(e) =>
+                                    updateWaterPoint(wp.id, { roomId: e.target.value })
+                                  }
+                                  className="w-full truncate rounded border border-[#2A2F38] bg-[#14161A] px-1.5 py-0.5 text-xs text-white"
+                                >
+                                  {activeUt.rooms.map((r) => (
+                                    <option key={r.id} value={r.id}>
+                                      {r.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </td>
+                              <td className="px-2.5 py-1.5 font-mono tabular-nums whitespace-nowrap">
+                                <input
+                                  type="number"
+                                  step="0.05"
+                                  value={wp.x}
+                                  aria-label={`Coordenada X de ${wp.code}`}
+                                  onChange={(e) =>
+                                    updateWaterPoint(
+                                      wp.id,
+                                      { x: round2(Number(e.target.value)) },
+                                      true,
+                                    )
+                                  }
+                                  className="mr-1 inline-block w-12 rounded border border-[#2A2F38] bg-[#14161A] px-1 py-0.5 text-white"
+                                />
+                                <input
+                                  type="number"
+                                  step="0.05"
+                                  value={wp.y}
+                                  aria-label={`Coordenada Y de ${wp.code}`}
+                                  onChange={(e) =>
+                                    updateWaterPoint(
+                                      wp.id,
+                                      { y: round2(Number(e.target.value)) },
+                                      true,
+                                    )
+                                  }
+                                  className="mr-1 inline-block w-12 rounded border border-[#2A2F38] bg-[#14161A] px-1 py-0.5 text-white"
+                                />
+                                <input
+                                  type="number"
+                                  step="0.05"
+                                  value={wp.z}
+                                  aria-label={`Altura Z de ${wp.code}`}
+                                  onChange={(e) =>
+                                    updateWaterPoint(wp.id, {
+                                      z: round2(Number(e.target.value)),
+                                    })
+                                  }
+                                  className="inline-block w-12 rounded border border-[#2A2F38] bg-[#14161A] px-1 py-0.5 text-white"
+                                />
+                              </td>
+                              <td className="truncate px-2.5 py-1.5">
+                                <span
+                                  className={
+                                    wp.waterType === 'quente' ? 'text-red-400' : 'text-sky-400'
+                                  }
+                                >
+                                  {wp.waterType === 'quente' ? 'Quente' : 'Fria'}
+                                </span>
+                              </td>
+                              <td className="px-2 py-1.5 text-right font-mono">{wp.diameterMm}</td>
+                              <td className="px-2 py-1.5 text-right font-mono">
+                                {wp.weightHunter}
+                              </td>
+                              <td className="truncate px-2.5 py-1.5 text-[#C4C9D4]" title={wp.material}>
+                                {wp.material}
+                              </td>
+                              <td className="px-2 py-1.5 text-right">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onUpdateProject((prev) => ({
+                                      ...prev,
+                                      unitTypes: prev.unitTypes.map((u) =>
+                                        u.id === activeUt.id
+                                          ? {
+                                              ...u,
+                                              waterPoints: u.waterPoints.filter(
+                                                (p) => p.id !== wp.id,
+                                              ),
+                                            }
+                                          : u,
+                                      ),
+                                    }));
+                                  }}
+                                  className="p-1 text-red-400 hover:text-red-300"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <PaginationBar
+                    page={pagedWp.safePage}
+                    totalPages={pagedWp.totalPages}
+                    totalItems={waterPoints.length}
+                    startIndex={pagedWp.start}
+                    endIndex={pagedWp.end}
+                    onPageChange={setWpPage}
+                    itemLabel="pontos AF/AQ"
+                  />
+                </div>
+              )}
+
+              {/* HYDRAULIC VIEW 3: PARÂMETROS DE RESERVAÇÃO & NOVO PONTO */}
+              {hydView === 'parametros' && (
+                <div className="grid h-full min-h-0 grid-cols-1 gap-3 overflow-hidden lg:grid-cols-12">
+                  <div className="flex flex-col justify-between rounded-lg border border-[#2A2F38] bg-[#1B1E24] p-4 lg:col-span-6">
+                    <div className="space-y-3">
+                      <h2 className="text-sm font-semibold text-white">
+                        Parâmetros de Reservação &amp; Materiais
+                      </h2>
+                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                        <div>
+                          <label className="mb-1 block text-[11px] text-[#949BA8]">
+                            Ocupantes / Unid.
+                          </label>
+                          <input
+                            type="number"
+                            min={1}
+                            value={project.hydraulicConfig.occupantsPerUnit}
+                            onChange={(e) =>
+                              onUpdateProject((prev) => ({
+                                ...prev,
+                                hydraulicConfig: {
+                                  ...prev.hydraulicConfig,
+                                  occupantsPerUnit: Number(e.target.value),
+                                },
+                              }))
+                            }
+                            className="w-full rounded border border-[#2A2F38] bg-[#14161A] px-2.5 py-1.5 font-mono text-xs text-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11px] text-[#949BA8]">
+                            Consumo (L/hab·dia)
+                          </label>
+                          <input
+                            type="number"
+                            step="10"
+                            min={80}
+                            value={project.hydraulicConfig.litersPerPersonDay}
+                            onChange={(e) =>
+                              onUpdateProject((prev) => ({
+                                ...prev,
+                                hydraulicConfig: {
+                                  ...prev.hydraulicConfig,
+                                  litersPerPersonDay: Number(e.target.value),
+                                },
+                              }))
+                            }
+                            className="w-full rounded border border-[#2A2F38] bg-[#14161A] px-2.5 py-1.5 font-mono text-xs text-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11px] text-[#949BA8]">
+                            Dias de Reserva
+                          </label>
+                          <input
+                            type="number"
+                            min={1}
+                            max={5}
+                            value={project.hydraulicConfig.reserveDays}
+                            onChange={(e) =>
+                              onUpdateProject((prev) => ({
+                                ...prev,
+                                hydraulicConfig: {
+                                  ...prev.hydraulicConfig,
+                                  reserveDays: Number(e.target.value),
+                                },
+                              }))
+                            }
+                            className="w-full rounded border border-[#2A2F38] bg-[#14161A] px-2.5 py-1.5 font-mono text-xs text-white"
+                          />
+                        </div>
+                        <div className="sm:col-span-3">
+                          <label className="mb-1 block text-[11px] text-[#949BA8]">
+                            Tubulação Água Fria
+                          </label>
+                          <input
+                            type="text"
+                            value={project.hydraulicConfig.coldWaterMaterial}
+                            onChange={(e) =>
+                              onUpdateProject((prev) => ({
+                                ...prev,
+                                hydraulicConfig: {
+                                  ...prev.hydraulicConfig,
+                                  coldWaterMaterial: e.target.value,
+                                },
+                              }))
+                            }
+                            className="w-full rounded border border-[#2A2F38] bg-[#14161A] px-2.5 py-1.5 text-xs text-white"
+                          />
+                        </div>
+                        <div className="sm:col-span-3">
+                          <label className="mb-1 block text-[11px] text-[#949BA8]">
+                            Tubulação Água Quente
+                          </label>
+                          <input
+                            type="text"
+                            value={project.hydraulicConfig.hotWaterMaterial}
+                            onChange={(e) =>
+                              onUpdateProject((prev) => ({
+                                ...prev,
+                                hydraulicConfig: {
+                                  ...prev.hydraulicConfig,
+                                  hotWaterMaterial: e.target.value,
+                                },
+                              }))
+                            }
+                            className="w-full rounded border border-[#2A2F38] bg-[#14161A] px-2.5 py-1.5 text-xs text-white"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                    <div className="rounded border border-[#2A2F38] bg-[#14161A] p-2.5 font-mono text-[11px] text-[#949BA8]">
+                      Memória: {hydReport.reservoirMethodology}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col justify-between rounded-lg border border-[#2A2F38] bg-[#1B1E24] p-4 lg:col-span-6">
+                    <div className="space-y-3">
+                      <h2 className="flex items-center gap-2 text-sm font-semibold text-white">
+                        <Droplets className="h-4 w-4 text-[#60A5FA]" />
+                        Inserir Ponto Hidráulico em {activeUt.code}
+                      </h2>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="mb-1 block text-[11px] text-[#949BA8]">
+                            Equipamento / Uso
+                          </label>
+                          <select
+                            value={wCat}
+                            onChange={(e) => setWCat(e.target.value as WaterCategory)}
+                            className="w-full rounded border border-[#2A2F38] bg-[#14161A] px-2.5 py-1.5 text-xs text-white"
+                          >
+                            <option value="pia">Pia</option>
+                            <option value="lavatorio">Lavatório</option>
+                            <option value="chuveiro">Chuveiro</option>
+                            <option value="vaso_sanitario">Vaso Sanitário</option>
+                            <option value="maquina_lavar">Máquina de Lavar</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11px] text-[#949BA8]">
+                            Tipo de Água
+                          </label>
+                          <select
+                            value={wType}
+                            onChange={(e) => setWType(e.target.value as 'fria' | 'quente')}
+                            className="w-full rounded border border-[#2A2F38] bg-[#14161A] px-2.5 py-1.5 text-xs text-white"
+                          >
+                            <option value="fria">Água Fria</option>
+                            <option value="quente">Água Quente</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11px] text-[#949BA8]">
+                            Diâmetro (mm)
+                          </label>
+                          <input
+                            type="number"
+                            value={wDiam}
+                            onChange={(e) => setWDiam(Number(e.target.value))}
+                            className="w-full rounded border border-[#2A2F38] bg-[#14161A] px-2.5 py-1.5 font-mono text-xs text-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11px] text-[#949BA8]">
+                            Altura Z (m)
+                          </label>
+                          <input
+                            type="number"
+                            step="0.1"
+                            value={wZ}
+                            onChange={(e) => setWZ(Number(e.target.value))}
+                            className="w-full rounded border border-[#2A2F38] bg-[#14161A] px-2.5 py-1.5 font-mono text-xs text-white"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex justify-end border-t border-[#2A2F38] pt-3">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          handleAddWaterPoint();
+                          setHydView('planta');
+                        }}
+                        className="inline-flex items-center gap-1.5 rounded bg-[#2F7CF6] px-4 py-2 text-xs font-semibold text-white hover:bg-[#2569D6]"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        Adicionar Ponto em {activeUt.code}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* SANITÁRIA TAB */}
+      {subTab === 'sanitaria' && activeUt && unitDrain && (
+        <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
+          <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 rounded-lg border border-[#2A2F38] bg-[#1B1E24] px-3 py-2">
+            <div className="min-w-0">
+              <div className="truncate text-xs font-semibold text-white">
+                Rede Sanitária — {activeUt.code} (ΣUHC: {unitDrain.totalUHC} · TQ Ø
+                {unitDrain.recommendedStackMm}mm{drRouting ? ` · ${drRouting.totalDrainPipeM}m` : ''})
+              </div>
+              <div className="truncate font-mono text-[10.5px] text-[#949BA8]" title={unitDrain.methodology}>
+                {unitDrain.methodology}
               </div>
             </div>
-            <div className="rounded-lg border border-[#2A2F38] bg-[#1B1E24] p-4">
-              <div className="text-[11px] text-[#949BA8]">Reserva Total ({project.hydraulicConfig.reserveDays} dias)</div>
-              <div className="text-xl font-mono font-semibold text-emerald-400 mt-1 tabular-nums">
-                {hydReport.recommendedTotalReservoirLiters} L
-              </div>
-            </div>
-            <div className="rounded-lg border border-[#2A2F38] bg-[#1B1E24] p-4">
-              <div className="text-[11px] text-[#949BA8]">Vazão Provável ({activeUt?.code})</div>
-              <div className="text-xl font-mono font-semibold text-white mt-1 tabular-nums">
-                {unitHyd?.probableFlowColdLs ?? 0} L/s
+
+            <div className="flex flex-wrap items-center gap-1.5">
+              <select
+                value={dCat}
+                onChange={(e) => setDCat(e.target.value as DrainageCategory)}
+                className="rounded border border-[#2A2F38] bg-[#14161A] px-2 py-1 text-xs text-white"
+              >
+                <option value="pia">Saída Pia</option>
+                <option value="lavatorio">Saída Lavatório</option>
+                <option value="vaso_sanitario">Vaso Sanitário</option>
+                <option value="chuveiro">Ralo Box</option>
+                <option value="caixa_sifonada">Caixa Sifonada</option>
+                <option value="caixa_gordura">Caixa Gordura</option>
+                <option value="tubo_queda">Tubo de Queda</option>
+                <option value="ventilacao">Ventilação</option>
+              </select>
+              <input
+                type="number"
+                value={dDiam}
+                onChange={(e) => setDDiam(Number(e.target.value))}
+                className="w-14 rounded border border-[#2A2F38] bg-[#14161A] px-1.5 py-1 font-mono text-xs text-white"
+                title="Diâmetro (mm)"
+              />
+              <input
+                type="number"
+                step="0.5"
+                value={dSlope}
+                onChange={(e) => setDSlope(Number(e.target.value))}
+                className="w-14 rounded border border-[#2A2F38] bg-[#14161A] px-1.5 py-1 font-mono text-xs text-white"
+                title="Declividade (%)"
+              />
+              <input
+                type="number"
+                value={dUhc}
+                onChange={(e) => setDUhc(Number(e.target.value))}
+                className="w-12 rounded border border-[#2A2F38] bg-[#14161A] px-1.5 py-1 font-mono text-xs text-white"
+                title="UHC"
+              />
+              <button
+                type="button"
+                onClick={handleAddDrainagePoint}
+                className="inline-flex items-center gap-1 rounded bg-[#2F7CF6] px-2.5 py-1 text-xs font-semibold text-white hover:bg-[#2569D6]"
+              >
+                <Plus className="h-3.5 w-3.5" /> Inserir
+              </button>
+
+              <div className="ml-1 flex rounded border border-[#2A2F38] bg-[#14161A] p-0.5">
+                <button
+                  type="button"
+                  onClick={() => setSanView('planta')}
+                  className={`rounded px-2 py-0.5 text-xs ${
+                    sanView === 'planta' ? 'bg-[#2F7CF6] text-white' : 'text-[#949BA8] hover:text-white'
+                  }`}
+                >
+                  Planta
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSanView('tabela')}
+                  className={`rounded px-2 py-0.5 text-xs ${
+                    sanView === 'tabela' ? 'bg-[#2F7CF6] text-white' : 'text-[#949BA8] hover:text-white'
+                  }`}
+                >
+                  Tabela ({drainagePoints.length})
+                </button>
               </div>
             </div>
           </div>
 
-          <div className="rounded-lg border border-[#2A2F38] bg-[#1B1E24] p-4 space-y-3">
-            <h2 className="text-sm font-semibold text-white">Parâmetros de Reservação & Materiais</h2>
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-              <div>
-                <label className="block text-[11px] text-[#949BA8] mb-1">Ocupantes / Unidade</label>
-                <input
-                  type="number"
-                  min={1}
-                  value={project.hydraulicConfig.occupantsPerUnit}
-                  onChange={(e) =>
-                    onUpdateProject((prev) => ({
-                      ...prev,
-                      hydraulicConfig: { ...prev.hydraulicConfig, occupantsPerUnit: Number(e.target.value) },
-                    }))
-                  }
-                  className="w-full px-2 py-1.5 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                />
-              </div>
-              <div>
-                <label className="block text-[11px] text-[#949BA8] mb-1">Consumo (L/hab·dia)</label>
-                <input
-                  type="number"
-                  step="10"
-                  min={80}
-                  value={project.hydraulicConfig.litersPerPersonDay}
-                  onChange={(e) =>
-                    onUpdateProject((prev) => ({
-                      ...prev,
-                      hydraulicConfig: { ...prev.hydraulicConfig, litersPerPersonDay: Number(e.target.value) },
-                    }))
-                  }
-                  className="w-full px-2 py-1.5 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                />
-              </div>
-              <div>
-                <label className="block text-[11px] text-[#949BA8] mb-1">Dias de Reserva</label>
-                <input
-                  type="number"
-                  min={1}
-                  max={5}
-                  value={project.hydraulicConfig.reserveDays}
-                  onChange={(e) =>
-                    onUpdateProject((prev) => ({
-                      ...prev,
-                      hydraulicConfig: { ...prev.hydraulicConfig, reserveDays: Number(e.target.value) },
-                    }))
-                  }
-                  className="w-full px-2 py-1.5 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                />
-              </div>
-              <div>
-                <label className="block text-[11px] text-[#949BA8] mb-1">Tubulação Água Fria</label>
-                <input
-                  type="text"
-                  value={project.hydraulicConfig.coldWaterMaterial}
-                  onChange={(e) =>
-                    onUpdateProject((prev) => ({
-                      ...prev,
-                      hydraulicConfig: { ...prev.hydraulicConfig, coldWaterMaterial: e.target.value },
-                    }))
-                  }
-                  className="w-full px-2 py-1.5 text-xs rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                />
-              </div>
-              <div>
-                <label className="block text-[11px] text-[#949BA8] mb-1">Tubulação Água Quente</label>
-                <input
-                  type="text"
-                  value={project.hydraulicConfig.hotWaterMaterial}
-                  onChange={(e) =>
-                    onUpdateProject((prev) => ({
-                      ...prev,
-                      hydraulicConfig: { ...prev.hydraulicConfig, hotWaterMaterial: e.target.value },
-                    }))
-                  }
-                  className="w-full px-2 py-1.5 text-xs rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                />
-              </div>
-            </div>
-            <div className="text-xs text-[#949BA8] pt-1 font-mono">
-              Memória: {hydReport.reservoirMethodology}
-            </div>
-          </div>
-
-          {!activeUt && (
-            <div className="rounded-lg border border-dashed border-[#323844] bg-[#1B1E24] p-6 text-center text-xs text-[#949BA8]">
-              Nenhuma tipologia criada ainda. Cadastre uma tipologia na etapa &quot;Planta 2D & Tipologias&quot; para lançar pontos hidráulicos e sanitários.
+          {unitDrain.slopeIssues.length > 0 && (
+            <div className="flex shrink-0 items-center gap-1.5 truncate rounded border border-red-500/40 bg-red-950/30 px-3 py-1.5 text-xs text-red-200">
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-red-400" />
+              <span className="truncate" title={unitDrain.slopeIssues.join(' | ')}>
+                {unitDrain.slopeIssues[0]}
+                {unitDrain.slopeIssues.length > 1
+                  ? ` (+${unitDrain.slopeIssues.length - 1} alertas)`
+                  : ''}
+              </span>
             </div>
           )}
 
-          {activeUt && (
-            <div className="rounded-lg border border-[#2A2F38] bg-[#1B1E24] p-4 space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <h2 className="text-sm font-semibold text-white flex items-center gap-2">
-                    <Droplets className="w-4 h-4 text-[#60A5FA]" />
-                    Pontos Hidráulicos de {activeUt.code} ({activeUt.waterPoints.length})
-                  </h2>
-                  {hydRouting && (
-                    <div className="text-[11px] font-mono text-sky-300 mt-0.5">
-                      Prumada ({hydRouting.riser.x.toFixed(2)}, {hydRouting.riser.y.toFixed(2)}) · Tubulação otimizada (menor caminho MST): {hydRouting.totalPipeM} m
-                    </div>
-                  )}
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onUpdateProject((prev) => ({
-                        ...prev,
-                        hydraulicConfig: {
-                          ...prev.hydraulicConfig,
-                          hasHotWaterHeating: false,
-                          hotWaterMaterial: 'Sem Água Quente (Chuveiro Elétrico)',
-                          heatingSystem: 'Sem aquecimento central (kitnet simples: somente água fria + chuveiro elétrico)',
-                        },
-                        unitTypes: prev.unitTypes.map((u) =>
-                          u.id === activeUt.id
-                            ? {
-                                ...u,
-                                mepProfile: 'simples',
-                                waterPoints: u.waterPoints.filter((wp) => wp.waterType !== 'quente'),
-                              }
-                            : u,
-                        ),
-                      }), `Simplificação hidráulica (Só Água Fria) em ${activeUt.code}`);
-                    }}
-                    className="px-2.5 py-1 text-[11px] font-semibold rounded border border-emerald-500/40 bg-emerald-600/20 text-emerald-200 hover:bg-emerald-600/35"
-                  >
-                    Modo Só Água Fria (Simples)
-                  </button>
-                  <select
-                    value={wCat}
-                    onChange={(e) => setWCat(e.target.value as WaterCategory)}
-                    className="px-2 py-1 text-xs rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                  >
-                    <option value="pia">Pia</option>
-                    <option value="lavatorio">Lavatório</option>
-                    <option value="chuveiro">Chuveiro</option>
-                    <option value="vaso_sanitario">Vaso Sanitário</option>
-                    <option value="maquina_lavar">Máquina de Lavar</option>
-                  </select>
-                  <select
-                    value={wType}
-                    onChange={(e) => setWType(e.target.value as 'fria' | 'quente')}
-                    className="px-2 py-1 text-xs rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                  >
-                    <option value="fria">Água Fria</option>
-                    <option value="quente">Água Quente</option>
-                  </select>
-                  <input
-                    type="number"
-                    value={wDiam}
-                    onChange={(e) => setWDiam(Number(e.target.value))}
-                    className="w-16 px-2 py-1 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                    title="Diâmetro (mm)"
-                  />
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={wZ}
-                    onChange={(e) => setWZ(Number(e.target.value))}
-                    className="w-16 px-2 py-1 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                    title="Altura Z (m)"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onUpdateProject((prev) => ({
-                        ...prev,
-                        unitTypes: prev.unitTypes.map((u) =>
-                          u.id === activeUt.id
-                            ? {
-                                ...u,
-                                waterPoints: [
-                                  ...u.waterPoints,
-                                  {
-                                    id: nextId('wp'),
-                                    code: `${wType === 'quente' ? 'AQ' : 'AF'}-${u.waterPoints.length + 1}`,
-                                    category: wCat,
-                                    equipment: wCat.replace(/_/g, ' '),
-                                    roomId: u.rooms[0]?.id ?? '',
-                                    x: 0.5,
-                                    y: 0.2,
-                                    z: wZ,
-                                    waterType: wType,
-                                    diameterMm: wDiam,
-                                    material:
-                                      wType === 'quente'
-                                        ? prev.hydraulicConfig.hotWaterMaterial
-                                        : prev.hydraulicConfig.coldWaterMaterial,
-                                    availablePressureMca: 5.0,
-                                    supplySource: 'Coluna 01',
-                                    branchName: 'Ramal Principal',
-                                    weightHunter: 0.5,
-                                    notes: '',
-                                  },
-                                ],
-                              }
-                            : u,
-                        ),
-                      }));
-                    }}
-                    className="inline-flex items-center gap-1 px-3 py-1 text-xs font-semibold rounded bg-[#2F7CF6] text-white"
-                  >
-                    <Plus className="w-3.5 h-3.5" /> Adicionar Ponto
-                  </button>
-                </div>
-              </div>
-
-              {/* Interactive 2D Hydraulic Plan (AF/AQ) */}
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start pt-1">
-                <div className="lg:col-span-7 rounded border border-[#2A2F38] bg-[#111317] p-2">
-                  <div className="flex items-center justify-between px-1 pb-1.5 text-[11px] text-[#949BA8]">
-                    <span className="inline-flex items-center gap-1.5 text-sky-300 font-medium">
-                      <Move className="w-3.5 h-3.5" />
-                      Planta Hidráulica Interativa (arraste AF/AQ — sincronizada com Editor 2D)
+          <div className="min-h-0 flex-1 overflow-hidden">
+            {sanView === 'planta' ? (
+              <div className="grid h-full min-h-0 grid-cols-1 gap-3 overflow-hidden lg:grid-cols-12">
+                <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-[#2A2F38] bg-[#111317] p-2.5 lg:col-span-7">
+                  <div className="mb-1.5 flex shrink-0 items-center justify-between text-[11px] text-[#949BA8]">
+                    <span className="inline-flex items-center gap-1.5 font-medium text-emerald-300">
+                      <Move className="h-3.5 w-3.5" />
+                      Planta Sanitária Interativa (arraste pontos &amp; ralos)
                     </span>
                     <span>Snap 0,05m</span>
                   </div>
                   <svg
-                    ref={hydSvgRef}
+                    ref={drainSvgRef}
                     viewBox={`${-0.35} ${-0.35} ${activeUt.width + 0.7} ${activeUt.depth + 0.7}`}
-                    className="w-full max-h-[360px] select-none touch-none"
+                    className="min-h-0 h-full w-full flex-1 select-none touch-none"
                     onPointerMove={(e) => {
-                      if (!draggingWp) return;
-                      const pt = clientToUnitCoords(hydSvgRef.current, e.clientX, e.clientY);
-                      const nx = round2(Math.max(0.05, Math.min(activeUt.width - 0.05, snapCoord(pt.x - draggingWp.offsetX))));
-                      const ny = round2(Math.max(0.05, Math.min(activeUt.depth - 0.05, snapCoord(pt.y - draggingWp.offsetY))));
-                      updateWaterPoint(draggingWp.id, { x: nx, y: ny }, true);
+                      if (!draggingDp) return;
+                      const pt = clientToUnitCoords(drainSvgRef.current, e.clientX, e.clientY);
+                      const nx = round2(
+                        Math.max(
+                          0.05,
+                          Math.min(activeUt.width - 0.05, snapCoord(pt.x - draggingDp.offsetX)),
+                        ),
+                      );
+                      const ny = round2(
+                        Math.max(
+                          0.05,
+                          Math.min(activeUt.depth - 0.05, snapCoord(pt.y - draggingDp.offsetY)),
+                        ),
+                      );
+                      updateDrainagePoint(draggingDp.id, { x: nx, y: ny }, true);
                     }}
-                    onPointerUp={() => setDraggingWp(null)}
-                    onPointerLeave={() => setDraggingWp(null)}
+                    onPointerUp={() => setDraggingDp(null)}
+                    onPointerLeave={() => setDraggingDp(null)}
                   >
                     {activeUt.rooms
                       .filter((r) => r.category !== 'mezanino')
@@ -507,90 +1329,90 @@ export const MepHydraulicSanitaryModule: React.FC<MepHydraulicSanitaryModuleProp
                       const { center } = getOpeningWorldPosition(wall, op);
                       const deg = (getWallAngleRad(wall) * 180) / Math.PI;
                       return (
-                        <g key={op.id} transform={`translate(${center.x}, ${center.y}) rotate(${deg})`} pointerEvents="none">
-                          <rect x={-op.width / 2} y={-wall.thickness * 0.58} width={op.width} height={wall.thickness * 1.16} fill="#111317" />
-                          <line x1={-op.width / 2} y1={0} x2={op.width / 2} y2={0} stroke={op.type === 'janela' ? '#38BDF8' : '#F59E0B'} strokeWidth={0.03} />
+                        <g
+                          key={op.id}
+                          transform={`translate(${center.x}, ${center.y}) rotate(${deg})`}
+                          pointerEvents="none"
+                        >
+                          <rect
+                            x={-op.width / 2}
+                            y={-wall.thickness * 0.58}
+                            width={op.width}
+                            height={wall.thickness * 1.16}
+                            fill="#111317"
+                          />
+                          <line
+                            x1={-op.width / 2}
+                            y1={0}
+                            x2={op.width / 2}
+                            y2={0}
+                            stroke={op.type === 'janela' ? '#38BDF8' : '#F59E0B'}
+                            strokeWidth={0.03}
+                          />
                         </g>
                       );
                     })}
-                    {hydRouting && (
-                      <g pointerEvents="none">
-                        {hydRouting.segments.map((seg) => {
-                          const pts = seg.elbow
-                            ? `${seg.from.x},${seg.from.y} ${seg.elbow.x},${seg.elbow.y} ${seg.to.x},${seg.to.y}`
-                            : `${seg.from.x},${seg.from.y} ${seg.to.x},${seg.to.y}`;
-                          return (
-                            <polyline
-                              key={`hyd-rt-${seg.id}`}
-                              points={pts}
-                              fill="none"
-                              stroke={seg.kind === 'hot_water' ? '#EF4444' : '#38BDF8'}
-                              strokeOpacity={0.75}
-                              strokeWidth={0.028}
-                              strokeDasharray={seg.kind === 'hot_water' ? '0.07 0.04' : '0.09 0.03'}
-                            />
-                          );
-                        })}
-                        <circle
-                          cx={hydRouting.riser.x}
-                          cy={hydRouting.riser.y}
-                          r={0.09}
-                          fill="#0EA5E9"
-                          stroke="#FFFFFF"
-                          strokeWidth={0.02}
+                    {activeUt.drainagePoints.map((dp) => {
+                      const target = activeUt.drainagePoints.find((t) => t.id === dp.connectedToId);
+                      if (!target) return null;
+                      return (
+                        <line
+                          key={`dr-conn-${dp.id}`}
+                          x1={dp.x}
+                          y1={dp.y}
+                          x2={target.x}
+                          y2={target.y}
+                          stroke="#10B981"
+                          strokeOpacity={0.55}
+                          strokeWidth={0.028}
+                          strokeDasharray="0.07 0.05"
+                          pointerEvents="none"
                         />
-                        <text
-                          x={hydRouting.riser.x + 0.11}
-                          y={hydRouting.riser.y + 0.04}
-                          fill="#BAE6FD"
-                          fontSize="0.1"
-                          fontWeight="bold"
-                          fontFamily="JetBrains Mono, monospace"
-                        >
-                          PRUMADA AF
-                        </text>
-                      </g>
-                    )}
-                    {activeUt.waterPoints.map((wp) => {
-                      const isSel = selectedWpId === wp.id;
-                      const col = wp.waterType === 'quente' ? '#EF4444' : '#3B82F6';
+                      );
+                    })}
+                    {activeUt.drainagePoints.map((dp) => {
+                      const isSel = selectedDpId === dp.id;
                       return (
                         <g
-                          key={wp.id}
-                          transform={`translate(${wp.x}, ${wp.y})`}
+                          key={dp.id}
+                          transform={`translate(${dp.x}, ${dp.y})`}
                           className="cursor-move"
                           onPointerDown={(e) => {
                             e.stopPropagation();
-                            setSelectedWpId(wp.id);
-                            const pt = clientToUnitCoords(hydSvgRef.current, e.clientX, e.clientY);
-                            setDraggingWp({ id: wp.id, offsetX: pt.x - wp.x, offsetY: pt.y - wp.y });
+                            setSelectedDpId(dp.id);
+                            const pt = clientToUnitCoords(
+                              drainSvgRef.current,
+                              e.clientX,
+                              e.clientY,
+                            );
+                            setDraggingDp({
+                              id: dp.id,
+                              offsetX: pt.x - dp.x,
+                              offsetY: pt.y - dp.y,
+                            });
                           }}
                         >
                           <circle
                             r={0.15}
-                            fill={isSel ? 'rgba(59,130,246,0.28)' : 'transparent'}
+                            fill={isSel ? 'rgba(16,185,129,0.28)' : 'transparent'}
                             stroke={isSel ? '#60A5FA' : 'transparent'}
                             strokeWidth={0.025}
                           />
-                          <rect
-                            x={-0.08}
-                            y={-0.08}
-                            width={0.16}
-                            height={0.16}
-                            rx={0.025}
-                            fill={col}
-                            stroke={isSel ? '#FFFFFF' : '#0F1115'}
-                            strokeWidth={0.02}
+                          <circle
+                            r={0.09}
+                            fill="#0F1115"
+                            stroke={isSel ? '#FFFFFF' : '#10B981'}
+                            strokeWidth={0.032}
                           />
                           <text
                             x={0.12}
                             y={0.04}
-                            fill={wp.waterType === 'quente' ? '#FCA5A5' : '#93C5FD'}
+                            fill="#34D399"
                             fontSize="0.11"
                             fontWeight={isSel ? 'bold' : undefined}
                             fontFamily="JetBrains Mono, monospace"
                           >
-                            {wp.code}
+                            {dp.code}
                           </text>
                         </g>
                       );
@@ -598,693 +1420,309 @@ export const MepHydraulicSanitaryModule: React.FC<MepHydraulicSanitaryModuleProp
                   </svg>
                 </div>
 
-                <div className="lg:col-span-5 rounded border border-[#2A2F38] bg-[#14161A] p-3 space-y-2.5 text-xs">
-                  <div className="text-[11px] font-semibold uppercase tracking-wider text-sky-400">
-                    Ponto Hidráulico Selecionado
-                  </div>
-                  {(() => {
-                    const selWp = activeUt.waterPoints.find((p) => p.id === selectedWpId);
-                    if (!selWp) {
+                <div className="flex min-h-0 flex-col justify-between rounded-lg border border-[#2A2F38] bg-[#1B1E24] p-3 text-xs lg:col-span-5">
+                  <div className="space-y-2.5">
+                    <div className="border-b border-[#2A2F38] pb-2 text-[11px] font-semibold uppercase tracking-wider text-emerald-400">
+                      Ponto Sanitário Selecionado
+                    </div>
+                    {(() => {
+                      const selDp = activeUt.drainagePoints.find((p) => p.id === selectedDpId);
+                      if (!selDp) {
+                        return (
+                          <p className="rounded border border-dashed border-[#2A2F38] bg-[#14161A] p-3 text-[11px] text-[#949BA8]">
+                            Arraste qualquer ponto sanitário ou ralo na planta ao lado (ou selecione na aba Tabela) para reposicionar e atualizar as conexões.
+                          </p>
+                        );
+                      }
                       return (
-                        <p className="text-[11px] text-[#949BA8]">
-                          Arraste qualquer ponto AF/AQ na planta ao lado (ou clique em uma linha da tabela) para reposicionar e sincronizar com o Editor CAD 2D.
-                        </p>
-                      );
-                    }
-                    return (
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className="font-mono font-semibold text-white">
-                            {selWp.code} — {selWp.equipment}
-                          </span>
-                          <span className={selWp.waterType === 'quente' ? 'text-red-400' : 'text-sky-400'}>
-                            {selWp.waterType === 'quente' ? 'Água Quente' : 'Água Fria'}
-                          </span>
-                        </div>
-                        <div>
-                          <label className="block text-[10px] text-[#949BA8] mb-0.5">Ambiente</label>
-                          <select
-                            value={selWp.roomId}
-                            onChange={(e) => updateWaterPoint(selWp.id, { roomId: e.target.value })}
-                            className="w-full px-2 py-1 text-xs rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
-                          >
-                            {activeUt.rooms.map((rm) => (
-                              <option key={rm.id} value={rm.id}>
-                                {rm.name} ({rm.code})
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                        <div className="grid grid-cols-3 gap-2">
-                          <div>
-                            <label className="block text-[10px] text-[#949BA8] mb-0.5">X (m)</label>
-                            <input
-                              type="number"
-                              step="0.05"
-                              value={selWp.x}
-                              onChange={(e) => updateWaterPoint(selWp.id, { x: round2(Number(e.target.value)) }, true)}
-                              className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
-                            />
+                        <div className="space-y-2.5">
+                          <div className="flex items-center justify-between">
+                            <span className="font-mono font-semibold text-white">
+                              {selDp.code} — {selDp.category.replace(/_/g, ' ')}
+                            </span>
+                            <span className="font-mono text-[11px] text-emerald-400">
+                              Ø{selDp.diameterMm}mm
+                            </span>
                           </div>
                           <div>
-                            <label className="block text-[10px] text-[#949BA8] mb-0.5">Y (m)</label>
-                            <input
-                              type="number"
-                              step="0.05"
-                              value={selWp.y}
-                              onChange={(e) => updateWaterPoint(selWp.id, { y: round2(Number(e.target.value)) }, true)}
-                              className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-[10px] text-[#949BA8] mb-0.5">Altura Z (m)</label>
-                            <input
-                              type="number"
-                              step="0.05"
-                              value={selWp.z}
-                              onChange={(e) => updateWaterPoint(selWp.id, { z: round2(Number(e.target.value)) })}
-                              className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
-                            />
-                          </div>
-                        </div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div>
-                            <label className="block text-[10px] text-[#949BA8] mb-0.5">Diâmetro (mm)</label>
-                            <input
-                              type="number"
-                              step="5"
-                              value={selWp.diameterMm}
-                              onChange={(e) => updateWaterPoint(selWp.id, { diameterMm: Number(e.target.value) })}
-                              className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-[10px] text-[#949BA8] mb-0.5">Peso NBR</label>
-                            <input
-                              type="number"
-                              step="0.1"
-                              value={selWp.weightHunter}
-                              onChange={(e) => updateWaterPoint(selWp.id, { weightHunter: Number(e.target.value) })}
-                              className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })()}
-                </div>
-              </div>
-
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs border-collapse">
-                  <thead className="bg-[#181B20] text-[11px] text-[#949BA8]">
-                    <tr>
-                      <th className="py-2 px-3">Código</th>
-                      <th className="py-2 px-3">Equipamento</th>
-                      <th className="py-2 px-3">Ambiente</th>
-                      <th className="py-2 px-3">X / Y / Z (m)</th>
-                      <th className="py-2 px-3">Tipo</th>
-                      <th className="py-2 px-3 text-right">Ø (mm)</th>
-                      <th className="py-2 px-3 text-right">Peso NBR</th>
-                      <th className="py-2 px-3">Material</th>
-                      <th className="py-2 px-3 text-right">Remover</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[#252A33]">
-                    {activeUt.waterPoints.map((wp) => {
-                      const isSel = selectedWpId === wp.id;
-                      return (
-                        <tr
-                          key={wp.id}
-                          onClick={() => setSelectedWpId(wp.id)}
-                          className={`cursor-pointer ${isSel ? 'bg-[#2F7CF6]/15' : 'hover:bg-[#22262E]/50'}`}
-                        >
-                          <td className="py-2 px-3 font-mono text-[#60A5FA]">{wp.code}</td>
-                          <td className="py-2 px-3 text-white">{wp.equipment}</td>
-                          <td className="py-2 px-3">
+                            <label className="mb-0.5 block text-[10px] text-[#949BA8]">Ambiente</label>
                             <select
-                              value={wp.roomId}
-                              aria-label={`Ambiente de ${wp.code}`}
-                              onChange={(e) => updateWaterPoint(wp.id, { roomId: e.target.value })}
-                              className="px-1.5 py-0.5 bg-[#14161A] border border-[#2A2F38] rounded text-white text-xs"
+                              value={selDp.roomId}
+                              onChange={(e) =>
+                                updateDrainagePoint(selDp.id, { roomId: e.target.value })
+                              }
+                              className="w-full rounded border border-[#2A2F38] bg-[#14161A] px-2 py-1 text-xs text-white"
                             >
-                              {activeUt.rooms.map((r) => (
-                                <option key={r.id} value={r.id}>
-                                  {r.name}
+                              {activeUt.rooms.map((rm) => (
+                                <option key={rm.id} value={rm.id}>
+                                  {rm.name} ({rm.code})
                                 </option>
                               ))}
                             </select>
-                          </td>
-                          <td className="py-2 px-3 font-mono tabular-nums whitespace-nowrap">
-                            <input
-                              type="number"
-                              step="0.05"
-                              value={wp.x}
-                              aria-label={`Coordenada X de ${wp.code}`}
-                              onChange={(e) => updateWaterPoint(wp.id, { x: round2(Number(e.target.value)) }, true)}
-                              className="w-14 px-1 py-0.5 bg-[#14161A] border border-[#2A2F38] rounded text-white inline-block mr-1"
-                            />
-                            <input
-                              type="number"
-                              step="0.05"
-                              value={wp.y}
-                              aria-label={`Coordenada Y de ${wp.code}`}
-                              onChange={(e) => updateWaterPoint(wp.id, { y: round2(Number(e.target.value)) }, true)}
-                              className="w-14 px-1 py-0.5 bg-[#14161A] border border-[#2A2F38] rounded text-white inline-block mr-1"
-                            />
-                            <input
-                              type="number"
-                              step="0.05"
-                              value={wp.z}
-                              aria-label={`Altura Z de ${wp.code}`}
-                              onChange={(e) => updateWaterPoint(wp.id, { z: round2(Number(e.target.value)) })}
-                              className="w-14 px-1 py-0.5 bg-[#14161A] border border-[#2A2F38] rounded text-white inline-block"
-                            />
-                          </td>
-                          <td className="py-2 px-3">
-                            <span className={wp.waterType === 'quente' ? 'text-red-400' : 'text-sky-400'}>
-                              {wp.waterType === 'quente' ? 'Água Quente' : 'Água Fria'}
-                            </span>
-                          </td>
-                          <td className="py-2 px-3 text-right font-mono">{wp.diameterMm}</td>
-                          <td className="py-2 px-3 text-right font-mono">{wp.weightHunter}</td>
-                          <td className="py-2 px-3 text-[#C4C9D4]">{wp.material}</td>
-                          <td className="py-2 px-3 text-right">
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onUpdateProject((prev) => ({
-                                  ...prev,
-                                  unitTypes: prev.unitTypes.map((u) =>
-                                    u.id === activeUt.id
-                                      ? {
-                                          ...u,
-                                          waterPoints: u.waterPoints.filter((p) => p.id !== wp.id),
-                                        }
-                                      : u,
-                                  ),
-                                }));
-                              }}
-                              className="p-1 text-red-400 hover:text-red-300"
+                          </div>
+                          <div className="grid grid-cols-3 gap-2">
+                            <div>
+                              <label className="mb-0.5 block text-[10px] text-[#949BA8]">
+                                X (m)
+                              </label>
+                              <input
+                                type="number"
+                                step="0.05"
+                                value={selDp.x}
+                                onChange={(e) =>
+                                  updateDrainagePoint(
+                                    selDp.id,
+                                    { x: round2(Number(e.target.value)) },
+                                    true,
+                                  )
+                                }
+                                className="w-full rounded border border-[#2A2F38] bg-[#14161A] px-2 py-1 font-mono text-xs text-white"
+                              />
+                            </div>
+                            <div>
+                              <label className="mb-0.5 block text-[10px] text-[#949BA8]">
+                                Y (m)
+                              </label>
+                              <input
+                                type="number"
+                                step="0.05"
+                                value={selDp.y}
+                                onChange={(e) =>
+                                  updateDrainagePoint(
+                                    selDp.id,
+                                    { y: round2(Number(e.target.value)) },
+                                    true,
+                                  )
+                                }
+                                className="w-full rounded border border-[#2A2F38] bg-[#14161A] px-2 py-1 font-mono text-xs text-white"
+                              />
+                            </div>
+                            <div>
+                              <label className="mb-0.5 block text-[10px] text-[#949BA8]">
+                                Decliv. (%)
+                              </label>
+                              <input
+                                type="number"
+                                step="0.5"
+                                value={selDp.slopePercent}
+                                onChange={(e) =>
+                                  updateDrainagePoint(selDp.id, {
+                                    slopePercent: Number(e.target.value),
+                                  })
+                                }
+                                className="w-full rounded border border-[#2A2F38] bg-[#14161A] px-2 py-1 font-mono text-xs text-white"
+                              />
+                            </div>
+                          </div>
+                          <div>
+                            <label className="mb-0.5 block text-[10px] text-[#949BA8]">
+                              Conectado a
+                            </label>
+                            <select
+                              value={selDp.connectedToId}
+                              onChange={(e) =>
+                                updateDrainagePoint(selDp.id, { connectedToId: e.target.value })
+                              }
+                              className="w-full rounded border border-[#2A2F38] bg-[#14161A] px-2 py-1 font-mono text-xs text-white"
                             >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </td>
-                        </tr>
+                              <option value="CI-GERAL">CI-GERAL (Caixa Inspeção Externa)</option>
+                              {activeUt.drainagePoints
+                                .filter((t) => t.id !== selDp.id)
+                                .map((t) => (
+                                  <option key={t.id} value={t.id}>
+                                    {t.code} ({t.category.replace(/_/g, ' ')})
+                                  </option>
+                                ))}
+                            </select>
+                          </div>
+                        </div>
                       );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-              {unitHyd && (
-                <div className="text-xs text-[#949BA8] font-mono">
-                  Dimensionamento {activeUt.code}: {unitHyd.methodology}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* SANITÁRIA TAB */}
-      {subTab === 'sanitaria' && activeUt && unitDrain && (
-        <div className="space-y-5">
-          <div className="rounded-lg border border-[#2A2F38] bg-[#1B1E24] p-4 space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <h2 className="text-sm font-semibold text-white">
-                  Rede Sanitária Conectada — {activeUt.code} (ΣUHC: {unitDrain.totalUHC} · TQ Ø{unitDrain.recommendedStackMm}mm{drRouting ? ` · ${drRouting.totalDrainPipeM}m` : ''})
-                </h2>
-                <p className="text-xs text-[#949BA8] mt-0.5 font-mono">{unitDrain.methodology}</p>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <select
-                  value={dCat}
-                  onChange={(e) => setDCat(e.target.value as DrainageCategory)}
-                  className="px-2 py-1 text-xs rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                >
-                  <option value="pia">Saída Pia</option>
-                  <option value="lavatorio">Saída Lavatório</option>
-                  <option value="vaso_sanitario">Vaso Sanitário</option>
-                  <option value="chuveiro">Ralo Box</option>
-                  <option value="caixa_sifonada">Caixa Sifonada</option>
-                  <option value="caixa_gordura">Caixa de Gordura</option>
-                  <option value="tubo_queda">Tubo de Queda</option>
-                  <option value="ventilacao">Ventilação</option>
-                </select>
-                <input
-                  type="number"
-                  value={dDiam}
-                  onChange={(e) => setDDiam(Number(e.target.value))}
-                  className="w-16 px-2 py-1 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                  title="Diâmetro (mm)"
-                />
-                <input
-                  type="number"
-                  step="0.5"
-                  value={dSlope}
-                  onChange={(e) => setDSlope(Number(e.target.value))}
-                  className="w-16 px-2 py-1 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                  title="Declividade (%)"
-                />
-                <input
-                  type="number"
-                  value={dUhc}
-                  onChange={(e) => setDUhc(Number(e.target.value))}
-                  className="w-14 px-2 py-1 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
-                  title="UHC"
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    const tq = activeUt.drainagePoints.find((d) => d.category === 'tubo_queda');
-                    onUpdateProject((prev) => ({
-                      ...prev,
-                      unitTypes: prev.unitTypes.map((u) =>
-                        u.id === activeUt.id
-                          ? {
-                              ...u,
-                              drainagePoints: [
-                                ...u.drainagePoints,
-                                {
-                                  id: nextId('dr'),
-                                  code: `ES-${u.drainagePoints.length + 1}`,
-                                  category: dCat,
-                                  roomId: u.rooms[0]?.id ?? '',
-                                  x: 0.4,
-                                  y: 0.4,
-                                  diameterMm: dDiam,
-                                  material: 'PVC Esgoto SN',
-                                  slopePercent: dSlope,
-                                  uhc: dUhc,
-                                  connectedToId: tq?.id ?? 'CI-GERAL',
-                                  notes: '',
-                                },
-                              ],
-                            }
-                          : u,
-                      ),
-                    }));
-                  }}
-                  className="inline-flex items-center gap-1 px-3 py-1 text-xs font-semibold rounded bg-[#2F7CF6] text-white"
-                >
-                  <Plus className="w-3.5 h-3.5" /> Inserir
-                </button>
-              </div>
-            </div>
-
-            {unitDrain.slopeIssues.length > 0 && (
-              <div className="p-3 rounded border border-red-500/40 bg-red-950/30 text-xs text-red-200 space-y-1">
-                {unitDrain.slopeIssues.map((iss, i) => (
-                  <div key={i} className="flex items-center gap-1.5">
-                    <AlertTriangle className="w-3.5 h-3.5 text-red-400 shrink-0" />
-                    <span>{iss}</span>
+                    })()}
                   </div>
-                ))}
+
+                  <div className="rounded border border-[#2A2F38] bg-[#14161A] px-2.5 py-1.5 font-mono text-[10.5px] text-emerald-300">
+                    ΣUHC: {unitDrain.totalUHC} · Tubo de Queda Ø{unitDrain.recommendedStackMm}mm
+                    {drRouting ? ` · Comprimento total: ${drRouting.totalDrainPipeM} m` : ''}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="flex h-full min-h-0 flex-col justify-between overflow-hidden rounded-lg border border-[#2A2F38] bg-[#1B1E24]">
+                <div className="min-h-0 flex-1 overflow-hidden">
+                  <table className="w-full table-fixed border-collapse text-left text-xs">
+                    <thead className="bg-[#181B20] text-[11px] text-[#949BA8]">
+                      <tr>
+                        <th className="w-[8%] px-2.5 py-2">Código</th>
+                        <th className="w-[15%] px-2.5 py-2">Elemento</th>
+                        <th className="w-[16%] px-2.5 py-2">Ambiente</th>
+                        <th className="w-[16%] px-2.5 py-2">X / Y (m)</th>
+                        <th className="w-[8%] px-2 py-2 text-right">Ø (mm)</th>
+                        <th className="w-[11%] px-2 py-2 text-right">Decliv. %</th>
+                        <th className="w-[7%] px-2 py-2 text-right">UHC</th>
+                        <th className="w-[13%] px-2.5 py-2">Conectado a</th>
+                        <th className="w-[46px] px-2 py-2 text-right">Del</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#252A33]">
+                      {pagedDp.slice.map((dp) => {
+                        const isSel = selectedDpId === dp.id;
+                        return (
+                          <tr
+                            key={dp.id}
+                            onClick={() => setSelectedDpId(dp.id)}
+                            className={`cursor-pointer ${
+                              isSel ? 'bg-emerald-500/15' : 'hover:bg-[#22262E]/50'
+                            }`}
+                          >
+                            <td className="truncate px-2.5 py-1.5 font-mono text-emerald-400">
+                              {dp.code}
+                            </td>
+                            <td className="truncate px-2.5 py-1.5 text-white">
+                              {dp.category.replace(/_/g, ' ')}
+                            </td>
+                            <td className="px-2.5 py-1.5">
+                              <select
+                                value={dp.roomId}
+                                aria-label={`Ambiente de ${dp.code}`}
+                                onChange={(e) =>
+                                  updateDrainagePoint(dp.id, { roomId: e.target.value })
+                                }
+                                className="w-full truncate rounded border border-[#2A2F38] bg-[#14161A] px-1.5 py-0.5 text-xs text-white"
+                              >
+                                {activeUt.rooms.map((r) => (
+                                  <option key={r.id} value={r.id}>
+                                    {r.name}
+                                  </option>
+                                ))}
+                              </select>
+                            </td>
+                            <td className="px-2.5 py-1.5 font-mono tabular-nums whitespace-nowrap">
+                              <input
+                                type="number"
+                                step="0.05"
+                                value={dp.x}
+                                aria-label={`Coordenada X de ${dp.code}`}
+                                onChange={(e) =>
+                                  updateDrainagePoint(
+                                    dp.id,
+                                    { x: round2(Number(e.target.value)) },
+                                    true,
+                                  )
+                                }
+                                className="mr-1 inline-block w-12 rounded border border-[#2A2F38] bg-[#14161A] px-1 py-0.5 text-white"
+                              />
+                              <input
+                                type="number"
+                                step="0.05"
+                                value={dp.y}
+                                aria-label={`Coordenada Y de ${dp.code}`}
+                                onChange={(e) =>
+                                  updateDrainagePoint(
+                                    dp.id,
+                                    { y: round2(Number(e.target.value)) },
+                                    true,
+                                  )
+                                }
+                                className="inline-block w-12 rounded border border-[#2A2F38] bg-[#14161A] px-1 py-0.5 text-white"
+                              />
+                            </td>
+                            <td className="px-2 py-1.5 text-right font-mono">{dp.diameterMm}</td>
+                            <td className="px-2 py-1.5 text-right font-mono">
+                              <input
+                                type="number"
+                                step="0.5"
+                                value={dp.slopePercent}
+                                onChange={(e) =>
+                                  updateDrainagePoint(dp.id, {
+                                    slopePercent: Number(e.target.value),
+                                  })
+                                }
+                                className="w-14 rounded border border-[#2A2F38] bg-[#14161A] px-1 py-0.5 text-right font-mono text-white"
+                              />
+                            </td>
+                            <td className="px-2 py-1.5 text-right font-mono">{dp.uhc}</td>
+                            <td className="px-2.5 py-1.5 font-mono text-[#C4C9D4]">
+                              <select
+                                value={dp.connectedToId}
+                                onChange={(e) =>
+                                  updateDrainagePoint(dp.id, { connectedToId: e.target.value })
+                                }
+                                className="w-full truncate rounded border border-[#2A2F38] bg-[#14161A] px-1.5 py-0.5 font-mono text-xs text-white"
+                              >
+                                <option value="CI-GERAL">CI-GERAL</option>
+                                {activeUt.drainagePoints
+                                  .filter((t) => t.id !== dp.id)
+                                  .map((t) => (
+                                    <option key={t.id} value={t.id}>
+                                      {t.code}
+                                    </option>
+                                  ))}
+                              </select>
+                            </td>
+                            <td className="px-2 py-1.5 text-right">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onUpdateProject((prev) => ({
+                                    ...prev,
+                                    unitTypes: prev.unitTypes.map((u) =>
+                                      u.id === activeUt.id
+                                        ? {
+                                            ...u,
+                                            drainagePoints: u.drainagePoints.filter(
+                                              (p) => p.id !== dp.id,
+                                            ),
+                                          }
+                                        : u,
+                                    ),
+                                  }));
+                                }}
+                                className="p-1 text-red-400 hover:text-red-300"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <PaginationBar
+                  page={pagedDp.safePage}
+                  totalPages={pagedDp.totalPages}
+                  totalItems={drainagePoints.length}
+                  startIndex={pagedDp.start}
+                  endIndex={pagedDp.end}
+                  onPageChange={setDpPage}
+                  itemLabel="pontos sanitários"
+                />
               </div>
             )}
-
-            {/* Interactive 2D Sanitary Plan */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start pt-1">
-              <div className="lg:col-span-7 rounded border border-[#2A2F38] bg-[#111317] p-2">
-                <div className="flex items-center justify-between px-1 pb-1.5 text-[11px] text-[#949BA8]">
-                  <span className="inline-flex items-center gap-1.5 text-emerald-300 font-medium">
-                    <Move className="w-3.5 h-3.5" />
-                    Planta Sanitária Interativa (arraste pontos & ralos — sincronizada com Editor 2D)
-                  </span>
-                  <span>Snap 0,05m</span>
-                </div>
-                <svg
-                  ref={drainSvgRef}
-                  viewBox={`${-0.35} ${-0.35} ${activeUt.width + 0.7} ${activeUt.depth + 0.7}`}
-                  className="w-full max-h-[360px] select-none touch-none"
-                  onPointerMove={(e) => {
-                    if (!draggingDp) return;
-                    const pt = clientToUnitCoords(drainSvgRef.current, e.clientX, e.clientY);
-                    const nx = round2(Math.max(0.05, Math.min(activeUt.width - 0.05, snapCoord(pt.x - draggingDp.offsetX))));
-                    const ny = round2(Math.max(0.05, Math.min(activeUt.depth - 0.05, snapCoord(pt.y - draggingDp.offsetY))));
-                    updateDrainagePoint(draggingDp.id, { x: nx, y: ny }, true);
-                  }}
-                  onPointerUp={() => setDraggingDp(null)}
-                  onPointerLeave={() => setDraggingDp(null)}
-                >
-                  {activeUt.rooms
-                    .filter((r) => r.category !== 'mezanino')
-                    .map((rm) => (
-                      <g key={rm.id}>
-                        <rect
-                          x={rm.x}
-                          y={rm.y}
-                          width={rm.width}
-                          height={rm.depth}
-                          fill="#171A21"
-                          stroke="#262B35"
-                          strokeWidth={0.02}
-                        />
-                        <text
-                          x={rm.x + rm.width / 2}
-                          y={rm.y + rm.depth / 2}
-                          textAnchor="middle"
-                          fill="#4B5563"
-                          fontSize="0.18"
-                          fontWeight="bold"
-                        >
-                          {rm.code}
-                        </text>
-                      </g>
-                    ))}
-                  {activeUt.furniture
-                    .filter((f) => (f.elevationM ?? 0) < 0.8 && f.category !== 'luminaria')
-                    .map((fur) => (
-                      <g key={fur.id} opacity={0.38} pointerEvents="none">
-                        <FurnitureCadBlock
-                          category={fur.category}
-                          x={fur.x}
-                          y={fur.y}
-                          width={fur.width}
-                          depth={fur.depth}
-                          stroke="#64748B"
-                          fill="rgba(30,41,59,0.2)"
-                          strokeWidth={0.015}
-                          detailed={false}
-                          stairSpec={fur.stairSpec}
-                          rotationDeg={fur.rotationDeg}
-                        />
-                      </g>
-                    ))}
-                  {activeUt.walls.map((w) => (
-                    <line
-                      key={w.id}
-                      x1={w.start.x}
-                      y1={w.start.y}
-                      x2={w.end.x}
-                      y2={w.end.y}
-                      stroke={w.isExternal ? '#E2E8F0' : '#94A3B8'}
-                      strokeWidth={w.thickness}
-                      strokeLinecap="square"
-                      pointerEvents="none"
-                    />
-                  ))}
-                  {activeUt.openings.map((op) => {
-                    const wall = activeUt.walls.find((w) => w.id === op.wallId);
-                    if (!wall) return null;
-                    const { center } = getOpeningWorldPosition(wall, op);
-                    const deg = (getWallAngleRad(wall) * 180) / Math.PI;
-                    return (
-                      <g key={op.id} transform={`translate(${center.x}, ${center.y}) rotate(${deg})`} pointerEvents="none">
-                        <rect x={-op.width / 2} y={-wall.thickness * 0.58} width={op.width} height={wall.thickness * 1.16} fill="#111317" />
-                        <line x1={-op.width / 2} y1={0} x2={op.width / 2} y2={0} stroke={op.type === 'janela' ? '#38BDF8' : '#F59E0B'} strokeWidth={0.03} />
-                      </g>
-                    );
-                  })}
-                  {/* Pipe connections */}
-                  {activeUt.drainagePoints.map((dp) => {
-                    const target = activeUt.drainagePoints.find((t) => t.id === dp.connectedToId);
-                    if (!target) return null;
-                    return (
-                      <line
-                        key={`dr-conn-${dp.id}`}
-                        x1={dp.x}
-                        y1={dp.y}
-                        x2={target.x}
-                        y2={target.y}
-                        stroke="#10B981"
-                        strokeOpacity={0.55}
-                        strokeWidth={0.028}
-                        strokeDasharray="0.07 0.05"
-                        pointerEvents="none"
-                      />
-                    );
-                  })}
-                  {activeUt.drainagePoints.map((dp) => {
-                    const isSel = selectedDpId === dp.id;
-                    return (
-                      <g
-                        key={dp.id}
-                        transform={`translate(${dp.x}, ${dp.y})`}
-                        className="cursor-move"
-                        onPointerDown={(e) => {
-                          e.stopPropagation();
-                          setSelectedDpId(dp.id);
-                          const pt = clientToUnitCoords(drainSvgRef.current, e.clientX, e.clientY);
-                          setDraggingDp({ id: dp.id, offsetX: pt.x - dp.x, offsetY: pt.y - dp.y });
-                        }}
-                      >
-                        <circle
-                          r={0.15}
-                          fill={isSel ? 'rgba(16,185,129,0.28)' : 'transparent'}
-                          stroke={isSel ? '#60A5FA' : 'transparent'}
-                          strokeWidth={0.025}
-                        />
-                        <circle
-                          r={0.09}
-                          fill="#0F1115"
-                          stroke={isSel ? '#FFFFFF' : '#10B981'}
-                          strokeWidth={0.032}
-                        />
-                        <text
-                          x={0.12}
-                          y={0.04}
-                          fill="#34D399"
-                          fontSize="0.11"
-                          fontWeight={isSel ? 'bold' : undefined}
-                          fontFamily="JetBrains Mono, monospace"
-                        >
-                          {dp.code}
-                        </text>
-                      </g>
-                    );
-                  })}
-                </svg>
-              </div>
-
-              <div className="lg:col-span-5 rounded border border-[#2A2F38] bg-[#14161A] p-3 space-y-2.5 text-xs">
-                <div className="text-[11px] font-semibold uppercase tracking-wider text-emerald-400">
-                  Ponto Sanitário Selecionado
-                </div>
-                {(() => {
-                  const selDp = activeUt.drainagePoints.find((p) => p.id === selectedDpId);
-                  if (!selDp) {
-                    return (
-                      <p className="text-[11px] text-[#949BA8]">
-                        Arraste qualquer ponto sanitário ou ralo na planta ao lado (ou clique em uma linha da tabela) para reposicionar e atualizar as conexões no Editor CAD 2D.
-                      </p>
-                    );
-                  }
-                  return (
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="font-mono font-semibold text-white">
-                          {selDp.code} — {selDp.category.replace(/_/g, ' ')}
-                        </span>
-                        <span className="font-mono text-[11px] text-emerald-400">Ø{selDp.diameterMm}mm</span>
-                      </div>
-                      <div>
-                        <label className="block text-[10px] text-[#949BA8] mb-0.5">Ambiente</label>
-                        <select
-                          value={selDp.roomId}
-                          onChange={(e) => updateDrainagePoint(selDp.id, { roomId: e.target.value })}
-                          className="w-full px-2 py-1 text-xs rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
-                        >
-                          {activeUt.rooms.map((rm) => (
-                            <option key={rm.id} value={rm.id}>
-                              {rm.name} ({rm.code})
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div className="grid grid-cols-3 gap-2">
-                        <div>
-                          <label className="block text-[10px] text-[#949BA8] mb-0.5">X (m)</label>
-                          <input
-                            type="number"
-                            step="0.05"
-                            value={selDp.x}
-                            onChange={(e) => updateDrainagePoint(selDp.id, { x: round2(Number(e.target.value)) }, true)}
-                            className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[10px] text-[#949BA8] mb-0.5">Y (m)</label>
-                          <input
-                            type="number"
-                            step="0.05"
-                            value={selDp.y}
-                            onChange={(e) => updateDrainagePoint(selDp.id, { y: round2(Number(e.target.value)) }, true)}
-                            className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[10px] text-[#949BA8] mb-0.5">Decliv. (%)</label>
-                          <input
-                            type="number"
-                            step="0.5"
-                            value={selDp.slopePercent}
-                            onChange={(e) => updateDrainagePoint(selDp.id, { slopePercent: Number(e.target.value) })}
-                            className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
-                          />
-                        </div>
-                      </div>
-                      <div>
-                        <label className="block text-[10px] text-[#949BA8] mb-0.5">Conectado a</label>
-                        <select
-                          value={selDp.connectedToId}
-                          onChange={(e) => updateDrainagePoint(selDp.id, { connectedToId: e.target.value })}
-                          className="w-full px-2 py-1 text-xs font-mono rounded bg-[#1B1E24] border border-[#2A2F38] text-white"
-                        >
-                          <option value="CI-GERAL">CI-GERAL (Caixa Inspeção Externa)</option>
-                          {activeUt.drainagePoints
-                            .filter((t) => t.id !== selDp.id)
-                            .map((t) => (
-                              <option key={t.id} value={t.id}>
-                                {t.code} ({t.category.replace(/_/g, ' ')})
-                              </option>
-                            ))}
-                        </select>
-                      </div>
-                    </div>
-                  );
-                })()}
-              </div>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse">
-                <thead className="bg-[#181B20] text-[11px] text-[#949BA8]">
-                  <tr>
-                    <th className="py-2 px-3">Código</th>
-                    <th className="py-2 px-3">Elemento</th>
-                    <th className="py-2 px-3">Ambiente</th>
-                    <th className="py-2 px-3">X / Y (m)</th>
-                    <th className="py-2 px-3 text-right">Ø (mm)</th>
-                    <th className="py-2 px-3 text-right">Decliv. (%)</th>
-                    <th className="py-2 px-3 text-right">UHC</th>
-                    <th className="py-2 px-3">Conectado a</th>
-                    <th className="py-2 px-3 text-right">Remover</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[#252A33]">
-                  {activeUt.drainagePoints.map((dp) => {
-                    const isSel = selectedDpId === dp.id;
-                    return (
-                      <tr
-                        key={dp.id}
-                        onClick={() => setSelectedDpId(dp.id)}
-                        className={`cursor-pointer ${isSel ? 'bg-emerald-500/15' : 'hover:bg-[#22262E]/50'}`}
-                      >
-                        <td className="py-2 px-3 font-mono text-emerald-400">{dp.code}</td>
-                        <td className="py-2 px-3 text-white">{dp.category.replace(/_/g, ' ')}</td>
-                        <td className="py-2 px-3">
-                          <select
-                            value={dp.roomId}
-                            aria-label={`Ambiente de ${dp.code}`}
-                            onChange={(e) => updateDrainagePoint(dp.id, { roomId: e.target.value })}
-                            className="px-1.5 py-0.5 bg-[#14161A] border border-[#2A2F38] rounded text-white text-xs"
-                          >
-                            {activeUt.rooms.map((r) => (
-                              <option key={r.id} value={r.id}>
-                                {r.name}
-                              </option>
-                            ))}
-                          </select>
-                        </td>
-                        <td className="py-2 px-3 font-mono tabular-nums whitespace-nowrap">
-                          <input
-                            type="number"
-                            step="0.05"
-                            value={dp.x}
-                            aria-label={`Coordenada X de ${dp.code}`}
-                            onChange={(e) => updateDrainagePoint(dp.id, { x: round2(Number(e.target.value)) }, true)}
-                            className="w-14 px-1 py-0.5 bg-[#14161A] border border-[#2A2F38] rounded text-white inline-block mr-1"
-                          />
-                          <input
-                            type="number"
-                            step="0.05"
-                            value={dp.y}
-                            aria-label={`Coordenada Y de ${dp.code}`}
-                            onChange={(e) => updateDrainagePoint(dp.id, { y: round2(Number(e.target.value)) }, true)}
-                            className="w-14 px-1 py-0.5 bg-[#14161A] border border-[#2A2F38] rounded text-white inline-block"
-                          />
-                        </td>
-                        <td className="py-2 px-3 text-right font-mono">{dp.diameterMm}</td>
-                        <td className="py-2 px-3 text-right font-mono">
-                          <input
-                            type="number"
-                            step="0.5"
-                            value={dp.slopePercent}
-                            onChange={(e) => updateDrainagePoint(dp.id, { slopePercent: Number(e.target.value) })}
-                            className="w-16 px-1.5 py-0.5 text-right font-mono bg-[#14161A] border border-[#2A2F38] rounded text-white"
-                          />
-                        </td>
-                        <td className="py-2 px-3 text-right font-mono">{dp.uhc}</td>
-                        <td className="py-2 px-3 font-mono text-[#C4C9D4]">
-                          <select
-                            value={dp.connectedToId}
-                            onChange={(e) => updateDrainagePoint(dp.id, { connectedToId: e.target.value })}
-                            className="px-1.5 py-0.5 bg-[#14161A] border border-[#2A2F38] rounded text-white text-xs font-mono"
-                          >
-                            <option value="CI-GERAL">CI-GERAL</option>
-                            {activeUt.drainagePoints
-                              .filter((t) => t.id !== dp.id)
-                              .map((t) => (
-                                <option key={t.id} value={t.id}>
-                                  {t.code}
-                                </option>
-                              ))}
-                          </select>
-                        </td>
-                        <td className="py-2 px-3 text-right">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onUpdateProject((prev) => ({
-                                ...prev,
-                                unitTypes: prev.unitTypes.map((u) =>
-                                  u.id === activeUt.id
-                                    ? {
-                                        ...u,
-                                        drainagePoints: u.drainagePoints.filter((p) => p.id !== dp.id),
-                                      }
-                                    : u,
-                                ),
-                              }));
-                            }}
-                            className="p-1 text-red-400 hover:text-red-300"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
           </div>
         </div>
       )}
 
       {/* ÁGUAS PLUVIAIS TAB */}
       {subTab === 'pluviais' && (
-        <div className="space-y-5">
-          <div className="rounded-lg border border-[#2A2F38] bg-[#1B1E24] p-4 space-y-4">
-            <h2 className="text-sm font-semibold text-white flex items-center gap-2">
-              <CloudRain className="w-4 h-4 text-[#60A5FA]" />
+        <div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-hidden">
+          <div className="shrink-0 space-y-2.5 rounded-lg border border-[#2A2F38] bg-[#1B1E24] p-3">
+            <h2 className="flex items-center gap-2 text-xs font-semibold text-white">
+              <CloudRain className="h-4 w-4 text-[#60A5FA]" />
               Parâmetros Pluviométricos (ABNT NBR 10844)
             </h2>
 
             {rainReport.status === 'pendente_dados_pluviometricos' && (
-              <div className="p-3 rounded border border-amber-500/40 bg-amber-950/30 text-xs text-amber-200 flex items-start gap-2">
-                <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                <span>{rainReport.methodology}</span>
+              <div className="flex items-center gap-2 rounded border border-amber-500/40 bg-amber-950/30 px-3 py-1.5 text-xs text-amber-200">
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-400" />
+                <span className="truncate">{rainReport.methodology}</span>
               </div>
             )}
 
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               <div>
-                <label className="block text-[11px] text-[#949BA8] mb-1">Localidade / Município</label>
+                <label className="mb-1 block text-[11px] text-[#949BA8]">Localidade / Município</label>
                 <input
                   type="text"
                   value={project.rainwaterConfig.municipality}
@@ -1295,11 +1733,11 @@ export const MepHydraulicSanitaryModule: React.FC<MepHydraulicSanitaryModuleProp
                       rainwaterConfig: { ...prev.rainwaterConfig, municipality: e.target.value },
                     }))
                   }
-                  className="w-full px-2.5 py-1.5 text-xs rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                  className="w-full rounded border border-[#2A2F38] bg-[#14161A] px-2.5 py-1.5 text-xs text-white"
                 />
               </div>
               <div>
-                <label className="block text-[11px] text-[#949BA8] mb-1">Intensidade I (mm/h)</label>
+                <label className="mb-1 block text-[11px] text-[#949BA8]">Intensidade I (mm/h)</label>
                 <input
                   type="number"
                   step="1"
@@ -1314,11 +1752,13 @@ export const MepHydraulicSanitaryModule: React.FC<MepHydraulicSanitaryModuleProp
                       },
                     }))
                   }
-                  className="w-full px-2.5 py-1.5 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                  className="w-full rounded border border-[#2A2F38] bg-[#14161A] px-2.5 py-1.5 font-mono text-xs text-white"
                 />
               </div>
               <div>
-                <label className="block text-[11px] text-[#949BA8] mb-1">Período Retorno (anos)</label>
+                <label className="mb-1 block text-[11px] text-[#949BA8]">
+                  Período Retorno (anos)
+                </label>
                 <input
                   type="number"
                   value={project.rainwaterConfig.returnPeriodYears ?? ''}
@@ -1332,11 +1772,13 @@ export const MepHydraulicSanitaryModule: React.FC<MepHydraulicSanitaryModuleProp
                       },
                     }))
                   }
-                  className="w-full px-2.5 py-1.5 text-xs font-mono rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                  className="w-full rounded border border-[#2A2F38] bg-[#14161A] px-2.5 py-1.5 font-mono text-xs text-white"
                 />
               </div>
               <div>
-                <label className="block text-[11px] text-[#949BA8] mb-1">Fonte Normativa / Estação</label>
+                <label className="mb-1 block text-[11px] text-[#949BA8]">
+                  Fonte Normativa / Estação
+                </label>
                 <input
                   type="text"
                   value={project.rainwaterConfig.sourceReference}
@@ -1344,42 +1786,60 @@ export const MepHydraulicSanitaryModule: React.FC<MepHydraulicSanitaryModuleProp
                   onChange={(e) =>
                     onUpdateProject((prev) => ({
                       ...prev,
-                      rainwaterConfig: { ...prev.rainwaterConfig, sourceReference: e.target.value },
+                      rainwaterConfig: {
+                        ...prev.rainwaterConfig,
+                        sourceReference: e.target.value,
+                      },
                     }))
                   }
-                  className="w-full px-2.5 py-1.5 text-xs rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                  className="w-full rounded border border-[#2A2F38] bg-[#14161A] px-2.5 py-1.5 text-xs text-white"
                 />
               </div>
             </div>
 
             {rainReport.flowLMin !== null && (
-              <div className="p-3 rounded border border-emerald-500/40 bg-emerald-950/20 text-xs text-emerald-200 font-mono">
+              <div className="truncate rounded border border-emerald-500/40 bg-emerald-950/20 px-3 py-1.5 font-mono text-xs text-emerald-200">
                 Vazão Pluvial Calculada: {rainReport.flowLMin} L/min — {rainReport.methodology}
               </div>
             )}
+          </div>
 
-            <table className="w-full text-left text-xs border-collapse">
-              <thead className="bg-[#181B20] text-[11px] text-[#949BA8]">
-                <tr>
-                  <th className="py-2 px-3">Código</th>
-                  <th className="py-2 px-3">Tipo</th>
-                  <th className="py-2 px-3">Descrição</th>
-                  <th className="py-2 px-3 text-right">Área Contrib. (m²)</th>
-                  <th className="py-2 px-3">Seção / Diâmetro</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#252A33]">
-                {project.rainwaterElements.map((rw) => (
-                  <tr key={rw.id}>
-                    <td className="py-2 px-3 font-mono text-[#60A5FA]">{rw.code}</td>
-                    <td className="py-2 px-3">{rw.type}</td>
-                    <td className="py-2 px-3 text-white">{rw.description}</td>
-                    <td className="py-2 px-3 text-right font-mono">{rw.catchmentAreaM2}</td>
-                    <td className="py-2 px-3 font-mono">{rw.diameterOrSection}</td>
+          <div className="flex min-h-0 flex-1 flex-col justify-between overflow-hidden rounded-lg border border-[#2A2F38] bg-[#1B1E24]">
+            <div className="min-h-0 flex-1 overflow-hidden">
+              <table className="w-full table-fixed border-collapse text-left text-xs">
+                <thead className="bg-[#181B20] text-[11px] text-[#949BA8]">
+                  <tr>
+                    <th className="w-[12%] px-3 py-2">Código</th>
+                    <th className="w-[16%] px-3 py-2">Tipo</th>
+                    <th className="w-[40%] px-3 py-2">Descrição</th>
+                    <th className="w-[16%] px-3 py-2 text-right">Área Contrib. (m²)</th>
+                    <th className="w-[16%] px-3 py-2">Seção / Diâmetro</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-[#252A33]">
+                  {pagedRw.slice.map((rw) => (
+                    <tr key={rw.id} className="hover:bg-[#22262E]/50">
+                      <td className="truncate px-3 py-2 font-mono text-[#60A5FA]">{rw.code}</td>
+                      <td className="truncate px-3 py-2">{rw.type}</td>
+                      <td className="truncate px-3 py-2 text-white" title={rw.description}>
+                        {rw.description}
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono">{rw.catchmentAreaM2}</td>
+                      <td className="truncate px-3 py-2 font-mono">{rw.diameterOrSection}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <PaginationBar
+              page={pagedRw.safePage}
+              totalPages={pagedRw.totalPages}
+              totalItems={project.rainwaterElements.length}
+              startIndex={pagedRw.start}
+              endIndex={pagedRw.end}
+              onPageChange={setRwPage}
+              itemLabel="elementos pluviais"
+            />
           </div>
         </div>
       )}

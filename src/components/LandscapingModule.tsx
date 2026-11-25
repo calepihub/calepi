@@ -32,6 +32,7 @@ import type {
   Project,
   SiteLandscaping,
 } from '../types/project';
+import { PaginationBar, paginateItems, useViewportPageSize } from './PaginationBar';
 
 interface LandscapingModuleProps {
   project: Project;
@@ -63,6 +64,8 @@ export const LandscapingModule: React.FC<LandscapingModuleProps> = ({
   );
 
   const [selected, setSelected] = useState<SelectedItem>(null);
+  const [leftTab, setLeftTab] = useState<'solo' | 'botanica'>('solo');
+  const [speciesPage, setSpeciesPage] = useState(0);
   const [placingSpeciesId, setPlacingSpeciesId] = useState<BotanicalSpeciesId | null>(null);
   const [speciesFilter, setSpeciesFilter] = useState<SpeciesFilter>('todos');
   const [dragging, setDragging] = useState<{
@@ -250,6 +253,8 @@ export const LandscapingModule: React.FC<LandscapingModuleProps> = ({
         : BOTANICAL_SPECIES_CATALOG.filter((s) => s.category === speciesFilter),
     [speciesFilter],
   );
+  const speciesPerPage = useViewportPageSize(380, 62, 3, 8);
+  const pagedSpecies = paginateItems(filteredSpecies, speciesPage, speciesPerPage);
 
   const selectedZone =
     selected?.kind === 'zone' ? landscaping.surfaceZones.find((z) => z.id === selected.id) ?? null : null;
@@ -285,265 +290,330 @@ export const LandscapingModule: React.FC<LandscapingModuleProps> = ({
   }, [bbox, landscaping, project.floors, project.unitTypes]);
 
   return (
-    <div className="mx-auto max-w-[1520px] space-y-4 p-4 sm:p-6 text-slate-100">
-      {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[#2A2F38] bg-[#1B1E24] p-4">
-        <div>
-          <h1 className="flex items-center gap-2 text-lg font-semibold text-white">
-            <Trees className="h-5 w-5 text-emerald-400" />
+    <div className="mx-auto flex h-full w-full max-w-[1520px] flex-col gap-2 overflow-hidden p-3 text-slate-100">
+      {/* Compact Header */}
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 rounded-lg border border-[#2A2F38] bg-[#1B1E24] px-4 py-2">
+        <div className="min-w-0">
+          <h1 className="flex items-center gap-2 text-base font-semibold text-white">
+            <Trees className="h-4 w-4 text-emerald-400" />
             Paisagismo, Piscinas, Área Gourmet &amp; Pisos Externos
           </h1>
-          <p className="mt-0.5 text-xs text-slate-400">
-            Planeje pisos externos (gramas, antiderrapante, areia, brita, deck, paver), lazer e 17 espécies botânicas brasileiras sincronizadas no 3D PBR, CAD e SINAPI-RJ.
+          <p className="truncate text-[11px] text-slate-400">
+            Pisos externos, lazer e 17 espécies botânicas sincronizadas no 3D PBR, CAD e SINAPI-RJ.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-1.5">
           <button
             type="button"
             onClick={handleAutoPopulate}
-            className="inline-flex items-center gap-1.5 rounded bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500"
+            className="inline-flex items-center gap-1 rounded bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-emerald-500 whitespace-nowrap"
           >
             <Sparkles className="h-3.5 w-3.5" />
-            Auto-Preencher Jardim, Piscina &amp; Gourmet
+            Auto-Preencher
           </button>
           {onOpenRenderStudio && (
             <button
               type="button"
               onClick={onOpenRenderStudio}
-              className="inline-flex items-center gap-1.5 rounded border border-[#2F7CF6] bg-[#2F7CF6]/15 px-3 py-1.5 text-xs font-medium text-[#60A5FA] hover:bg-[#2F7CF6] hover:text-white"
+              className="inline-flex items-center gap-1 rounded border border-[#2F7CF6] bg-[#2F7CF6]/15 px-2.5 py-1 text-xs font-medium text-[#60A5FA] hover:bg-[#2F7CF6] hover:text-white whitespace-nowrap"
             >
               <Sun className="h-3.5 w-3.5" />
-              Abrir Render Cinematográfico
+              Render 3D
             </button>
           )}
           <button
             type="button"
             onClick={handleClearLandscaping}
-            className="inline-flex items-center gap-1 rounded border border-slate-700 bg-[#14161A] px-2.5 py-1.5 text-xs text-slate-300 hover:border-red-500/60 hover:text-red-300"
+            className="inline-flex items-center gap-1 rounded border border-slate-700 bg-[#14161A] px-2.5 py-1 text-xs text-slate-300 hover:border-red-500/60 hover:text-red-300 whitespace-nowrap"
           >
             <Trash2 className="h-3.5 w-3.5" /> Limpar
           </button>
         </div>
       </div>
 
-      {/* KPI & Permeable Soil Strip */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-        <div className="rounded border border-[#2A2F38] bg-[#1B1E24] p-3">
-          <div className="text-[11px] text-slate-400">Área Livre do Lote</div>
-          <div className="mt-0.5 font-mono text-base font-semibold text-white">
+      {/* Compact KPI Strip */}
+      <div className="grid shrink-0 grid-cols-5 gap-2">
+        <div className="rounded border border-[#2A2F38] bg-[#1B1E24] px-3 py-1.5">
+          <div className="text-[10px] text-slate-400">Área Livre do Lote</div>
+          <div className="font-mono text-sm font-semibold tabular-nums text-white">
             {round2(Math.max(0, summaryStats.lotArea - summaryStats.builtFootprint))} m²
           </div>
         </div>
-        <div className="rounded border border-[#2A2F38] bg-[#1B1E24] p-3">
-          <div className="text-[11px] text-slate-400">Taxa de Permeabilidade</div>
-          <div className="mt-0.5 font-mono text-base font-semibold text-emerald-400">
+        <div className="rounded border border-[#2A2F38] bg-[#1B1E24] px-3 py-1.5">
+          <div className="text-[10px] text-slate-400">Taxa Permeabilidade</div>
+          <div className="font-mono text-sm font-semibold tabular-nums text-emerald-400">
             {summaryStats.permRate}% ({summaryStats.permeableArea} m²)
           </div>
         </div>
-        <div className="rounded border border-[#2A2F38] bg-[#1B1E24] p-3">
-          <div className="text-[11px] text-slate-400">Zonas de Piso Externo</div>
-          <div className="mt-0.5 font-mono text-base font-semibold text-white">
+        <div className="rounded border border-[#2A2F38] bg-[#1B1E24] px-3 py-1.5">
+          <div className="text-[10px] text-slate-400">Zonas de Piso</div>
+          <div className="font-mono text-sm font-semibold tabular-nums text-white">
             {landscaping.surfaceZones.length} zonas
           </div>
         </div>
-        <div className="rounded border border-[#2A2F38] bg-[#1B1E24] p-3">
-          <div className="text-[11px] text-slate-400">Piscinas &amp; Gourmet</div>
-          <div className="mt-0.5 font-mono text-base font-semibold text-cyan-300">
+        <div className="rounded border border-[#2A2F38] bg-[#1B1E24] px-3 py-1.5">
+          <div className="text-[10px] text-slate-400">Piscina &amp; Gourmet</div>
+          <div className="font-mono text-sm font-semibold tabular-nums text-cyan-300">
             {landscaping.pools.length} pisc. · {landscaping.gourmetAreas.length} goum.
           </div>
         </div>
-        <div className="rounded border border-[#2A2F38] bg-[#1B1E24] p-3">
-          <div className="text-[11px] text-slate-400">Árvores &amp; Espécies</div>
-          <div className="mt-0.5 font-mono text-base font-semibold text-emerald-300">
+        <div className="rounded border border-[#2A2F38] bg-[#1B1E24] px-3 py-1.5">
+          <div className="text-[10px] text-slate-400">Árvores &amp; Espécies</div>
+          <div className="font-mono text-sm font-semibold tabular-nums text-emerald-300">
             {landscaping.plants.length} exemplares
           </div>
         </div>
       </div>
 
-      {/* Main 3-column Interactive Workspace */}
-      <div className="grid gap-4 lg:grid-cols-12">
-        {/* Left Controls: Ground Finish + Quick Add + Botanical Catalog */}
-        <div className="space-y-4 lg:col-span-4">
-          {/* Ground base surface & Add Lazer */}
-          <div className="rounded-lg border border-[#2A2F38] bg-[#1B1E24] p-3.5 space-y-3">
-            <div>
-              <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
-                Solo Base Predominante do Terreno
-              </label>
-              <select
-                value={landscaping.defaultGroundSurface}
-                onChange={(e) =>
-                  updateLandscaping((cur) => ({
-                    ...cur,
-                    defaultGroundSurface: e.target.value as ExteriorSurfaceType,
-                  }))
-                }
-                className="w-full rounded border border-[#2A2F38] bg-[#14161A] px-2.5 py-1.5 text-xs text-white"
-              >
-                {EXTERIOR_SURFACE_CATALOG.map((surf) => (
-                  <option key={surf.id} value={surf.id}>
-                    {surf.label} {surf.permeable ? '· Permeável' : '· Impermeável'}
-                  </option>
-                ))}
-              </select>
-              <p className="mt-1 text-[11px] text-slate-400">{groundMeta.notes}</p>
-            </div>
-
-            <div className="grid grid-cols-3 gap-2 pt-1">
-              <button
-                type="button"
-                onClick={() => handleAddZone('piso_antiderrapante')}
-                className="flex flex-col items-center gap-1 rounded border border-[#2A2F38] bg-[#14161A] px-2 py-2 text-[11px] font-medium text-slate-200 hover:border-[#2F7CF6] hover:text-white"
-              >
-                <Layers className="h-4 w-4 text-amber-300" />
-                + Zona Piso
-              </button>
-              <button
-                type="button"
-                onClick={handleAddPool}
-                className="flex flex-col items-center gap-1 rounded border border-[#2A2F38] bg-[#14161A] px-2 py-2 text-[11px] font-medium text-slate-200 hover:border-cyan-400 hover:text-white"
-              >
-                <Waves className="h-4 w-4 text-cyan-400" />
-                + Piscina
-              </button>
-              <button
-                type="button"
-                onClick={handleAddGourmet}
-                className="flex flex-col items-center gap-1 rounded border border-[#2A2F38] bg-[#14161A] px-2 py-2 text-[11px] font-medium text-slate-200 hover:border-orange-400 hover:text-white"
-              >
-                <Flame className="h-4 w-4 text-orange-400" />
-                + Gourmet
-              </button>
-            </div>
-
-            <label className="flex items-center gap-2 border-t border-slate-800 pt-2 text-xs text-slate-300 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={landscaping.gardenLightsOn ?? true}
-                onChange={(e) =>
-                  updateLandscaping((cur) => ({ ...cur, gardenLightsOn: e.target.checked }))
-                }
-              />
-              Balizadores / iluminação cênica do jardim e piscina à noite
-            </label>
+      {/* Main 3-column Zero-Scroll Workspace */}
+      <div className="grid min-h-0 flex-1 grid-cols-12 gap-3 overflow-hidden">
+        {/* Left Controls (Tabbed: Solo & Lazer | Catálogo Botânico) */}
+        <div className="col-span-4 flex min-h-0 flex-col overflow-hidden rounded-lg border border-[#2A2F38] bg-[#1B1E24]">
+          <div className="flex shrink-0 border-b border-[#2A2F38] bg-[#14161A] p-1 gap-1">
+            <button
+              type="button"
+              onClick={() => setLeftTab('solo')}
+              className={`flex-1 rounded py-1 text-xs font-medium whitespace-nowrap ${
+                leftTab === 'solo' ? 'bg-[#2F7CF6] text-white' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              Solo &amp; Lazer
+            </button>
+            <button
+              type="button"
+              onClick={() => setLeftTab('botanica')}
+              className={`flex-1 rounded py-1 text-xs font-medium whitespace-nowrap ${
+                leftTab === 'botanica' ? 'bg-[#2F7CF6] text-white' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              Botânica Real (17)
+            </button>
           </div>
 
-          {/* 17 Botanical Species Catalog */}
-          <div className="rounded-lg border border-[#2A2F38] bg-[#1B1E24] p-3.5 space-y-3">
-            <div className="flex items-center justify-between gap-2">
-              <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-300">
-                Catálogo Botânico Real (17 Espécies)
-              </h2>
-              {placingSpeciesId && (
-                <button
-                  type="button"
-                  onClick={() => setPlacingSpeciesId(null)}
-                  className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10.5px] text-amber-300"
-                >
-                  Cancelar plantio
-                </button>
-              )}
-            </div>
-
-            <div className="flex flex-wrap gap-1">
-              {(
-                [
-                  ['todos', 'Todas (17)'],
-                  ['frutifera', 'Frutíferas'],
-                  ['palmeira', 'Palmeiras'],
-                  ['arvore_ornamental', 'Árvores'],
-                  ['tropical_arbusto', 'Tropicais'],
-                ] as const
-              ).map(([cat, label]) => (
-                <button
-                  key={cat}
-                  type="button"
-                  onClick={() => setSpeciesFilter(cat)}
-                  className={`rounded px-2 py-1 text-[11px] font-medium ${
-                    speciesFilter === cat
-                      ? 'bg-[#2F7CF6] text-white'
-                      : 'bg-[#14161A] text-slate-400 hover:text-white'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-
-            {placingSpeciesId && (
-              <div className="rounded border border-emerald-500/40 bg-emerald-950/40 px-2.5 py-1.5 text-[11px] text-emerald-200">
-                Clique na planta do terreno ao lado para plantar:{' '}
-                <strong>{getBotanicalMeta(placingSpeciesId).commonName}</strong>
-              </div>
-            )}
-
-            <div className="max-h-[340px] space-y-1.5 overflow-y-auto pr-1">
-              {filteredSpecies.map((sp) => {
-                const isPlacing = placingSpeciesId === sp.id;
-                return (
-                  <button
-                    key={sp.id}
-                    type="button"
-                    onClick={() => setPlacingSpeciesId(isPlacing ? null : sp.id)}
-                    className={`flex w-full items-start gap-2.5 rounded border p-2 text-left transition ${
-                      isPlacing
-                        ? 'border-emerald-400 bg-emerald-950/40'
-                        : 'border-[#2A2F38] bg-[#14161A] hover:border-slate-600'
-                    }`}
+          {leftTab === 'solo' ? (
+            <div className="flex min-h-0 flex-1 flex-col justify-between gap-3 overflow-hidden p-3">
+              <div className="space-y-3">
+                <div>
+                  <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                    Solo Base Predominante do Terreno
+                  </label>
+                  <select
+                    value={landscaping.defaultGroundSurface}
+                    onChange={(e) =>
+                      updateLandscaping((cur) => ({
+                        ...cur,
+                        defaultGroundSurface: e.target.value as ExteriorSurfaceType,
+                      }))
+                    }
+                    className="w-full rounded border border-[#2A2F38] bg-[#14161A] px-2.5 py-1.5 text-xs text-white"
                   >
-                    <span
-                      className="mt-0.5 h-5 w-5 shrink-0 rounded-full border border-white/20"
-                      style={{
-                        background: `radial-gradient(circle at 35% 35%, ${sp.accentHex}, ${sp.foliageHex})`,
-                      }}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center justify-between gap-1">
-                        <span className="truncate text-xs font-semibold text-white">
-                          {sp.commonName}
-                        </span>
-                        <span className="font-mono text-[10px] text-emerald-300 shrink-0">
-                          H {sp.matureHeightM}m · Ø{sp.canopyDiameterM}m
-                        </span>
-                      </div>
-                      <div className="text-[10.5px] italic text-slate-400">{sp.scientificName}</div>
-                      <div className="mt-0.5 text-[10.5px] text-slate-400 line-clamp-2">
-                        {sp.accentLabel} · {sp.sunExposure}
-                      </div>
-                    </div>
+                    {EXTERIOR_SURFACE_CATALOG.map((surf) => (
+                      <option key={surf.id} value={surf.id}>
+                        {surf.label} {surf.permeable ? '· Permeável' : '· Impermeável'}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-[11px] text-slate-400">{groundMeta.notes}</p>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleAddZone('piso_antiderrapante')}
+                    className="flex flex-col items-center gap-1 rounded border border-[#2A2F38] bg-[#14161A] px-2 py-2 text-[11px] font-medium text-slate-200 hover:border-[#2F7CF6] hover:text-white"
+                  >
+                    <Layers className="h-4 w-4 text-amber-300" />
+                    + Zona Piso
                   </button>
-                );
-              })}
+                  <button
+                    type="button"
+                    onClick={handleAddPool}
+                    className="flex flex-col items-center gap-1 rounded border border-[#2A2F38] bg-[#14161A] px-2 py-2 text-[11px] font-medium text-slate-200 hover:border-cyan-400 hover:text-white"
+                  >
+                    <Waves className="h-4 w-4 text-cyan-400" />
+                    + Piscina
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleAddGourmet}
+                    className="flex flex-col items-center gap-1 rounded border border-[#2A2F38] bg-[#14161A] px-2 py-2 text-[11px] font-medium text-slate-200 hover:border-orange-400 hover:text-white"
+                  >
+                    <Flame className="h-4 w-4 text-orange-400" />
+                    + Gourmet
+                  </button>
+                </div>
+
+                <label className="flex cursor-pointer items-center gap-2 border-t border-slate-800 pt-2 text-xs text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={landscaping.gardenLightsOn ?? true}
+                    onChange={(e) =>
+                      updateLandscaping((cur) => ({ ...cur, gardenLightsOn: e.target.checked }))
+                    }
+                  />
+                  Balizadores / iluminação cênica noturna
+                </label>
+              </div>
+
+              <div className="space-y-2 rounded border border-[#2A2F38] bg-[#14161A] p-3 text-xs">
+                <div className="flex items-center gap-1.5 font-semibold text-white">
+                  <Plus className="h-3.5 w-3.5 text-emerald-400" /> Piso Rápido por Material
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {(
+                    [
+                      ['piso_antiderrapante', 'Antiderrapante'],
+                      ['cimento_queimado', 'Cimento Queim.'],
+                      ['areia', 'Areia'],
+                      ['brita', 'Brita'],
+                      ['deck_madeira', 'Deck'],
+                      ['paver_intertravado', 'Paver'],
+                    ] as const
+                  ).map(([surf, lbl]) => (
+                    <button
+                      key={surf}
+                      type="button"
+                      onClick={() => handleAddZone(surf)}
+                      className="rounded border border-[#2A2F38] bg-[#1B1E24] px-2 py-1 text-[11px] text-slate-300 hover:border-emerald-400 hover:text-white"
+                    >
+                      + {lbl}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="flex min-h-0 flex-1 flex-col justify-between overflow-hidden">
+              <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden p-3">
+                <div className="flex shrink-0 items-center justify-between gap-2">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-300">
+                    Espécies ({filteredSpecies.length})
+                  </span>
+                  {placingSpeciesId && (
+                    <button
+                      type="button"
+                      onClick={() => setPlacingSpeciesId(null)}
+                      className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10.5px] text-amber-300"
+                    >
+                      Cancelar plantio
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex shrink-0 flex-wrap gap-1">
+                  {(
+                    [
+                      ['todos', 'Todas'],
+                      ['frutifera', 'Frutíferas'],
+                      ['palmeira', 'Palmeiras'],
+                      ['arvore_ornamental', 'Árvores'],
+                      ['tropical_arbusto', 'Tropicais'],
+                    ] as const
+                  ).map(([cat, label]) => (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => {
+                        setSpeciesFilter(cat);
+                        setSpeciesPage(0);
+                      }}
+                      className={`rounded px-2 py-0.5 text-[11px] font-medium ${
+                        speciesFilter === cat
+                          ? 'bg-[#2F7CF6] text-white'
+                          : 'bg-[#14161A] text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+
+                {placingSpeciesId && (
+                  <div className="shrink-0 rounded border border-emerald-500/40 bg-emerald-950/40 px-2.5 py-1 text-[11px] text-emerald-200">
+                    Clique na planta ao lado para plantar:{' '}
+                    <strong>{getBotanicalMeta(placingSpeciesId).commonName}</strong>
+                  </div>
+                )}
+
+                <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-hidden">
+                  {pagedSpecies.slice.map((sp) => {
+                    const isPlacing = placingSpeciesId === sp.id;
+                    return (
+                      <button
+                        key={sp.id}
+                        type="button"
+                        onClick={() => setPlacingSpeciesId(isPlacing ? null : sp.id)}
+                        className={`flex w-full items-start gap-2 rounded border p-2 text-left transition ${
+                          isPlacing
+                            ? 'border-emerald-400 bg-emerald-950/40'
+                            : 'border-[#2A2F38] bg-[#14161A] hover:border-slate-600'
+                        }`}
+                      >
+                        <span
+                          className="mt-0.5 h-5 w-5 shrink-0 rounded-full border border-white/20"
+                          style={{
+                            background: `radial-gradient(circle at 35% 35%, ${sp.accentHex}, ${sp.foliageHex})`,
+                          }}
+                        />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center justify-between gap-1">
+                            <span className="truncate text-xs font-semibold text-white">
+                              {sp.commonName}
+                            </span>
+                            <span className="shrink-0 font-mono text-[10px] text-emerald-300">
+                              H {sp.matureHeightM}m · Ø{sp.canopyDiameterM}m
+                            </span>
+                          </div>
+                          <div className="truncate text-[10px] italic text-slate-400">
+                            {sp.scientificName} · {sp.sunExposure}
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <PaginationBar
+                page={pagedSpecies.safePage}
+                totalPages={pagedSpecies.totalPages}
+                totalItems={filteredSpecies.length}
+                startIndex={pagedSpecies.start}
+                endIndex={pagedSpecies.end}
+                onPageChange={setSpeciesPage}
+                itemLabel="espécies"
+                compact
+              />
+            </div>
+          )}
         </div>
 
         {/* Center Interactive Top-Down Lot Planner */}
-        <div className="space-y-3 lg:col-span-5">
-          <div className="rounded-lg border border-[#2A2F38] bg-[#1B1E24] p-3">
-            <div className="mb-2 flex items-center justify-between gap-2 text-xs">
-              <span className="font-medium text-slate-200 flex items-center gap-1.5">
-                <MapPin className="h-3.5 w-3.5 text-[#2F7CF6]" />
+        <div className="col-span-5 flex min-h-0 flex-col overflow-hidden rounded-lg border border-[#2A2F38] bg-[#1B1E24] p-3">
+          <div className="mb-2 flex shrink-0 items-center justify-between gap-2 text-xs">
+            <span className="flex items-center gap-1.5 truncate font-medium text-slate-200">
+              <MapPin className="h-3.5 w-3.5 shrink-0 text-[#2F7CF6]" />
+              <span className="truncate">
                 {placingSpeciesId
                   ? 'Modo Plantio: clique no lote para posicionar'
-                  : 'Planta Paisagística Interativa (arraste pisos, piscina, gourmet ou árvores)'}
+                  : 'Planta Paisagística Interativa (arraste elementos)'}
               </span>
-              <span className="font-mono text-[11px] text-slate-400">
-                {round2(bbox.width)}×{round2(bbox.depth)} m
-              </span>
-            </div>
+            </span>
+            <span className="shrink-0 font-mono text-[11px] text-slate-400">
+              {round2(bbox.width)}×{round2(bbox.depth)} m
+            </span>
+          </div>
 
-            <svg
-              ref={svgRef}
-              viewBox={`${minX} ${minY} ${viewW} ${viewH}`}
-              onClick={handleSvgClick}
-              onPointerMove={handlePointerMove}
-              onPointerUp={() => setDragging(null)}
-              onPointerLeave={() => setDragging(null)}
-              className={`aspect-[4/4.3] w-full rounded border border-[#2A2F38] bg-[#0B1018] ${
-                placingSpeciesId ? 'cursor-crosshair' : 'cursor-default'
-              }`}
-            >
+          <svg
+            ref={svgRef}
+            viewBox={`${minX} ${minY} ${viewW} ${viewH}`}
+            onClick={handleSvgClick}
+            onPointerMove={handlePointerMove}
+            onPointerUp={() => setDragging(null)}
+            onPointerLeave={() => setDragging(null)}
+            className={`min-h-0 w-full flex-1 rounded border border-[#2A2F38] bg-[#0B1018] ${
+              placingSpeciesId ? 'cursor-crosshair' : 'cursor-default'
+            }`}
+          >
               {/* Ground Surface Lot Polygon */}
               <polygon
                 points={site.vertices.map((v) => `${v.x},${v.y}`).join(' ')}
@@ -830,12 +900,11 @@ export const LandscapingModule: React.FC<LandscapingModuleProps> = ({
                 );
               })}
             </svg>
-          </div>
         </div>
 
         {/* Right Inspector Panel */}
-        <div className="space-y-4 lg:col-span-3">
-          <div className="rounded-lg border border-[#2A2F38] bg-[#1B1E24] p-4 space-y-3">
+        <div className="col-span-3 flex min-h-0 flex-col gap-2 overflow-hidden">
+          <div className="flex-1 overflow-hidden rounded-lg border border-[#2A2F38] bg-[#1B1E24] p-3 space-y-2.5">
             <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-300">
               Propriedades do Elemento
             </h2>
@@ -1275,33 +1344,6 @@ export const LandscapingModule: React.FC<LandscapingModuleProps> = ({
                 </div>
               );
             })()}
-          </div>
-
-          <div className="rounded-lg border border-[#2A2F38] bg-[#1B1E24] p-3.5 text-xs space-y-2">
-            <div className="font-semibold text-white flex items-center gap-1.5">
-              <Plus className="h-3.5 w-3.5 text-emerald-400" /> Piso Rápido por Material
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {(
-                [
-                  ['piso_antiderrapante', 'Antiderrapante'],
-                  ['cimento_queimado', 'Cimento Queim.'],
-                  ['areia', 'Areia'],
-                  ['brita', 'Brita'],
-                  ['deck_madeira', 'Deck'],
-                  ['paver_intertravado', 'Paver'],
-                ] as const
-              ).map(([surf, lbl]) => (
-                <button
-                  key={surf}
-                  type="button"
-                  onClick={() => handleAddZone(surf)}
-                  className="rounded border border-[#2A2F38] bg-[#14161A] px-2 py-1 text-[11px] text-slate-300 hover:border-emerald-400 hover:text-white"
-                >
-                  + {lbl}
-                </button>
-              ))}
-            </div>
           </div>
         </div>
       </div>

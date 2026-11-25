@@ -184,14 +184,30 @@ Regras obrigatórias:
   let vite: ViteDevServer | null = null;
 
   if (process.env.NODE_ENV !== 'production') {
-    vite = await createViteServer({
+    const viteInitPromise = createViteServer({
       server: {
         middlewareMode: true,
-        hmr: process.env.DISABLE_HMR === 'true' ? false : { server: httpServer },
+        ...(process.env.DISABLE_HMR === 'true' ? { hmr: false } : {}),
       },
       appType: 'spa',
+    })
+      .then((instance) => {
+        vite = instance;
+        return instance;
+      })
+      .catch((err) => {
+        console.error('Failed to initialize Vite dev server:', err);
+        process.exit(1);
+      });
+
+    app.use(async (req, res, next) => {
+      try {
+        const instance = vite ?? (await viteInitPromise);
+        instance.middlewares(req, res, next);
+      } catch (err) {
+        next(err);
+      }
     });
-    app.use(vite.middlewares);
   } else {
     const distPath = path.resolve(__dirname, 'dist');
     app.use(express.static(distPath));

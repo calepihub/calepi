@@ -86,14 +86,14 @@ const WORKFLOW_STEPS: Array<{
   label: string;
   icon: React.ComponentType<{ className?: string }>;
 }> = [
-  { id: 'terreno', num: '1', label: 'Terreno & Implantação', icon: MapPin },
-  { id: 'paisagismo', num: '2', label: 'Paisagismo & Piscina', icon: Trees },
-  { id: 'planta2d', num: '3', label: 'Tipologias & Planta 2D', icon: PenTool },
-  { id: 'acabamentos', num: '4', label: 'Acabamentos & Louças', icon: Bath },
-  { id: 'bim3d', num: '5', label: 'Modelo BIM 3D', icon: Box },
-  { id: 'render_studio', num: '6', label: 'Render Cinematográfico', icon: Camera },
-  { id: 'engenharia', num: '7', label: 'Engenharia & Custos', icon: Calculator },
-  { id: 'documentacao', num: '8', label: 'Pranchas & Memoriais', icon: FileText },
+  { id: 'terreno', num: '1', label: 'Terreno & Lote', icon: MapPin },
+  { id: 'paisagismo', num: '2', label: 'Paisagismo', icon: Trees },
+  { id: 'planta2d', num: '3', label: 'Tipologias & 2D', icon: PenTool },
+  { id: 'acabamentos', num: '4', label: 'Acabamentos', icon: Bath },
+  { id: 'bim3d', num: '5', label: 'BIM 3D', icon: Box },
+  { id: 'render_studio', num: '6', label: 'Render 3D', icon: Camera },
+  { id: 'engenharia', num: '7', label: 'Engenharia', icon: Calculator },
+  { id: 'documentacao', num: '8', label: 'Pranchas & Docs', icon: FileText },
 ];
 
 export function App() {
@@ -616,7 +616,7 @@ export function App() {
   // 1. Auth Initialization Screen
   if (!authReady) {
     return (
-      <div className="flex h-screen w-screen items-center justify-center bg-[#14161A] text-sm text-slate-300">
+      <div className="flex h-dvh w-screen items-center justify-center overflow-hidden bg-[#14161A] text-sm text-slate-300">
         Inicializando sessão segura no Firebase...
       </div>
     );
@@ -625,10 +625,10 @@ export function App() {
   // 2. Firebase Google Auth Gate (zero localStorage / zero unauthenticated demo projects)
   if (!authUser) {
     return (
-      <div className="flex min-h-screen w-screen flex-col bg-[#14161A] text-slate-100">
-        <header className="flex h-12 shrink-0 items-center justify-between border-b border-slate-800 bg-[#1B1E24] px-6">
+      <div className="flex h-dvh w-screen flex-col overflow-hidden bg-[#14161A] text-slate-100">
+        <header className="flex h-11 shrink-0 items-center justify-between border-b border-slate-800 bg-[#1B1E24] px-5">
           <div className="flex items-center gap-2">
-            <Building2 className="h-5 w-5 text-[#2F7CF6]" />
+            <Building2 className="h-4 w-4 text-[#2F7CF6]" />
             <span className="text-sm font-bold tracking-tight text-white">KITNET PRO STUDIO</span>
           </div>
           <span className="font-mono text-xs text-slate-400">
@@ -636,8 +636,8 @@ export function App() {
           </span>
         </header>
 
-        <main className="flex flex-1 items-center justify-center p-6">
-          <div className="w-full max-w-lg rounded-xl border border-slate-800 bg-[#1B1E24] p-7 shadow-2xl space-y-6">
+        <main className="flex min-h-0 flex-1 items-center justify-center overflow-hidden p-4">
+          <div className="w-full max-w-lg rounded-xl border border-slate-800 bg-[#1B1E24] p-6 shadow-2xl space-y-4">
             <div className="space-y-2 border-b border-slate-800 pb-4">
               <div className="inline-flex items-center gap-1.5 rounded border border-[#2F7CF6]/40 bg-[#2F7CF6]/10 px-2.5 py-1 text-[11px] font-mono text-sky-300">
                 <Cloud className="h-3.5 w-3.5" />
@@ -691,7 +691,7 @@ export function App() {
   // 3. Loading user's Firestore projects
   if (!isStorageLoaded) {
     return (
-      <div className="flex h-screen w-screen items-center justify-center bg-[#14161A] text-sm text-slate-300">
+      <div className="flex h-dvh w-screen items-center justify-center overflow-hidden bg-[#14161A] text-sm text-slate-300">
         Sincronizando empreendimentos no Firebase Firestore...
       </div>
     );
@@ -700,10 +700,10 @@ export function App() {
   // 4. Zero-Projects Onboarding (blank fields, zero fake data)
   if (!activeProject) {
     return (
-      <div className="flex min-h-screen w-screen flex-col bg-[#14161A] text-slate-100">
-        <header className="flex h-12 shrink-0 items-center justify-between border-b border-slate-800 bg-[#1B1E24] px-6">
+      <div className="flex h-dvh w-screen flex-col overflow-hidden bg-[#14161A] text-slate-100">
+        <header className="flex h-11 shrink-0 items-center justify-between border-b border-slate-800 bg-[#1B1E24] px-5">
           <div className="flex items-center gap-2">
-            <Building2 className="h-5 w-5 text-[#2F7CF6]" />
+            <Building2 className="h-4 w-4 text-[#2F7CF6]" />
             <span className="text-sm font-bold tracking-tight text-white">KITNET PRO STUDIO</span>
           </div>
           <div className="flex items-center gap-3">
@@ -721,14 +721,14 @@ export function App() {
           </div>
         </header>
 
-        <main className="flex flex-1 items-center justify-center p-6">
-          <div className="w-full max-w-2xl rounded-xl border border-slate-800 bg-[#1B1E24] p-7 shadow-2xl space-y-5">
-            <div className="border-b border-slate-800 pb-4">
-              <h1 className="text-xl font-semibold text-white">
+        <main className="flex min-h-0 flex-1 items-center justify-center overflow-hidden p-4">
+          <div className="w-full max-w-2xl rounded-xl border border-slate-800 bg-[#1B1E24] p-5 shadow-2xl space-y-3">
+            <div className="border-b border-slate-800 pb-3">
+              <h1 className="text-lg font-semibold text-white">
                 Criar Primeiro Empreendimento do Zero
               </h1>
-              <p className="mt-1.5 text-xs text-slate-400 leading-relaxed">
-                Nenhum projeto pré-carregado. Informe apenas os parâmetros reais do seu lote e sistema construtivo — todos os dados ficam salvos exclusivamente na sua conta via Firebase Firestore.
+              <p className="mt-1 text-xs text-slate-400">
+                Informe os parâmetros reais do seu lote e sistema construtivo — salvos exclusivamente via Firebase Firestore.
               </p>
             </div>
 
@@ -906,13 +906,13 @@ export function App() {
   }
 
   return (
-    <div className="flex h-screen w-screen flex-col overflow-hidden bg-[#14161A] text-slate-100">
-      {/* Single Clean Top Workspace Bar (h-12) */}
-      <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-slate-800 bg-[#1B1E24] px-4">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <div className="flex items-center gap-2 whitespace-nowrap shrink-0">
-            <Building2 className="h-5 w-5 text-[#2F7CF6]" />
-            <span className="text-sm font-bold tracking-tight text-white">KITNET PRO STUDIO</span>
+    <div className="flex h-dvh w-screen flex-col overflow-hidden bg-[#14161A] text-slate-100">
+      {/* Compact Top Command Bar (h-11) */}
+      <header className="flex h-11 shrink-0 items-center justify-between gap-2 border-b border-slate-800 bg-[#1B1E24] px-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <div className="flex items-center gap-1.5 whitespace-nowrap shrink-0">
+            <Building2 className="h-4 w-4 text-[#2F7CF6]" />
+            <span className="text-xs font-bold tracking-tight text-white">KITNET PRO STUDIO</span>
           </div>
 
           <span className="hidden text-slate-700 sm:inline" aria-hidden="true">
@@ -1049,194 +1049,128 @@ export function App() {
         </div>
       )}
 
-      {/* Workspace Body: Left Linear 5-Step Sidebar + Full-Bleed Canvas/Viewport */}
-      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
-        {/* Compact Horizontal Bar on Mobile / Left Linear Sidebar on Desktop */}
-        <aside
-          aria-label="Navegação das etapas do projeto"
-          className="flex shrink-0 flex-row items-center gap-1 overflow-x-auto border-b border-slate-800 bg-[#171A20] px-3 py-2 lg:w-56 lg:flex-col lg:items-stretch lg:overflow-y-auto lg:border-b-0 lg:border-r lg:p-3"
-        >
+      {/* Single-Row Top Workflow Navigation Ribbon (reclaims 224px sidebar width) */}
+      <nav
+        aria-label="Navegação das etapas do projeto"
+        className="flex h-9 shrink-0 items-center justify-between gap-1 border-b border-slate-800 bg-[#171A20] px-3"
+      >
+        <div className="grid w-full grid-cols-8 gap-1">
           {WORKFLOW_STEPS.map((step) => {
             const Icon = step.icon;
             const active = !projectsHubOpen && activeStep === step.id;
             return (
-              <div key={step.id} className="shrink-0 lg:space-y-1">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setProjectsHubOpen(false);
-                    setActiveStep(step.id);
-                  }}
-                  className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs font-medium transition whitespace-nowrap ${
-                    active
-                      ? 'bg-[#2F7CF6] text-white'
-                      : 'text-slate-300 hover:bg-[#222730] hover:text-white'
-                  }`}
-                >
-                  <Icon className="h-3.5 w-3.5 shrink-0" />
-                  <span className="font-mono text-[11px] opacity-80">{step.num}.</span>
-                  <span className="truncate">{step.label}</span>
-                </button>
-
-                {/* Contextual Sub-Items (Desktop nested cleanly under active step) */}
-                {active && step.id === 'terreno' && (
-                  <div className="hidden space-y-0.5 pl-6 lg:block">
-                    {(
-                      [
-                        ['terreno', 'Implantação, Repetições & Andares'],
-                        ['urbanismo', 'Leis Urbanísticas'],
-                      ] as const
-                    ).map(([id, label]) => (
-                      <button
-                        key={id}
-                        type="button"
-                        onClick={() => setTerrenoSubTab(id)}
-                        className={`block w-full rounded px-2.5 py-1.5 text-left text-[11.5px] transition ${
-                          terrenoSubTab === id
-                            ? 'bg-[#222730] font-medium text-white'
-                            : 'text-slate-400 hover:text-white'
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                {active && step.id === 'planta2d' && (
-                  <div className="hidden space-y-0.5 pl-6 lg:block">
-                    {(
-                      [
-                        ['tipologias', `Tipologias (${activeProject.unitTypes.length})`],
-                        ['editor2d', 'Editor CAD 2D'],
-                      ] as const
-                    ).map(([id, label]) => (
-                      <button
-                        key={id}
-                        type="button"
-                        onClick={() => setPlantaSubTab(id)}
-                        className={`block w-full rounded px-2.5 py-1.5 text-left text-[11.5px] transition ${
-                          plantaSubTab === id
-                            ? 'bg-[#222730] font-medium text-white'
-                            : 'text-slate-400 hover:text-white'
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                {active && step.id === 'engenharia' && (
-                  <div className="hidden space-y-0.5 pl-6 lg:block">
-                    {(
-                      [
-                        ['quantitativos', 'Quantitativos & SINAPI-RJ'],
-                        ['compatibilizacao', 'Compatibilização & NBR'],
-                        ['eletrica', 'Elétrica & Especiais'],
-                        ['hidraulica', 'Hidráulica & Sanitária'],
-                        ['construcao', 'Sistema & Estrutura'],
-                      ] as const
-                    ).map(([id, label]) => (
-                      <button
-                        key={id}
-                        type="button"
-                        onClick={() => setEngSubTab(id)}
-                        className={`block w-full rounded px-2.5 py-1.5 text-left text-[11.5px] transition ${
-                          engSubTab === id
-                            ? 'bg-[#222730] font-medium text-white'
-                            : 'text-slate-400 hover:text-white'
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+              <button
+                key={step.id}
+                type="button"
+                onClick={() => {
+                  setProjectsHubOpen(false);
+                  setActiveStep(step.id);
+                }}
+                title={`${step.num}. ${step.label}`}
+                className={`flex items-center justify-center gap-1.5 rounded px-2 py-1 text-[11.5px] font-medium transition whitespace-nowrap min-w-0 ${
+                  active
+                    ? 'bg-[#2F7CF6] text-white'
+                    : 'text-slate-300 hover:bg-[#222730] hover:text-white'
+                }`}
+              >
+                <Icon className="h-3.5 w-3.5 shrink-0" />
+                <span className="font-mono text-[10px] opacity-80 shrink-0">{step.num}.</span>
+                <span className="truncate">{step.label}</span>
+              </button>
             );
           })}
-        </aside>
+        </div>
+      </nav>
 
-        {/* Mobile Sub-Navigation Strip (hidden on lg+ because sidebar shows sub-items) */}
-        {!projectsHubOpen &&
-          (activeStep === 'terreno' || activeStep === 'planta2d' || activeStep === 'engenharia') && (
-            <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-slate-800 bg-[#12151B] px-3 py-1.5 lg:hidden">
-              {activeStep === 'terreno' &&
-                (
-                  [
-                    ['terreno', 'Implantação, Repetições & Andares'],
-                    ['urbanismo', 'Leis Urbanísticas'],
-                  ] as const
-                ).map(([id, label]) => (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => setTerrenoSubTab(id)}
-                    className={`rounded px-2.5 py-1 text-xs whitespace-nowrap ${
-                      terrenoSubTab === id ? 'bg-[#222730] text-white' : 'text-slate-400'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              {activeStep === 'planta2d' &&
-                (
-                  [
-                    ['tipologias', `Tipologias (${activeProject.unitTypes.length})`],
-                    ['editor2d', 'Editor CAD 2D'],
-                  ] as const
-                ).map(([id, label]) => (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => setPlantaSubTab(id)}
-                    className={`rounded px-2.5 py-1 text-xs whitespace-nowrap ${
-                      plantaSubTab === id ? 'bg-[#222730] text-white' : 'text-slate-400'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              {activeStep === 'engenharia' &&
-                (
-                  [
-                    ['quantitativos', 'Quantitativos & SINAPI-RJ'],
-                    ['compatibilizacao', 'Compatibilização & NBR'],
-                    ['eletrica', 'Elétrica & Especiais'],
-                    ['hidraulica', 'Hidráulica & Sanitária'],
-                    ['construcao', 'Sistema & Estrutura'],
-                  ] as const
-                ).map(([id, label]) => (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => setEngSubTab(id)}
-                    className={`rounded px-2.5 py-1 text-xs whitespace-nowrap ${
-                      engSubTab === id ? 'bg-[#222730] text-white' : 'text-slate-400'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-            </div>
-          )}
-
-        {/* Main Content Viewport */}
-        <main className="min-h-0 flex-1 overflow-hidden bg-[#14161A]">
-          {projectsHubOpen ? (
-            <div className="h-full overflow-y-auto">
-              <div className="mx-auto flex max-w-[1400px] items-center justify-between border-b border-slate-800/70 px-6 py-2.5 text-xs text-slate-400">
-                <span>Gerenciador de Empreendimentos na Nuvem (Firebase Firestore)</span>
+      {/* Slim Contextual Sub-Navigation Ribbon (Desktop & Mobile unified, zero scroll) */}
+      {!projectsHubOpen &&
+        (activeStep === 'terreno' || activeStep === 'planta2d' || activeStep === 'engenharia') && (
+          <div className="flex h-8 shrink-0 items-center gap-1.5 border-b border-slate-800 bg-[#12151B] px-3">
+            <span className="hidden text-[10px] font-mono uppercase tracking-wider text-slate-500 sm:inline">
+              Submódulo:
+            </span>
+            {activeStep === 'terreno' &&
+              (
+                [
+                  ['terreno', 'Implantação, Repetições & Andares'],
+                  ['urbanismo', 'Leis Urbanísticas & Índices'],
+                ] as const
+              ).map(([id, label]) => (
                 <button
+                  key={id}
                   type="button"
-                  onClick={() => setProjectsHubOpen(false)}
-                  className="inline-flex items-center gap-1 rounded border border-slate-700 px-2.5 py-1 text-slate-200 hover:border-slate-500"
+                  onClick={() => setTerrenoSubTab(id)}
+                  className={`rounded px-2.5 py-0.5 text-xs font-medium whitespace-nowrap transition ${
+                    terrenoSubTab === id
+                      ? 'bg-[#222730] text-white border border-slate-700'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
                 >
-                  <X className="h-3.5 w-3.5" />
-                  Voltar ao Estúdio
+                  {label}
                 </button>
-              </div>
+              ))}
+            {activeStep === 'planta2d' &&
+              (
+                [
+                  ['tipologias', `Tipologias (${activeProject.unitTypes.length})`],
+                  ['editor2d', 'Editor CAD 2D'],
+                ] as const
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setPlantaSubTab(id)}
+                  className={`rounded px-2.5 py-0.5 text-xs font-medium whitespace-nowrap transition ${
+                    plantaSubTab === id
+                      ? 'bg-[#222730] text-white border border-slate-700'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            {activeStep === 'engenharia' &&
+              (
+                [
+                  ['quantitativos', 'Quantitativos & SINAPI-RJ'],
+                  ['compatibilizacao', 'Compatibilização & NBR'],
+                  ['eletrica', 'Elétrica & Especiais'],
+                  ['hidraulica', 'Hidráulica & Sanitária'],
+                  ['construcao', 'Sistema & Estrutura'],
+                ] as const
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setEngSubTab(id)}
+                  className={`rounded px-2.5 py-0.5 text-xs font-medium whitespace-nowrap transition ${
+                    engSubTab === id
+                      ? 'bg-[#222730] text-white border border-slate-700'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+          </div>
+        )}
+
+      {/* Full-Width Zero-Scroll Content Viewport */}
+      <main className="min-h-0 flex-1 overflow-hidden bg-[#14161A]">
+        {projectsHubOpen ? (
+          <div className="flex h-full flex-col overflow-hidden">
+            <div className="flex h-8 shrink-0 items-center justify-between border-b border-slate-800/70 px-4 text-xs text-slate-400">
+              <span>Gerenciador de Empreendimentos na Nuvem (Firebase Firestore)</span>
+              <button
+                type="button"
+                onClick={() => setProjectsHubOpen(false)}
+                className="inline-flex items-center gap-1 rounded border border-slate-700 px-2.5 py-0.5 text-slate-200 hover:border-slate-500"
+              >
+                <X className="h-3.5 w-3.5" />
+                Voltar ao Estúdio
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-hidden">
               <ProjectHub
                 projects={projects}
                 activeProjectId={activeProject.id}
@@ -1249,148 +1183,136 @@ export function App() {
                 onNavigateModule={navigateFromModule}
               />
             </div>
-          ) : (
-            <>
-              {activeStep === 'terreno' && terrenoSubTab === 'terreno' && (
-                <div className="h-full overflow-y-auto">
-                  <SiteModule
-                    project={activeProject}
-                    onUpdateProject={handleUpdateProject}
-                    onNavigateModule={navigateFromModule}
-                    onSelectUnitType={setSelectedUnitTypeId}
-                  />
-                </div>
-              )}
+          </div>
+        ) : (
+          <div className="h-full w-full overflow-hidden">
+            {activeStep === 'terreno' && terrenoSubTab === 'terreno' && (
+              <SiteModule
+                project={activeProject}
+                onUpdateProject={handleUpdateProject}
+                onNavigateModule={navigateFromModule}
+                onSelectUnitType={setSelectedUnitTypeId}
+              />
+            )}
 
-              {activeStep === 'terreno' && terrenoSubTab === 'urbanismo' && (
-                <div className="h-full overflow-y-auto">
-                  <UrbanismModule project={activeProject} onUpdateProject={handleUpdateProject} />
-                </div>
-              )}
+            {activeStep === 'terreno' && terrenoSubTab === 'urbanismo' && (
+              <UrbanismModule project={activeProject} onUpdateProject={handleUpdateProject} />
+            )}
 
-              {activeStep === 'paisagismo' && (
-                <div className="h-full overflow-y-auto">
-                  <LandscapingModule
-                    project={activeProject}
-                    onUpdateProject={handleUpdateProject}
-                    onOpenRenderStudio={() => setActiveStep('render_studio')}
-                  />
-                </div>
-              )}
+            {activeStep === 'paisagismo' && (
+              <LandscapingModule
+                project={activeProject}
+                onUpdateProject={handleUpdateProject}
+                onOpenRenderStudio={() => setActiveStep('render_studio')}
+              />
+            )}
 
-              {activeStep === 'planta2d' && plantaSubTab === 'tipologias' && (
-                <div className="h-full overflow-y-auto">
-                  <TypologiesModule
-                    project={activeProject}
-                    selectedUnitTypeId={selectedUnitTypeId}
-                    onSelectUnitType={setSelectedUnitTypeId}
-                    onUpdateProject={handleUpdateProject}
-                    onOpen2DEditor={() => setPlantaSubTab('editor2d')}
-                    onOpenImplantation={() => navigateFromModule('terreno')}
-                  />
-                </div>
-              )}
+            {activeStep === 'planta2d' && plantaSubTab === 'tipologias' && (
+              <TypologiesModule
+                project={activeProject}
+                selectedUnitTypeId={selectedUnitTypeId}
+                onSelectUnitType={setSelectedUnitTypeId}
+                onUpdateProject={handleUpdateProject}
+                onOpen2DEditor={() => setPlantaSubTab('editor2d')}
+                onOpenImplantation={() => navigateFromModule('terreno')}
+              />
+            )}
 
-              {activeStep === 'planta2d' && plantaSubTab === 'editor2d' && (
-                <FloorPlanEditor2D
-                  project={activeProject}
-                  selectedUnitTypeId={selectedUnitTypeId}
-                  onSelectUnitType={setSelectedUnitTypeId}
-                  onUpdateProject={handleUpdateProject}
-                  onUndo={handleUndo}
-                  onRedo={handleRedo}
-                  canUndo={undoStack.length > 0}
-                  canRedo={redoStack.length > 0}
-                  onOpenImplantation={() => navigateFromModule('terreno')}
-                />
-              )}
+            {activeStep === 'planta2d' && plantaSubTab === 'editor2d' && (
+              <FloorPlanEditor2D
+                project={activeProject}
+                selectedUnitTypeId={selectedUnitTypeId}
+                onSelectUnitType={setSelectedUnitTypeId}
+                onUpdateProject={handleUpdateProject}
+                onUndo={handleUndo}
+                onRedo={handleRedo}
+                canUndo={undoStack.length > 0}
+                canRedo={redoStack.length > 0}
+                onOpenImplantation={() => navigateFromModule('terreno')}
+              />
+            )}
 
-              {activeStep === 'acabamentos' && (
-                <FinishesAndFixturesModule
-                  project={activeProject}
-                  onUpdateProject={handleUpdateProject}
-                  onNavigateModule={navigateFromModule}
-                />
-              )}
+            {activeStep === 'acabamentos' && (
+              <FinishesAndFixturesModule
+                project={activeProject}
+                onUpdateProject={handleUpdateProject}
+                onNavigateModule={navigateFromModule}
+              />
+            )}
 
-              {activeStep === 'bim3d' && (
-                <Bim3DViewport
-                  project={activeProject}
-                  onUpdateProject={handleUpdateProject}
-                  onSaveRender={handleSaveRenderToCloud}
-                />
-              )}
+            {activeStep === 'bim3d' && (
+              <Bim3DViewport
+                project={activeProject}
+                onUpdateProject={handleUpdateProject}
+                onSaveRender={handleSaveRenderToCloud}
+              />
+            )}
 
-              {activeStep === 'render_studio' && (
-                <CinematicRenderStudio
-                  project={activeProject}
-                  onUpdateProject={handleUpdateProject}
-                  onSaveRender={handleSaveRenderToCloud}
-                />
-              )}
+            {activeStep === 'render_studio' && (
+              <CinematicRenderStudio
+                project={activeProject}
+                onUpdateProject={handleUpdateProject}
+                onSaveRender={handleSaveRenderToCloud}
+              />
+            )}
 
-              {activeStep === 'engenharia' && engSubTab === 'quantitativos' && (
-                <QuantitiesAndBudgetModule
-                  project={activeProject}
-                  onUpdateProject={handleUpdateProject}
-                />
-              )}
+            {activeStep === 'engenharia' && engSubTab === 'quantitativos' && (
+              <QuantitiesAndBudgetModule
+                project={activeProject}
+                onUpdateProject={handleUpdateProject}
+              />
+            )}
 
-              {activeStep === 'engenharia' && engSubTab === 'compatibilizacao' && (
-                <EngineeringComplianceModule
-                  project={activeProject}
-                  onUpdateProject={handleUpdateProject}
-                  onFocusUnitTypeIn2D={(utId) => {
-                    setSelectedUnitTypeId(utId);
-                    setActiveStep('planta2d');
-                    setPlantaSubTab('editor2d');
-                  }}
-                  onOpen3D={() => setActiveStep('bim3d')}
-                />
-              )}
+            {activeStep === 'engenharia' && engSubTab === 'compatibilizacao' && (
+              <EngineeringComplianceModule
+                project={activeProject}
+                onUpdateProject={handleUpdateProject}
+                onFocusUnitTypeIn2D={(utId) => {
+                  setSelectedUnitTypeId(utId);
+                  setActiveStep('planta2d');
+                  setPlantaSubTab('editor2d');
+                }}
+                onOpen3D={() => setActiveStep('bim3d')}
+              />
+            )}
 
-              {activeStep === 'engenharia' && engSubTab === 'eletrica' && (
-                <div className="h-full overflow-y-auto">
-                  <MepElectricalModule
-                    project={activeProject}
-                    selectedUnitTypeId={selectedUnitTypeId}
-                    onSelectUnitType={setSelectedUnitTypeId}
-                    onUpdateProject={handleUpdateProject}
-                  />
-                </div>
-              )}
+            {activeStep === 'engenharia' && engSubTab === 'eletrica' && (
+              <MepElectricalModule
+                project={activeProject}
+                selectedUnitTypeId={selectedUnitTypeId}
+                onSelectUnitType={setSelectedUnitTypeId}
+                onUpdateProject={handleUpdateProject}
+              />
+            )}
 
-              {activeStep === 'engenharia' && engSubTab === 'hidraulica' && (
-                <div className="h-full overflow-y-auto">
-                  <MepHydraulicSanitaryModule
-                    project={activeProject}
-                    selectedUnitTypeId={selectedUnitTypeId}
-                    onSelectUnitType={setSelectedUnitTypeId}
-                    onUpdateProject={handleUpdateProject}
-                  />
-                </div>
-              )}
+            {activeStep === 'engenharia' && engSubTab === 'hidraulica' && (
+              <MepHydraulicSanitaryModule
+                project={activeProject}
+                selectedUnitTypeId={selectedUnitTypeId}
+                onSelectUnitType={setSelectedUnitTypeId}
+                onUpdateProject={handleUpdateProject}
+              />
+            )}
 
-              {activeStep === 'engenharia' && engSubTab === 'construcao' && (
-                <ConstructionAndStructureModule
-                  project={activeProject}
-                  selectedUnitTypeId={selectedUnitTypeId}
-                  onSelectUnitType={setSelectedUnitTypeId}
-                  onUpdateProject={handleUpdateProject}
-                />
-              )}
+            {activeStep === 'engenharia' && engSubTab === 'construcao' && (
+              <ConstructionAndStructureModule
+                project={activeProject}
+                selectedUnitTypeId={selectedUnitTypeId}
+                onSelectUnitType={setSelectedUnitTypeId}
+                onUpdateProject={handleUpdateProject}
+              />
+            )}
 
-              {activeStep === 'documentacao' && (
-                <DocumentationAndExportModule
-                  project={activeProject}
-                  onUpdateProject={handleUpdateProject}
-                  onDeleteRenderFromCloud={handleDeleteRenderFromCloud}
-                />
-              )}
-            </>
-          )}
-        </main>
-      </div>
+            {activeStep === 'documentacao' && (
+              <DocumentationAndExportModule
+                project={activeProject}
+                onUpdateProject={handleUpdateProject}
+                onDeleteRenderFromCloud={handleDeleteRenderFromCloud}
+              />
+            )}
+          </div>
+        )}
+      </main>
 
       <AssistantDrawer
         open={assistantOpen}

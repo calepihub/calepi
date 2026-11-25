@@ -12,6 +12,7 @@ import {
 import { round2 } from '../engine/geometry';
 import { compareConstructionMethodsForTypology } from '../engine/quantitiesAndBudget';
 import { nextId } from '../engine/parametricGenerator';
+import { PaginationBar, paginateItems, useViewportPageSize } from './PaginationBar';
 import type {
   ConstructionMethodDetails,
   ConstructionMethodId,
@@ -119,6 +120,14 @@ export const ConstructionAndStructureModule: React.FC<ConstructionAndStructureMo
   onUpdateProject,
 }) => {
   const [subTab, setSubTab] = useState<'metodo' | 'estrutura' | 'comparador'>('metodo');
+  const [methodRightTab, setMethodRightTab] = useState<'dimensoes' | 'especificacoes'>('dimensoes');
+  const [methodsPage, setMethodsPage] = useState(0);
+  const [structPage, setStructPage] = useState(0);
+  const [compPage, setCompPage] = useState(0);
+
+  const methodsPageSize = useViewportPageSize(220, 88, 3, 6);
+  const structPageSize = useViewportPageSize(330, 38, 4, 14);
+  const compPageSize = useViewportPageSize(240, 88, 2, 6);
 
   // New structural element form
   const [newElType, setNewElType] = useState<StructuralElement['type']>('pilar');
@@ -138,6 +147,11 @@ export const ConstructionAndStructureModule: React.FC<ConstructionAndStructureMo
     () => (activeUnitType ? compareConstructionMethodsForTypology(activeUnitType) : []),
     [activeUnitType],
   );
+
+  const methodIds = useMemo(() => Object.keys(METHOD_TEMPLATES) as ConstructionMethodId[], []);
+  const methodsPaged = paginateItems(methodIds, methodsPage, methodsPageSize);
+  const structPaged = paginateItems(project.structuralElements, structPage, structPageSize);
+  const compPaged = paginateItems(comparisonRows, compPage, compPageSize);
 
   const cm = project.constructionMethod;
 
@@ -255,14 +269,14 @@ export const ConstructionAndStructureModule: React.FC<ConstructionAndStructureMo
   }, [project.floors, project.structuralElements, project.unitTypes]);
 
   return (
-    <div className="h-full overflow-y-auto bg-[#14161A] p-6 text-slate-100">
-      <div className="mx-auto max-w-[1440px] space-y-6">
-        <div className="flex flex-col gap-4 border-b border-slate-800 pb-5 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h1 className="text-xl font-semibold text-white">
+    <div className="flex h-full w-full flex-col overflow-hidden bg-[#14161A] p-3 text-slate-100">
+      <div className="mx-auto flex min-h-0 w-full max-w-[1440px] flex-1 flex-col gap-2.5 overflow-hidden">
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
+          <div className="min-w-0">
+            <h1 className="truncate text-base font-semibold text-white">
               Métodos Construtivos, Estrutura Conceitual & Comparador
             </h1>
-            <p className="mt-1 text-sm text-slate-400">
+            <p className="truncate text-xs text-slate-400">
               Sistema adotado: <span className="font-medium text-slate-200">{cm.name}</span> · Paredes ext.{' '}
               <span className="font-mono tabular-nums text-slate-200">
                 {Math.round(cm.externalWallThickness * 100)} cm
@@ -274,11 +288,11 @@ export const ConstructionAndStructureModule: React.FC<ConstructionAndStructureMo
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5 shrink-0">
             <button
               type="button"
               onClick={() => setSubTab('metodo')}
-              className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium whitespace-nowrap shrink-0 transition ${
+              className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium whitespace-nowrap shrink-0 transition ${
                 subTab === 'metodo'
                   ? 'border-[#2F7CF6] bg-[#2F7CF6]/15 text-white'
                   : 'border-slate-800 bg-[#1B1E24] text-slate-300 hover:border-slate-700'
@@ -290,7 +304,7 @@ export const ConstructionAndStructureModule: React.FC<ConstructionAndStructureMo
             <button
               type="button"
               onClick={() => setSubTab('estrutura')}
-              className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium whitespace-nowrap shrink-0 transition ${
+              className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium whitespace-nowrap shrink-0 transition ${
                 subTab === 'estrutura'
                   ? 'border-[#2F7CF6] bg-[#2F7CF6]/15 text-white'
                   : 'border-slate-800 bg-[#1B1E24] text-slate-300 hover:border-slate-700'
@@ -302,7 +316,7 @@ export const ConstructionAndStructureModule: React.FC<ConstructionAndStructureMo
             <button
               type="button"
               onClick={() => setSubTab('comparador')}
-              className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium whitespace-nowrap shrink-0 transition ${
+              className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium whitespace-nowrap shrink-0 transition ${
                 subTab === 'comparador'
                   ? 'border-[#2F7CF6] bg-[#2F7CF6]/15 text-white'
                   : 'border-slate-800 bg-[#1B1E24] text-slate-300 hover:border-slate-700'
@@ -315,13 +329,15 @@ export const ConstructionAndStructureModule: React.FC<ConstructionAndStructureMo
         </div>
 
         {subTab === 'metodo' && (
-          <div className="grid gap-6 lg:grid-cols-12">
-            <div className="space-y-3 lg:col-span-5">
-              <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-                Biblioteca de Métodos Construtivos
-              </h2>
-              <div className="space-y-2">
-                {(Object.keys(METHOD_TEMPLATES) as ConstructionMethodId[]).map((id) => {
+          <div className="grid min-h-0 flex-1 gap-3 overflow-hidden lg:grid-cols-12">
+            <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-slate-800 bg-[#1B1E24] lg:col-span-5">
+              <div className="shrink-0 border-b border-slate-800 bg-[#14161A] px-3.5 py-2">
+                <h2 className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                  Biblioteca de Métodos Construtivos ({methodIds.length})
+                </h2>
+              </div>
+              <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden p-2.5">
+                {methodsPaged.slice.map((id) => {
                   const tpl = METHOD_TEMPLATES[id];
                   const active = cm.methodId === id;
                   return (
@@ -329,23 +345,23 @@ export const ConstructionAndStructureModule: React.FC<ConstructionAndStructureMo
                       key={id}
                       type="button"
                       onClick={() => applyMethodPreset(id)}
-                      className={`w-full rounded-lg border p-3.5 text-left transition ${
+                      className={`w-full rounded-lg border px-3 py-2 text-left transition ${
                         active
                           ? 'border-[#2F7CF6] bg-[#2F7CF6]/10'
-                          : 'border-slate-800 bg-[#1B1E24] hover:border-slate-700'
+                          : 'border-slate-800 bg-[#14161A] hover:border-slate-700'
                       }`}
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-medium text-white">{tpl.name}</span>
+                        <span className="truncate text-xs font-medium text-white">{tpl.name}</span>
                         {active && (
-                          <span className="inline-flex items-center gap-1 text-xs font-medium text-[#2F7CF6]">
+                          <span className="inline-flex shrink-0 items-center gap-1 text-[11px] font-medium text-[#2F7CF6]">
                             <CheckCircle2 className="h-3.5 w-3.5" />
                             Ativo
                           </span>
                         )}
                       </div>
-                      <p className="mt-1 text-xs text-slate-400">{tpl.notes}</p>
-                      <p className="mt-1.5 font-mono text-[11px] tabular-nums text-slate-500">
+                      <p className="mt-0.5 line-clamp-2 text-[11px] text-slate-400">{tpl.notes}</p>
+                      <p className="mt-1 font-mono text-[10px] tabular-nums text-slate-500">
                         Parede ext. {Math.round(tpl.externalWallThickness * 100)} cm · int.{' '}
                         {Math.round(tpl.internalWallThickness * 100)} cm
                       </p>
@@ -353,18 +369,57 @@ export const ConstructionAndStructureModule: React.FC<ConstructionAndStructureMo
                   );
                 })}
               </div>
+              <PaginationBar
+                page={methodsPaged.safePage}
+                totalPages={methodsPaged.totalPages}
+                totalItems={methodIds.length}
+                startIndex={methodsPaged.start}
+                endIndex={methodsPaged.end}
+                onPageChange={setMethodsPage}
+                itemLabel="sistemas"
+                compact
+              />
             </div>
 
-            <div className="space-y-5 lg:col-span-7">
-              <div className="rounded-lg border border-slate-800 bg-[#1B1E24] p-5">
-                <h2 className="text-sm font-semibold text-white">
-                  Parâmetros Técnicos do Sistema Ativo ({cm.name})
-                </h2>
-                <p className="mt-1 text-xs text-slate-400">
-                  Alterações de espessura propagam automaticamente para as paredes das tipologias e para a estimativa de quantitativos.
-                </p>
+            <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-slate-800 bg-[#1B1E24] p-4 lg:col-span-7">
+              <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
+                <div className="min-w-0">
+                  <h2 className="truncate text-sm font-semibold text-white">
+                    Parâmetros Técnicos do Sistema Ativo ({cm.name})
+                  </h2>
+                  <p className="truncate text-[11px] text-slate-400">
+                    Alterações de espessura propagam automaticamente para as paredes das tipologias e quantitativos.
+                  </p>
+                </div>
 
-                <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                <div className="flex items-center gap-1 rounded border border-slate-700 bg-[#14161A] p-0.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setMethodRightTab('dimensoes')}
+                    className={`rounded px-2.5 py-1 text-[11px] font-medium transition ${
+                      methodRightTab === 'dimensoes'
+                        ? 'bg-[#2F7CF6] text-white'
+                        : 'text-slate-300 hover:text-white'
+                    }`}
+                  >
+                    Dimensões & Cobertura
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMethodRightTab('especificacoes')}
+                    className={`rounded px-2.5 py-1 text-[11px] font-medium transition ${
+                      methodRightTab === 'especificacoes'
+                        ? 'bg-[#2F7CF6] text-white'
+                        : 'text-slate-300 hover:text-white'
+                    }`}
+                  >
+                    Especificações & Notas
+                  </button>
+                </div>
+              </div>
+
+              {methodRightTab === 'dimensoes' ? (
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
                   <label className="block space-y-1">
                     <span className="text-xs text-slate-400">Espessura Parede Externa (m)</span>
                     <input
@@ -472,8 +527,8 @@ export const ConstructionAndStructureModule: React.FC<ConstructionAndStructureMo
                     />
                   </label>
                 </div>
-
-                <div className="mt-4 space-y-3 border-t border-slate-800 pt-4">
+              ) : (
+                <div className="mt-3 space-y-2.5">
                   {(cm.methodId === 'alvenaria_convencional' || cm.methodId === 'misto') && (
                     <>
                       <label className="block space-y-1">
@@ -482,7 +537,7 @@ export const ConstructionAndStructureModule: React.FC<ConstructionAndStructureMo
                           type="text"
                           value={cm.masonryBlockType ?? ''}
                           onChange={(e) => updateCM({ masonryBlockType: e.target.value })}
-                          className="w-full rounded border border-slate-700 bg-[#14161A] px-3 py-1.5 text-sm text-white"
+                          className="w-full rounded border border-slate-700 bg-[#14161A] px-3 py-1.5 text-xs text-white"
                         />
                       </label>
                       <label className="block space-y-1">
@@ -491,21 +546,21 @@ export const ConstructionAndStructureModule: React.FC<ConstructionAndStructureMo
                           type="text"
                           value={cm.mortarType ?? ''}
                           onChange={(e) => updateCM({ mortarType: e.target.value })}
-                          className="w-full rounded border border-slate-700 bg-[#14161A] px-3 py-1.5 text-sm text-white"
+                          className="w-full rounded border border-slate-700 bg-[#14161A] px-3 py-1.5 text-xs text-white"
                         />
                       </label>
                     </>
                   )}
 
                   {cm.methodId === 'alvenaria_estrutural' && (
-                    <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="grid gap-2.5 sm:grid-cols-2">
                       <label className="block space-y-1">
                         <span className="text-xs text-slate-400">Família Modular do Bloco</span>
                         <input
                           type="text"
                           value={cm.structuralBlockFamily ?? ''}
                           onChange={(e) => updateCM({ structuralBlockFamily: e.target.value })}
-                          className="w-full rounded border border-slate-700 bg-[#14161A] px-3 py-1.5 text-sm text-white"
+                          className="w-full rounded border border-slate-700 bg-[#14161A] px-3 py-1.5 text-xs text-white"
                         />
                       </label>
                       <label className="block space-y-1">
@@ -519,7 +574,7 @@ export const ConstructionAndStructureModule: React.FC<ConstructionAndStructureMo
                               structuralResistanceMpa: e.target.value ? Number(e.target.value) : null,
                             })
                           }
-                          className="w-full rounded border border-slate-700 bg-[#14161A] px-3 py-1.5 font-mono text-sm tabular-nums text-white"
+                          className="w-full rounded border border-slate-700 bg-[#14161A] px-3 py-1.5 font-mono text-xs tabular-nums text-white"
                         />
                       </label>
                       <label className="block space-y-1 sm:col-span-2">
@@ -528,21 +583,21 @@ export const ConstructionAndStructureModule: React.FC<ConstructionAndStructureMo
                           type="text"
                           value={cm.groutSpec ?? ''}
                           onChange={(e) => updateCM({ groutSpec: e.target.value })}
-                          className="w-full rounded border border-slate-700 bg-[#14161A] px-3 py-1.5 text-sm text-white"
+                          className="w-full rounded border border-slate-700 bg-[#14161A] px-3 py-1.5 text-xs text-white"
                         />
                       </label>
                     </div>
                   )}
 
                   {cm.methodId === 'light_steel_frame' && (
-                    <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="grid gap-2.5 sm:grid-cols-2">
                       <label className="block space-y-1 sm:col-span-2">
                         <span className="text-xs text-slate-400">Perfil Metálico (Montantes / Guias)</span>
                         <input
                           type="text"
                           value={cm.lsfProfileSpec ?? ''}
                           onChange={(e) => updateCM({ lsfProfileSpec: e.target.value })}
-                          className="w-full rounded border border-slate-700 bg-[#14161A] px-3 py-1.5 text-sm text-white"
+                          className="w-full rounded border border-slate-700 bg-[#14161A] px-3 py-1.5 text-xs text-white"
                         />
                       </label>
                       <label className="block space-y-1">
@@ -552,7 +607,7 @@ export const ConstructionAndStructureModule: React.FC<ConstructionAndStructureMo
                           step="0.05"
                           value={cm.lsfStudSpacingM ?? 0.4}
                           onChange={(e) => updateCM({ lsfStudSpacingM: Number(e.target.value) || 0.4 })}
-                          className="w-full rounded border border-slate-700 bg-[#14161A] px-3 py-1.5 font-mono text-sm tabular-nums text-white"
+                          className="w-full rounded border border-slate-700 bg-[#14161A] px-3 py-1.5 font-mono text-xs tabular-nums text-white"
                         />
                       </label>
                       <label className="block space-y-1">
@@ -561,21 +616,21 @@ export const ConstructionAndStructureModule: React.FC<ConstructionAndStructureMo
                           type="text"
                           value={cm.lsfSheathing ?? ''}
                           onChange={(e) => updateCM({ lsfSheathing: e.target.value })}
-                          className="w-full rounded border border-slate-700 bg-[#14161A] px-3 py-1.5 text-sm text-white"
+                          className="w-full rounded border border-slate-700 bg-[#14161A] px-3 py-1.5 text-xs text-white"
                         />
                       </label>
                     </div>
                   )}
 
                   {cm.methodId === 'wood_frame' && (
-                    <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="grid gap-2.5 sm:grid-cols-2">
                       <label className="block space-y-1">
                         <span className="text-xs text-slate-400">Espécie / Tratamento</span>
                         <input
                           type="text"
                           value={cm.woodSpecies ?? ''}
                           onChange={(e) => updateCM({ woodSpecies: e.target.value })}
-                          className="w-full rounded border border-slate-700 bg-[#14161A] px-3 py-1.5 text-sm text-white"
+                          className="w-full rounded border border-slate-700 bg-[#14161A] px-3 py-1.5 text-xs text-white"
                         />
                       </label>
                       <label className="block space-y-1">
@@ -584,7 +639,7 @@ export const ConstructionAndStructureModule: React.FC<ConstructionAndStructureMo
                           type="text"
                           value={cm.woodSection ?? ''}
                           onChange={(e) => updateCM({ woodSection: e.target.value })}
-                          className="w-full rounded border border-slate-700 bg-[#14161A] px-3 py-1.5 text-sm text-white"
+                          className="w-full rounded border border-slate-700 bg-[#14161A] px-3 py-1.5 text-xs text-white"
                         />
                       </label>
                     </div>
@@ -597,7 +652,7 @@ export const ConstructionAndStructureModule: React.FC<ConstructionAndStructureMo
                         type="text"
                         value={cm.precastPanelSpec ?? ''}
                         onChange={(e) => updateCM({ precastPanelSpec: e.target.value })}
-                        className="w-full rounded border border-slate-700 bg-[#14161A] px-3 py-1.5 text-sm text-white"
+                        className="w-full rounded border border-slate-700 bg-[#14161A] px-3 py-1.5 text-xs text-white"
                       />
                     </label>
                   )}
@@ -608,7 +663,7 @@ export const ConstructionAndStructureModule: React.FC<ConstructionAndStructureMo
                       type="text"
                       value={cm.insulationSpec ?? ''}
                       onChange={(e) => updateCM({ insulationSpec: e.target.value })}
-                      className="w-full rounded border border-slate-700 bg-[#14161A] px-3 py-1.5 text-sm text-white"
+                      className="w-full rounded border border-slate-700 bg-[#14161A] px-3 py-1.5 text-xs text-white"
                     />
                   </label>
                   <label className="block space-y-1">
@@ -617,219 +672,216 @@ export const ConstructionAndStructureModule: React.FC<ConstructionAndStructureMo
                       rows={3}
                       value={cm.notes}
                       onChange={(e) => updateCM({ notes: e.target.value })}
-                      className="w-full rounded border border-slate-700 bg-[#14161A] px-3 py-2 text-sm text-white"
+                      className="w-full rounded border border-slate-700 bg-[#14161A] px-3 py-1.5 text-xs text-white"
                     />
                   </label>
                 </div>
-              </div>
+              )}
             </div>
           </div>
         )}
 
         {subTab === 'estrutura' && (
-          <div className="space-y-6">
-            <div className="flex items-start gap-3 rounded-lg border border-amber-500/35 bg-amber-500/10 p-4 text-sm text-amber-200">
-              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" />
-              <div>
-                <p className="font-semibold">
-                  MODELAGEM ESTRUTURAL CONCEITUAL — NÃO DIMENSIONADA AUTOMATICAMENTE
-                </p>
-                <p className="mt-1 text-xs leading-relaxed text-amber-200/85">
-                  Os elementos cadastrados abaixo representam locação geométrica preliminar para compatibilização arquitetônica e visualização 3D. Este sistema não executa cálculo estrutural de estabilidade, esforços ou armaduras; a execução exige projeto estrutural definitivo por Engenheiro Civil (ABNT NBR 6118, 6120, 6122 e 8800).
-                </p>
-              </div>
+          <div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-hidden">
+            <div className="flex shrink-0 items-center gap-2.5 rounded-lg border border-amber-500/35 bg-amber-500/10 px-3.5 py-2 text-xs text-amber-200">
+              <AlertTriangle className="h-4 w-4 shrink-0 text-amber-400" />
+              <p className="truncate">
+                <strong>MODELAGEM ESTRUTURAL CONCEITUAL — NÃO DIMENSIONADA AUTOMATICAMENTE:</strong> locação geométrica preliminar para compatibilização arquitetônica e 3D (ABNT NBR 6118, 6120, 6122 e 8800 exige RT).
+              </p>
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-4">
-              <div className="rounded-lg border border-slate-800 bg-[#1B1E24] p-4">
-                <span className="text-xs text-slate-400">Elementos Lançados</span>
-                <p className="mt-1 font-mono text-2xl font-semibold tabular-nums text-white">
+            <div className="grid shrink-0 grid-cols-2 gap-2.5 sm:grid-cols-4">
+              <div className="rounded-lg border border-slate-800 bg-[#1B1E24] px-3.5 py-2">
+                <span className="text-[11px] text-slate-400">Elementos Lançados</span>
+                <p className="font-mono text-lg font-semibold tabular-nums text-white">
                   {project.structuralElements.length}
                 </p>
               </div>
-              <div className="rounded-lg border border-slate-800 bg-[#1B1E24] p-4">
-                <span className="text-xs text-slate-400">Volume Pilares (Conceitual)</span>
-                <p className="mt-1 font-mono text-2xl font-semibold tabular-nums text-white">
+              <div className="rounded-lg border border-slate-800 bg-[#1B1E24] px-3.5 py-2">
+                <span className="text-[11px] text-slate-400">Volume Pilares (Conceitual)</span>
+                <p className="font-mono text-lg font-semibold tabular-nums text-white">
                   {structVolumeSummary.pillarsM3} m³
                 </p>
               </div>
-              <div className="rounded-lg border border-slate-800 bg-[#1B1E24] p-4">
-                <span className="text-xs text-slate-400">Volume Lajes (Pavimentos)</span>
-                <p className="mt-1 font-mono text-2xl font-semibold tabular-nums text-white">
+              <div className="rounded-lg border border-slate-800 bg-[#1B1E24] px-3.5 py-2">
+                <span className="text-[11px] text-slate-400">Volume Lajes (Pavimentos)</span>
+                <p className="font-mono text-lg font-semibold tabular-nums text-white">
                   {structVolumeSummary.slabsM3} m³
                 </p>
               </div>
-              <div className="rounded-lg border border-slate-800 bg-[#1B1E24] p-4">
-                <span className="text-xs text-slate-400">Status de Cálculo</span>
-                <p className="mt-1 text-sm font-semibold text-amber-400">NÃO DIMENSIONADO</p>
+              <div className="rounded-lg border border-slate-800 bg-[#1B1E24] px-3.5 py-2">
+                <span className="text-[11px] text-slate-400">Status de Cálculo</span>
+                <p className="mt-0.5 text-xs font-semibold text-amber-400">NÃO DIMENSIONADO</p>
               </div>
             </div>
 
-            <div className="grid gap-6 lg:grid-cols-12">
+            <div className="grid min-h-0 flex-1 gap-3 overflow-hidden lg:grid-cols-12">
               <form
                 onSubmit={handleAddStructural}
-                className="space-y-3 rounded-lg border border-slate-800 bg-[#1B1E24] p-4 lg:col-span-4"
+                className="flex min-h-0 flex-col justify-between gap-2 overflow-hidden rounded-lg border border-slate-800 bg-[#1B1E24] p-3.5 lg:col-span-4"
               >
-                <h3 className="flex items-center gap-2 text-sm font-semibold text-white">
-                  <Layers className="h-4 w-4 text-[#2F7CF6]" />
-                  Inserir Elemento Conceitual
-                </h3>
-                <div className="grid grid-cols-2 gap-3">
-                  <label className="block space-y-1">
-                    <span className="text-xs text-slate-400">Tipo</span>
+                <div className="space-y-2">
+                  <h3 className="flex items-center gap-2 text-xs font-semibold text-white">
+                    <Layers className="h-3.5 w-3.5 text-[#2F7CF6]" />
+                    Inserir Elemento Conceitual
+                  </h3>
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="block space-y-0.5">
+                      <span className="text-[11px] text-slate-400">Tipo</span>
+                      <select
+                        value={newElType}
+                        onChange={(e) => setNewElType(e.target.value as StructuralElement['type'])}
+                        className="w-full rounded border border-slate-700 bg-[#14161A] px-2 py-1 text-xs text-white"
+                      >
+                        <option value="pilar">Pilar</option>
+                        <option value="viga">Viga</option>
+                        <option value="laje">Laje</option>
+                        <option value="baldrame">Viga Baldrame</option>
+                        <option value="sapata">Sapata</option>
+                        <option value="estaca">Estaca / Bloco</option>
+                        <option value="escada">Escada</option>
+                        <option value="metalico">Perfil Metálico</option>
+                      </select>
+                    </label>
+                    <label className="block space-y-0.5">
+                      <span className="text-[11px] text-slate-400">Código</span>
+                      <input
+                        type="text"
+                        placeholder="Ex: P15"
+                        value={newElCode}
+                        onChange={(e) => setNewElCode(e.target.value)}
+                        className="w-full rounded border border-slate-700 bg-[#14161A] px-2 py-1 text-xs text-white"
+                      />
+                    </label>
+                  </div>
+
+                  <label className="block space-y-0.5">
+                    <span className="text-[11px] text-slate-400">Pavimento</span>
                     <select
-                      value={newElType}
-                      onChange={(e) => setNewElType(e.target.value as StructuralElement['type'])}
-                      className="w-full rounded border border-slate-700 bg-[#14161A] px-2.5 py-1.5 text-sm text-white"
+                      value={newElFloorId}
+                      onChange={(e) => setNewElFloorId(e.target.value)}
+                      className="w-full rounded border border-slate-700 bg-[#14161A] px-2 py-1 text-xs text-white"
                     >
-                      <option value="pilar">Pilar</option>
-                      <option value="viga">Viga</option>
-                      <option value="laje">Laje</option>
-                      <option value="baldrame">Viga Baldrame</option>
-                      <option value="sapata">Sapata</option>
-                      <option value="estaca">Estaca / Bloco</option>
-                      <option value="escada">Escada</option>
-                      <option value="metalico">Perfil Metálico</option>
+                      {project.floors.map((fl) => (
+                        <option key={fl.id} value={fl.id}>
+                          {fl.name}
+                        </option>
+                      ))}
                     </select>
                   </label>
-                  <label className="block space-y-1">
-                    <span className="text-xs text-slate-400">Código</span>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="block space-y-0.5">
+                      <span className="text-[11px] text-slate-400">X no terreno (m)</span>
+                      <input
+                        type="number"
+                        step="0.1"
+                        value={newElX}
+                        onChange={(e) => setNewElX(Number(e.target.value))}
+                        className="w-full rounded border border-slate-700 bg-[#14161A] px-2 py-1 font-mono text-xs tabular-nums text-white"
+                      />
+                    </label>
+                    <label className="block space-y-0.5">
+                      <span className="text-[11px] text-slate-400">Y no terreno (m)</span>
+                      <input
+                        type="number"
+                        step="0.1"
+                        value={newElY}
+                        onChange={(e) => setNewElY(Number(e.target.value))}
+                        className="w-full rounded border border-slate-700 bg-[#14161A] px-2 py-1 font-mono text-xs tabular-nums text-white"
+                      />
+                    </label>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2">
+                    <label className="block space-y-0.5">
+                      <span className="text-[11px] text-slate-400">Larg. (m)</span>
+                      <input
+                        type="number"
+                        step="0.05"
+                        min="0.05"
+                        value={newElW}
+                        onChange={(e) => setNewElW(Number(e.target.value))}
+                        className="w-full rounded border border-slate-700 bg-[#14161A] px-2 py-1 font-mono text-xs tabular-nums text-white"
+                      />
+                    </label>
+                    <label className="block space-y-0.5">
+                      <span className="text-[11px] text-slate-400">Prof. (m)</span>
+                      <input
+                        type="number"
+                        step="0.05"
+                        min="0.05"
+                        value={newElD}
+                        onChange={(e) => setNewElD(Number(e.target.value))}
+                        className="w-full rounded border border-slate-700 bg-[#14161A] px-2 py-1 font-mono text-xs tabular-nums text-white"
+                      />
+                    </label>
+                    <label className="block space-y-0.5">
+                      <span className="text-[11px] text-slate-400">Alt. (m)</span>
+                      <input
+                        type="number"
+                        step="0.1"
+                        min="0.1"
+                        value={newElH}
+                        onChange={(e) => setNewElH(Number(e.target.value))}
+                        className="w-full rounded border border-slate-700 bg-[#14161A] px-2 py-1 font-mono text-xs tabular-nums text-white"
+                      />
+                    </label>
+                  </div>
+
+                  <label className="block space-y-0.5">
+                    <span className="text-[11px] text-slate-400">Material Conceitual</span>
                     <input
                       type="text"
-                      placeholder="Ex: P15"
-                      value={newElCode}
-                      onChange={(e) => setNewElCode(e.target.value)}
-                      className="w-full rounded border border-slate-700 bg-[#14161A] px-2.5 py-1.5 text-sm text-white"
+                      value={newElMat}
+                      onChange={(e) => setNewElMat(e.target.value)}
+                      className="w-full rounded border border-slate-700 bg-[#14161A] px-2 py-1 text-xs text-white"
                     />
                   </label>
                 </div>
-
-                <label className="block space-y-1">
-                  <span className="text-xs text-slate-400">Pavimento</span>
-                  <select
-                    value={newElFloorId}
-                    onChange={(e) => setNewElFloorId(e.target.value)}
-                    className="w-full rounded border border-slate-700 bg-[#14161A] px-2.5 py-1.5 text-sm text-white"
-                  >
-                    {project.floors.map((fl) => (
-                      <option key={fl.id} value={fl.id}>
-                        {fl.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <label className="block space-y-1">
-                    <span className="text-xs text-slate-400">X no terreno (m)</span>
-                    <input
-                      type="number"
-                      step="0.1"
-                      value={newElX}
-                      onChange={(e) => setNewElX(Number(e.target.value))}
-                      className="w-full rounded border border-slate-700 bg-[#14161A] px-2.5 py-1.5 font-mono text-sm tabular-nums text-white"
-                    />
-                  </label>
-                  <label className="block space-y-1">
-                    <span className="text-xs text-slate-400">Y no terreno (m)</span>
-                    <input
-                      type="number"
-                      step="0.1"
-                      value={newElY}
-                      onChange={(e) => setNewElY(Number(e.target.value))}
-                      className="w-full rounded border border-slate-700 bg-[#14161A] px-2.5 py-1.5 font-mono text-sm tabular-nums text-white"
-                    />
-                  </label>
-                </div>
-
-                <div className="grid grid-cols-3 gap-2">
-                  <label className="block space-y-1">
-                    <span className="text-xs text-slate-400">Larg. (m)</span>
-                    <input
-                      type="number"
-                      step="0.05"
-                      min="0.05"
-                      value={newElW}
-                      onChange={(e) => setNewElW(Number(e.target.value))}
-                      className="w-full rounded border border-slate-700 bg-[#14161A] px-2 py-1.5 font-mono text-sm tabular-nums text-white"
-                    />
-                  </label>
-                  <label className="block space-y-1">
-                    <span className="text-xs text-slate-400">Prof. (m)</span>
-                    <input
-                      type="number"
-                      step="0.05"
-                      min="0.05"
-                      value={newElD}
-                      onChange={(e) => setNewElD(Number(e.target.value))}
-                      className="w-full rounded border border-slate-700 bg-[#14161A] px-2 py-1.5 font-mono text-sm tabular-nums text-white"
-                    />
-                  </label>
-                  <label className="block space-y-1">
-                    <span className="text-xs text-slate-400">Alt. (m)</span>
-                    <input
-                      type="number"
-                      step="0.1"
-                      min="0.1"
-                      value={newElH}
-                      onChange={(e) => setNewElH(Number(e.target.value))}
-                      className="w-full rounded border border-slate-700 bg-[#14161A] px-2 py-1.5 font-mono text-sm tabular-nums text-white"
-                    />
-                  </label>
-                </div>
-
-                <label className="block space-y-1">
-                  <span className="text-xs text-slate-400">Material Conceitual</span>
-                  <input
-                    type="text"
-                    value={newElMat}
-                    onChange={(e) => setNewElMat(e.target.value)}
-                    className="w-full rounded border border-slate-700 bg-[#14161A] px-2.5 py-1.5 text-sm text-white"
-                  />
-                </label>
 
                 <button
                   type="submit"
-                  className="flex w-full items-center justify-center gap-1.5 rounded-md bg-[#2F7CF6] px-4 py-2 text-sm font-medium text-white hover:bg-[#2567d4]"
+                  className="flex shrink-0 w-full items-center justify-center gap-1.5 rounded-md bg-[#2F7CF6] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#2567d4]"
                 >
-                  <Plus className="h-4 w-4" />
+                  <Plus className="h-3.5 w-3.5" />
                   Adicionar Elemento
                 </button>
               </form>
 
-              <div className="overflow-hidden rounded-lg border border-slate-800 bg-[#1B1E24] lg:col-span-8">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
+              <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-slate-800 bg-[#1B1E24] lg:col-span-8">
+                <div className="min-h-0 flex-1 overflow-hidden">
+                  <table className="w-full table-fixed text-left text-xs">
                     <thead className="border-b border-slate-800 bg-[#14161A] text-slate-400">
                       <tr>
-                        <th className="px-3 py-2.5 font-medium">Código</th>
-                        <th className="px-3 py-2.5 font-medium">Tipo</th>
-                        <th className="px-3 py-2.5 font-medium">Pavimento</th>
-                        <th className="px-3 py-2.5 font-medium">Coord. (X, Y)</th>
-                        <th className="px-3 py-2.5 font-medium">Dimensões (m)</th>
-                        <th className="px-3 py-2.5 font-medium">Status</th>
-                        <th className="px-3 py-2.5 text-right font-medium">Ação</th>
+                        <th className="w-16 px-3 py-2 font-medium">Código</th>
+                        <th className="w-20 px-3 py-2 font-medium">Tipo</th>
+                        <th className="px-3 py-2 font-medium">Pavimento</th>
+                        <th className="w-28 px-3 py-2 font-medium">Coord. (X, Y)</th>
+                        <th className="w-32 px-3 py-2 font-medium">Dimensões (m)</th>
+                        <th className="w-24 px-3 py-2 font-medium">Status</th>
+                        <th className="w-12 px-3 py-2 text-right font-medium">Ação</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800/70">
-                      {project.structuralElements.map((s) => {
+                      {structPaged.slice.map((s) => {
                         const flName =
                           project.floors.find((f) => f.id === s.floorId)?.name ?? 'Geral';
                         return (
                           <tr key={s.id} className="hover:bg-slate-800/30">
-                            <td className="px-3 py-2 font-mono font-semibold text-white">{s.code}</td>
-                            <td className="px-3 py-2 capitalize text-slate-300">{s.type}</td>
-                            <td className="px-3 py-2 text-slate-400">{flName}</td>
-                            <td className="px-3 py-2 font-mono tabular-nums text-slate-300">
+                            <td className="px-3 py-1.5 font-mono font-semibold text-white">{s.code}</td>
+                            <td className="px-3 py-1.5 capitalize text-slate-300">{s.type}</td>
+                            <td className="truncate px-3 py-1.5 text-slate-400">{flName}</td>
+                            <td className="px-3 py-1.5 font-mono tabular-nums text-slate-300">
                               ({s.x.toFixed(2)}, {s.y.toFixed(2)})
                             </td>
-                            <td className="px-3 py-2 font-mono tabular-nums text-slate-300">
-                              {s.width.toFixed(2)} × {s.depth.toFixed(2)} × {s.height.toFixed(2)}
+                            <td className="px-3 py-1.5 font-mono tabular-nums text-slate-300">
+                              {s.width.toFixed(2)}×{s.depth.toFixed(2)}×{s.height.toFixed(2)}
                             </td>
-                            <td className="px-3 py-2 text-amber-400">
+                            <td className="px-3 py-1.5 text-amber-400">
                               {s.isDimensioned ? 'Dimensionado' : 'Conceitual'}
                             </td>
-                            <td className="px-3 py-2 text-right">
+                            <td className="px-3 py-1.5 text-right">
                               <button
                                 type="button"
                                 onClick={() => removeStructural(s.id)}
@@ -852,19 +904,28 @@ export const ConstructionAndStructureModule: React.FC<ConstructionAndStructureMo
                     </tbody>
                   </table>
                 </div>
+                <PaginationBar
+                  page={structPaged.safePage}
+                  totalPages={structPaged.totalPages}
+                  totalItems={project.structuralElements.length}
+                  startIndex={structPaged.start}
+                  endIndex={structPaged.end}
+                  onPageChange={setStructPage}
+                  itemLabel="elementos"
+                />
               </div>
             </div>
           </div>
         )}
 
         {subTab === 'comparador' && (
-          <div className="space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-800 bg-[#1B1E24] p-4">
+          <div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-hidden">
+            <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-800 bg-[#1B1E24] px-3.5 py-2.5">
               <div>
-                <h2 className="text-sm font-semibold text-white">
+                <h2 className="text-xs font-semibold text-white">
                   Comparativo Técnico de Sistemas para Tipologia
                 </h2>
-                <p className="text-xs text-slate-400">
+                <p className="text-[11px] text-slate-400">
                   Custos e prazos não cotados permanecem explicitamente marcados como &quot;DADO NÃO DISPONÍVEL&quot;.
                 </p>
               </div>
@@ -872,8 +933,11 @@ export const ConstructionAndStructureModule: React.FC<ConstructionAndStructureMo
                 <span className="text-xs text-slate-400">Tipologia base:</span>
                 <select
                   value={activeUnitType?.id ?? ''}
-                  onChange={(e) => onSelectUnitType(e.target.value)}
-                  className="rounded border border-slate-700 bg-[#14161A] px-3 py-1.5 text-sm text-white"
+                  onChange={(e) => {
+                    onSelectUnitType(e.target.value);
+                    setCompPage(0);
+                  }}
+                  className="rounded border border-slate-700 bg-[#14161A] px-2.5 py-1 text-xs text-white"
                 >
                   {project.unitTypes.map((ut) => (
                     <option key={ut.id} value={ut.id}>
@@ -884,69 +948,64 @@ export const ConstructionAndStructureModule: React.FC<ConstructionAndStructureMo
               </div>
             </div>
 
-            <div className="overflow-hidden rounded-lg border border-slate-800 bg-[#1B1E24]">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-slate-800 bg-[#1B1E24]">
+              <div className="min-h-0 flex-1 overflow-hidden">
+                <table className="w-full table-fixed text-left text-[11px]">
                   <thead className="border-b border-slate-800 bg-[#14161A] text-slate-400">
                     <tr>
-                      <th className="px-3 py-3 font-medium">Sistema Construtivo</th>
-                      <th className="px-3 py-3 font-medium">Espessura Típica</th>
-                      <th className="px-3 py-3 font-medium">Área Paredes</th>
-                      <th className="px-3 py-3 font-medium">Materiais Principais</th>
-                      <th className="px-3 py-3 font-medium">Mão de Obra</th>
-                      <th className="px-3 py-3 font-medium">Peso / Carga</th>
-                      <th className="px-3 py-3 font-medium">Desempenho / Manutenção</th>
-                      <th className="px-3 py-3 font-medium">Custo & Prazo</th>
-                      <th className="px-3 py-3 font-medium">Restrições Técnicas</th>
+                      <th className="w-40 px-2.5 py-2 font-medium">Sistema Construtivo</th>
+                      <th className="w-24 px-2 py-2 font-medium">Espessura / Área</th>
+                      <th className="px-2.5 py-2 font-medium">Materiais &amp; Mão de Obra</th>
+                      <th className="px-2.5 py-2 font-medium">Peso / Perdas / Desempenho</th>
+                      <th className="w-40 px-2.5 py-2 font-medium">Custo &amp; Prazo</th>
+                      <th className="px-2.5 py-2 font-medium">Restrições Técnicas</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/70">
-                    {comparisonRows.map((row) => {
+                    {compPaged.slice.map((row) => {
                       const isCurrent = cm.methodId === row.methodId;
                       return (
                         <tr
                           key={row.methodId}
                           className={isCurrent ? 'bg-[#2F7CF6]/10' : 'hover:bg-slate-800/30'}
                         >
-                          <td className="px-3 py-3 font-medium text-white">
-                            {row.methodName}
+                          <td className="px-2.5 py-2 font-medium text-white align-top">
+                            <div>{row.methodName}</div>
                             {isCurrent && (
-                              <span className="mt-0.5 block text-[11px] font-normal text-[#2F7CF6]">
+                              <span className="mt-0.5 block text-[10px] font-normal text-[#2F7CF6]">
                                 Sistema Ativo no Projeto
                               </span>
                             )}
                           </td>
-                          <td className="px-3 py-3 font-mono tabular-nums text-slate-300">
-                            {row.typicalWallThicknessCm}
+                          <td className="px-2.5 py-2 font-mono tabular-nums text-slate-300 align-top">
+                            <div>{row.typicalWallThicknessCm}</div>
+                            <div className="text-slate-200">{row.wallAreaM2} m²</div>
                           </td>
-                          <td className="px-3 py-3 font-mono tabular-nums text-slate-200">
-                            {row.wallAreaM2} m²
+                          <td className="px-2.5 py-2 text-slate-300 align-top">
+                            <div className="line-clamp-2">{row.primaryMaterials}</div>
+                            <div className="mt-0.5 line-clamp-1 text-[10px] text-slate-400">
+                              {row.specializedLaborRequired}
+                            </div>
                           </td>
-                          <td className="px-3 py-3 text-slate-300">{row.primaryMaterials}</td>
-                          <td className="px-3 py-3 text-slate-300">{row.specializedLaborRequired}</td>
-                          <td className="px-3 py-3 text-slate-300">
-                            {row.estimatedWeightNote}
-                            <span className="mt-1 block text-[11px] text-slate-400">
-                              Perdas: {row.lossesNote}
-                            </span>
+                          <td className="px-2.5 py-2 text-slate-300 align-top">
+                            <div className="line-clamp-1">{row.estimatedWeightNote} · Perdas: {row.lossesNote}</div>
+                            <div className="mt-0.5 line-clamp-2 text-[10px] text-slate-400">
+                              {row.thermalAcousticNote} · {row.maintenanceDurabilityNote}
+                            </div>
                           </td>
-                          <td className="px-3 py-3 text-slate-300">
-                            {row.thermalAcousticNote}
-                            <span className="mt-1 block text-[11px] text-slate-400">
-                              {row.maintenanceDurabilityNote}
-                            </span>
+                          <td className="px-2.5 py-2 text-amber-300 align-top">
+                            <div className="line-clamp-1">Custo: {row.costEstimate}</div>
+                            <div className="mt-0.5 line-clamp-1">Prazo: {row.scheduleEstimate}</div>
                           </td>
-                          <td className="px-3 py-3 text-amber-300">
-                            <div>Custo: {row.costEstimate}</div>
-                            <div className="mt-0.5">Prazo: {row.scheduleEstimate}</div>
+                          <td className="px-2.5 py-2 text-slate-400 align-top">
+                            <div className="line-clamp-2">{row.restrictions}</div>
                           </td>
-                          <td className="px-3 py-3 text-slate-400">{row.restrictions}</td>
                         </tr>
                       );
                     })}
                     {comparisonRows.length === 0 && (
                       <tr>
-                        <td colSpan={9} className="px-4 py-8 text-center text-slate-400">
+                        <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
                           Crie ao menos uma tipologia na etapa &quot;Planta 2D & Tipologias&quot; para comparar áreas de paredes e sistemas construtivos.
                         </td>
                       </tr>
@@ -954,6 +1013,15 @@ export const ConstructionAndStructureModule: React.FC<ConstructionAndStructureMo
                   </tbody>
                 </table>
               </div>
+              <PaginationBar
+                page={compPaged.safePage}
+                totalPages={compPaged.totalPages}
+                totalItems={comparisonRows.length}
+                startIndex={compPaged.start}
+                endIndex={compPaged.end}
+                onPageChange={setCompPage}
+                itemLabel="sistemas comparados"
+              />
             </div>
           </div>
         )}
