@@ -298,19 +298,30 @@ export async function upsertUserProfile(user: User): Promise<void> {
 
 function buildFirestoreProjectPayload(project: Project, ownerId: string) {
   const safeId = normalizeId(project.id, 'proj');
+  const validStatuses = new Set(['em_andamento', 'concluido', 'arquivado']);
+  const validStages = new Set([
+    'estudo_conceitual',
+    'estudo_preliminar',
+    'anteprojeto',
+    'aprovacao',
+    'executivo',
+    'dimensionado',
+    'revisado',
+    'validado_rt',
+  ]);
   const base: Record<string, unknown> = {
     id: safeId,
     ownerId,
-    schemaVersion: project.schemaVersion || 1,
-    code: (project.code || 'KPS-001').slice(0, 48),
-    name: (project.name || 'Novo Empreendimento').slice(0, 160),
-    status: project.status,
-    stage: project.stage,
-    client: (project.client ?? 'Não informado').slice(0, 160),
-    owner: (project.owner ?? 'Não informado').slice(0, 160),
-    address: (project.address ?? 'Não informado').slice(0, 240),
-    municipality: (project.municipality ?? 'Não informado').slice(0, 120),
-    state: (project.state ?? '').slice(0, 8),
+    schemaVersion: typeof project.schemaVersion === 'number' ? project.schemaVersion : 1,
+    code: String(project.code || 'KPS-001').trim().slice(0, 48) || 'KPS-001',
+    name: String(project.name || 'Novo Empreendimento').trim().slice(0, 160) || 'Novo Empreendimento',
+    status: validStatuses.has(project.status) ? project.status : 'em_andamento',
+    stage: validStages.has(project.stage) ? project.stage : 'estudo_conceitual',
+    client: String(project.client ?? 'Não informado').slice(0, 160),
+    owner: String(project.owner ?? 'Não informado').slice(0, 160),
+    address: String(project.address ?? 'Não informado').slice(0, 240),
+    municipality: String(project.municipality ?? 'Não informado').slice(0, 120),
+    state: String(project.state ?? '').slice(0, 8),
     site: stripUndefined(project.site),
     urbanRules: stripUndefined((project.urbanRules ?? []).slice(0, 40)),
     constructionMethod: stripUndefined(project.constructionMethod),
@@ -331,10 +342,10 @@ function buildFirestoreProjectPayload(project: Project, ownerId: string) {
     fireSafetyNotes: stripUndefined(project.fireSafetyNotes),
     accessibilityConfig: stripUndefined(project.accessibilityConfig),
   };
-  if (project.implantation !== undefined) {
+  if (project.implantation && isPlainObject(project.implantation)) {
     base.implantation = stripUndefined(project.implantation);
   }
-  if (project.landscaping !== undefined) {
+  if (project.landscaping && isPlainObject(project.landscaping)) {
     base.landscaping = stripUndefined(project.landscaping);
   }
   return base;
