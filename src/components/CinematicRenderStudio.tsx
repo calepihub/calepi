@@ -28,10 +28,10 @@ import {
   buildPool3D,
   buildRoofAndWaterTowerGroup,
 } from '../engine/botanical3D';
+import { unitLocalToWorld } from '../engine/cadDrawings';
 import {
   getBoundingBox,
   getOpeningWorldPosition,
-  getWallAngleRad,
   getWallLength,
   round2,
 } from '../engine/geometry';
@@ -950,8 +950,9 @@ export const CinematicRenderStudio: React.FC<CinematicRenderStudioProps> = ({
           if (!wall) continue;
           const pos = getOpeningWorldPosition(wall, op);
           const wp = mapUnitPt(inst, ut.width, pos.center.x, pos.center.y);
-          const wallAng = getWallAngleRad(wall) + (inst.rotationDeg * Math.PI) / 180;
-          const rotY = inst.mirrored ? wallAng : -wallAng;
+          const pA = mapUnitPt(inst, ut.width, wall.start.x, wall.start.y);
+          const pB = mapUnitPt(inst, ut.width, wall.end.x, wall.end.y);
+          const rotY = -Math.atan2(pB.z - pA.z, pB.x - pA.x);
           const y0 = baseY + floor.slabThickness + op.sillHeight;
 
           if (op.type === 'janela') {
@@ -1247,16 +1248,15 @@ export const CinematicRenderStudio: React.FC<CinematicRenderStudioProps> = ({
       cam.position.set(-span * 0.9, span * 0.85, span * 0.95);
       ctrl.target.set(0, 1.2, 0);
     } else if (preset === 'interna' && firstInst && firstUt) {
-      cam.position.set(
-        firstInst.x + firstUt.width * 0.78 - centerOffset.x,
-        1.58,
-        firstInst.y + firstUt.depth * 0.82 - centerOffset.z,
+      const eyeW = unitLocalToWorld(
+        firstInst,
+        firstUt,
+        Math.max(0.55, firstUt.width * 0.78),
+        Math.max(0.75, firstUt.depth * 0.82),
       );
-      ctrl.target.set(
-        firstInst.x + firstUt.width * 0.35 - centerOffset.x,
-        0.95,
-        firstInst.y + 1.2 - centerOffset.z,
-      );
+      const tgtW = unitLocalToWorld(firstInst, firstUt, firstUt.width * 0.35, 1.2);
+      cam.position.set(eyeW.x - centerOffset.x, 1.58, eyeW.y - centerOffset.z);
+      ctrl.target.set(tgtW.x - centerOffset.x, 0.95, tgtW.y - centerOffset.z);
     } else {
       // Street facade oblique shot
       cam.position.set(halfW * 0.95 + 3.5, 3.6, halfD + 7.2);

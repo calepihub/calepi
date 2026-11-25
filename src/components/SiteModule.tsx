@@ -30,15 +30,19 @@ import {
 import { unitLocalToWorld } from '../engine/cadDrawings';
 import {
   createDefaultImplantationConfig,
+  customizeUnitTypeForSlot,
   deleteUnitTypeFromProject,
   formatLengthInUnit,
+  formatWorldEntrySideLabel,
   generateImplantationUnits,
+  getEffectiveWorldEntrySide,
   getGateWorldPosition,
   getLotBoundarySegments,
   normalizeSiteData,
   recalculateFloorElevations,
   replicateGroundFloorToAllFloors,
   setProjectFloorCount,
+  updateFloorUnitInProject,
   updateUnitTypeInProject,
   validateImplantation,
 } from '../engine/implantation';
@@ -585,58 +589,24 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
     e.preventDefault();
     if (!customizingUnitId || !activeFloor) return;
     const inst = activeFloor.units.find((u) => u.id === customizingUnitId);
-    const baseUt = inst ? project.unitTypes.find((t) => t.id === inst.unitTypeId) : undefined;
-    if (!inst || !baseUt) return;
-
-    const customType = generateParametricUnitLayout({
-      code: `${baseUt.code}-${inst.unitNumber}`,
-      name: `${baseUt.name} (Unid. ${inst.unitNumber})`,
-      width: Math.max(2.8, customW),
-      depth: Math.max(3.6, customD),
-      ceilingHeight: baseUt.ceilingHeight,
-      bedrooms: baseUt.bedrooms,
-      hasLaundry: baseUt.hasLaundry,
-      hasBalcony: baseUt.hasBalcony,
-      hasMezzanine: baseUt.hasMezzanine,
-      accessible: baseUt.accessible,
-      extWallThickness: project.constructionMethod.externalWallThickness,
-      intWallThickness:
-        baseUt.internalPartitionType === 'drywall'
-          ? 0.095
-          : project.constructionMethod.internalWallThickness,
-      constructionSystem: project.constructionMethod.methodId,
-      entrySide: customEntry,
-      internalPartitionType: baseUt.internalPartitionType ?? 'alvenaria',
-      mezzanineZone: baseUt.mezzanine?.zone,
-      mezzanineElevationM: baseUt.mezzanine?.elevationM,
-      mezzanineSizingMode: baseUt.mezzanine?.sizingMode,
-      mezzanineCoverageRatio: baseUt.mezzanine?.coverageRatio,
-      mezzanineCustomWidthM: baseUt.mezzanine?.customWidthM,
-      mezzanineCustomDepthM: baseUt.mezzanine?.customDepthM,
-      mezzanineUsage: baseUt.mezzanine?.usage,
-      mezzanineStructureType: baseUt.mezzanine?.structureType,
-      mezzanineStairLayout: baseUt.mezzanine?.stairLayout,
-      mezzanineStairSide: baseUt.mezzanine?.stairSide,
-    });
+    if (!inst) return;
 
     onUpdateProject(
-      (prev) => ({
-        ...prev,
-        unitTypes: [...prev.unitTypes, customType],
-        floors: prev.floors.map((f) =>
-          f.id === activeFloor.id
-            ? {
-                ...f,
-                units: f.units.map((u) =>
-                  u.id === inst.id
-                    ? { ...u, unitTypeId: customType.id, entranceOrientation: customEntry }
-                    : u,
-                ),
-              }
-            : f,
-        ),
-      }),
-      `Personalização individual de dimensões da unidade ${inst.unitNumber} (${customW}×${customD}m)`,
+      (prev) => {
+        const res = customizeUnitTypeForSlot(
+          prev,
+          activeFloor.id,
+          inst.id,
+          {
+            width: Math.max(2.8, customW),
+            depth: Math.max(3.6, customD),
+            entrySide: customEntry,
+          },
+          applyToAllFloors,
+        );
+        return res ? res.project : prev;
+      },
+      `Edição da unidade ${inst.unitNumber} (${customW}×${customD}m, entrada ${customEntry})${applyToAllFloors && project.floors.length > 1 ? ' nos pavimentos' : ''}`,
     );
     setCustomizingUnitId(null);
   };
@@ -2758,7 +2728,7 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
                   className="rounded border border-[#2A2F38] bg-[#14161A] p-3 space-y-2.5"
                 >
                   <div className="text-[11px] text-sky-300 font-medium">
-                    Desvincular e editar dimensões exclusivas da Kitnet {selectedInstance.unitNumber}
+                    Editar dimensões e entrada da Kitnet {selectedInstance.unitNumber}
                   </div>
                   <div className="grid grid-cols-3 gap-2">
                     <div>
@@ -2782,7 +2752,7 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
                       />
                     </div>
                     <div>
-                      <label className="block text-[10px] text-[#949BA8]">Entrada</label>
+                      <label className="block text-[10px] text-[#949BA8]">Entrada (modelo)</label>
                       <select
                         value={customEntry}
                         onChange={(e) => setCustomEntry(e.target.value as EntrySide)}
@@ -2794,6 +2764,29 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
                       </select>
                     </div>
                   </div>
+                  <div className="rounded bg-[#1B1E24] border border-emerald-500/30 px-2 py-1 text-[10.5px] text-emerald-300">
+                    Porta P1 no lote:{' '}
+                    <span className="font-semibold">
+                      {formatWorldEntrySideLabel(
+                        getEffectiveWorldEntrySide(
+                          customEntry,
+                          selectedInstance.rotationDeg,
+                          selectedInstance.mirrored,
+                        ),
+                      )}
+                    </span>
+                    {selectedInstance.mirrored && ' (unidade espelhada: Esq. ↔ Dir.)'}
+                  </div>
+                  {project.floors.length > 1 && (
+                    <label className="inline-flex items-center gap-1.5 text-[11px] text-slate-300 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={applyToAllFloors}
+                        onChange={(e) => setApplyToAllFloors(e.target.checked)}
+                      />
+                      Aplicar também nos {project.floors.length} pavimentos (ex.: {selectedInstance.unitNumber} e equivalentes)
+                    </label>
+                  )}
                   <div className="flex justify-end gap-2">
                     <button
                       type="button"
@@ -2806,7 +2799,9 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
                       type="submit"
                       className="px-3 py-1 text-[11px] font-semibold rounded bg-[#2F7CF6] text-white"
                     >
-                      Aplicar apenas nesta Kitnet
+                      {applyToAllFloors && project.floors.length > 1
+                        ? 'Aplicar nos Pavimentos'
+                        : 'Aplicar nesta Kitnet'}
                     </button>
                   </div>
                 </form>
@@ -3427,15 +3422,26 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
                   </button>
                 ))}
               </div>
+              {project.floors.length > 1 && (
+                <label className="inline-flex items-center gap-1.5 text-[11px] text-sky-200 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={applyToAllFloors}
+                    onChange={(e) => setApplyToAllFloors(e.target.checked)}
+                  />
+                  Sincronizar edições da tabela nos {project.floors.length} andares
+                </label>
+              )}
             </div>
 
             {activeFloor && (
-              <div className="max-h-56 overflow-y-auto border border-[#2A2F38] rounded">
+              <div className="max-h-64 overflow-y-auto border border-[#2A2F38] rounded">
                 <table className="w-full text-left text-xs border-collapse">
                   <thead className="bg-[#181B20] text-[11px] text-[#949BA8]">
                     <tr>
                       <th className="py-2 px-2.5">Unid.</th>
                       <th className="py-2 px-2.5">Modelo</th>
+                      <th className="py-2 px-2.5">Entrada (P1)</th>
                       <th className="py-2 px-2.5">X (m)</th>
                       <th className="py-2 px-2.5">Y (m)</th>
                       <th className="py-2 px-2.5">Rot.</th>
@@ -3446,13 +3452,18 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
                   <tbody className="divide-y divide-[#252A33]">
                     {activeFloor.units.length === 0 ? (
                       <tr>
-                        <td colSpan={7} className="py-6 text-center text-[#949BA8]">
+                        <td colSpan={8} className="py-6 text-center text-[#949BA8]">
                           Nenhuma unidade implantada neste pavimento. Configure a Etapa 2 à esquerda e clique em &quot;Gerar / Atualizar Implantação&quot; ou insira manualmente acima.
                         </td>
                       </tr>
                     ) : (
                       activeFloor.units.map((inst) => {
                         const isSel = selectedUnitId === inst.id;
+                        const utInst = project.unitTypes.find((t) => t.id === inst.unitTypeId);
+                        const currEntry: EntrySide = utInst?.entrySide ?? 'frente';
+                        const worldSideLabel = formatWorldEntrySideLabel(
+                          getEffectiveWorldEntrySide(currEntry, inst.rotationDeg, inst.mirrored),
+                        );
                         return (
                           <tr
                             key={inst.id}
@@ -3467,19 +3478,17 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
                                 value={inst.unitTypeId}
                                 onChange={(e) => {
                                   const nextUtId = e.target.value;
-                                  onUpdateProject((prev) => ({
-                                    ...prev,
-                                    floors: prev.floors.map((f) =>
-                                      f.id === activeFloor.id
-                                        ? {
-                                            ...f,
-                                            units: f.units.map((u) =>
-                                              u.id === inst.id ? { ...u, unitTypeId: nextUtId } : u,
-                                            ),
-                                          }
-                                        : f,
-                                    ),
-                                  }));
+                                  onUpdateProject(
+                                    (prev) =>
+                                      updateFloorUnitInProject(
+                                        prev,
+                                        activeFloor.id,
+                                        inst.id,
+                                        { unitTypeId: nextUtId },
+                                        applyToAllFloors,
+                                      ),
+                                    `Troca de tipologia da unidade ${inst.unitNumber}`,
+                                  );
                                 }}
                                 className="px-1.5 py-0.5 text-xs rounded bg-[#14161A] border border-[#2A2F38] text-white"
                               >
@@ -3491,25 +3500,48 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
                               </select>
                             </td>
                             <td className="py-1.5 px-2.5">
+                              <select
+                                value={currEntry}
+                                title={`Porta P1 no lote: ${worldSideLabel}`}
+                                onChange={(e) => {
+                                  const nextEntry = e.target.value as EntrySide;
+                                  onUpdateProject(
+                                    (prev) => {
+                                      const res = customizeUnitTypeForSlot(
+                                        prev,
+                                        activeFloor.id,
+                                        inst.id,
+                                        { entrySide: nextEntry },
+                                        applyToAllFloors,
+                                      );
+                                      return res ? res.project : prev;
+                                    },
+                                    `Entrada da unidade ${inst.unitNumber} alterada para ${nextEntry}`,
+                                  );
+                                }}
+                                className="px-1.5 py-0.5 text-xs rounded bg-[#14161A] border border-[#2A2F38] text-emerald-300"
+                              >
+                                <option value="frente">Frente</option>
+                                <option value="lateral_direita">Lat. Dir.</option>
+                                <option value="lateral_esquerda">Lat. Esq.</option>
+                              </select>
+                            </td>
+                            <td className="py-1.5 px-2.5">
                               <input
                                 type="number"
                                 step="0.1"
                                 value={inst.x}
                                 onChange={(e) => {
                                   const val = Number(e.target.value);
-                                  onUpdateProject((prev) => ({
-                                    ...prev,
-                                    floors: prev.floors.map((f) =>
-                                      f.id === activeFloor.id
-                                        ? {
-                                            ...f,
-                                            units: f.units.map((u) =>
-                                              u.id === inst.id ? { ...u, x: val } : u,
-                                            ),
-                                          }
-                                        : f,
+                                  onUpdateProject((prev) =>
+                                    updateFloorUnitInProject(
+                                      prev,
+                                      activeFloor.id,
+                                      inst.id,
+                                      { x: val },
+                                      applyToAllFloors,
                                     ),
-                                  }));
+                                  );
                                 }}
                                 className="w-16 px-1.5 py-0.5 font-mono bg-[#14161A] border border-[#2A2F38] rounded text-white"
                               />
@@ -3521,19 +3553,15 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
                                 value={inst.y}
                                 onChange={(e) => {
                                   const val = Number(e.target.value);
-                                  onUpdateProject((prev) => ({
-                                    ...prev,
-                                    floors: prev.floors.map((f) =>
-                                      f.id === activeFloor.id
-                                        ? {
-                                            ...f,
-                                            units: f.units.map((u) =>
-                                              u.id === inst.id ? { ...u, y: val } : u,
-                                            ),
-                                          }
-                                        : f,
+                                  onUpdateProject((prev) =>
+                                    updateFloorUnitInProject(
+                                      prev,
+                                      activeFloor.id,
+                                      inst.id,
+                                      { y: val },
+                                      applyToAllFloors,
                                     ),
-                                  }));
+                                  );
                                 }}
                                 className="w-16 px-1.5 py-0.5 font-mono bg-[#14161A] border border-[#2A2F38] rounded text-white"
                               />
@@ -3543,19 +3571,17 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
                                 value={inst.rotationDeg}
                                 onChange={(e) => {
                                   const nextRot = Number(e.target.value);
-                                  onUpdateProject((prev) => ({
-                                    ...prev,
-                                    floors: prev.floors.map((f) =>
-                                      f.id === activeFloor.id
-                                        ? {
-                                            ...f,
-                                            units: f.units.map((u) =>
-                                              u.id === inst.id ? { ...u, rotationDeg: nextRot } : u,
-                                            ),
-                                          }
-                                        : f,
-                                    ),
-                                  }));
+                                  onUpdateProject(
+                                    (prev) =>
+                                      updateFloorUnitInProject(
+                                        prev,
+                                        activeFloor.id,
+                                        inst.id,
+                                        { rotationDeg: nextRot },
+                                        applyToAllFloors,
+                                      ),
+                                    `Rotação da unidade ${inst.unitNumber} para ${nextRot}°`,
+                                  );
                                 }}
                                 className="px-1 py-0.5 font-mono bg-[#14161A] border border-[#2A2F38] rounded text-white"
                               >
@@ -3571,19 +3597,17 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
                                 checked={inst.mirrored}
                                 onChange={(e) => {
                                   const val = e.target.checked;
-                                  onUpdateProject((prev) => ({
-                                    ...prev,
-                                    floors: prev.floors.map((f) =>
-                                      f.id === activeFloor.id
-                                        ? {
-                                            ...f,
-                                            units: f.units.map((u) =>
-                                              u.id === inst.id ? { ...u, mirrored: val } : u,
-                                            ),
-                                          }
-                                        : f,
-                                    ),
-                                  }));
+                                  onUpdateProject(
+                                    (prev) =>
+                                      updateFloorUnitInProject(
+                                        prev,
+                                        activeFloor.id,
+                                        inst.id,
+                                        { mirrored: val },
+                                        applyToAllFloors,
+                                      ),
+                                    `Espelhamento da unidade ${inst.unitNumber}`,
+                                  );
                                 }}
                               />
                             </td>
@@ -3595,7 +3619,7 @@ export const SiteModule: React.FC<SiteModuleProps> = ({
                                   setSelectedUnitId(inst.id);
                                   handleCustomizeUnitDimensions(inst);
                                 }}
-                                title="Personalizar dimensões apenas desta kitnet"
+                                title="Personalizar dimensões e entrada desta unidade"
                                 className="px-1.5 py-0.5 text-[10px] rounded border border-[#323844] text-sky-300 hover:border-[#2F7CF6]"
                               >
                                 Editar

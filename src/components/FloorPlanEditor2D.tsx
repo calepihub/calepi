@@ -40,7 +40,14 @@ import {
   round3,
 } from '../engine/geometry';
 import { runCompatibilityAnalysis } from '../engine/engineering';
-import { replicateGroundFloorToAllFloors, setProjectFloorCount } from '../engine/implantation';
+import {
+  customizeUnitTypeForSlot,
+  formatWorldEntrySideLabel,
+  getEffectiveWorldEntrySide,
+  replicateGroundFloorToAllFloors,
+  setProjectFloorCount,
+  updateFloorUnitInProject,
+} from '../engine/implantation';
 import { computeElectricalRouting, computeHydraulicRouting } from '../engine/mepRouting';
 import { nextId } from '../engine/parametricGenerator';
 import { ElectricalSymbolSvg, FurnitureCadBlock } from './CadArchitecturalSymbols';
@@ -48,6 +55,7 @@ import type {
   DrainagePoint,
   ElectricalCategory,
   ElectricalPoint,
+  EntrySide,
   FurnitureCategory,
   FurnitureItem,
   Opening,
@@ -172,6 +180,7 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
   const [selectedRoomFilter, setSelectedRoomFilter] = useState<string>('todos');
   const [mezzanineViewLayer, setMezzanineViewLayer] = useState<'lado_a_lado' | 'terreo' | 'mezanino'>('lado_a_lado');
   const [selectedFloorId, setSelectedFloorId] = useState<string>(project.floors[0]?.id ?? '');
+  const [syncFloors, setSyncFloors] = useState<boolean>(true);
   const [tool, setTool] = useState<ToolMode>('select');
   const [doorRolePreset, setDoorRolePreset] = useState<OpeningRole>('outro');
   const [furniturePresetIdx, setFurniturePresetIdx] = useState(0);
@@ -848,19 +857,15 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
       } else if (draggingItem.kind === 'unit_instance' && scope === 'pavimento' && activeFloor) {
         const nx = snapVal(pt.x - draggingItem.offsetX);
         const ny = snapVal(pt.y - draggingItem.offsetY);
-        onUpdateProject((prev) => ({
-          ...prev,
-          floors: prev.floors.map((fl) =>
-            fl.id === activeFloor.id
-              ? {
-                  ...fl,
-                  units: fl.units.map((u) =>
-                    u.id === draggingItem.id ? { ...u, x: nx, y: ny } : u,
-                  ),
-                }
-              : fl,
+        onUpdateProject((prev) =>
+          updateFloorUnitInProject(
+            prev,
+            activeFloor.id,
+            draggingItem.id,
+            { x: nx, y: ny },
+            syncFloors,
           ),
-        }));
+        );
       }
     }
   };
@@ -889,21 +894,19 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
         ),
       }));
     } else if (selected.kind === 'unit_instance') {
-      onUpdateProject((prev) => ({
-        ...prev,
-        floors: prev.floors.map((fl) =>
-          fl.id === selected.floorId
-            ? {
-                ...fl,
-                units: fl.units.map((u) =>
-                  u.id === selected.id
-                    ? { ...u, rotationDeg: (((u.rotationDeg + deltaDeg) % 360) + 360) % 360 }
-                    : u,
-                ),
-              }
-            : fl,
-        ),
-      }));
+      onUpdateProject((prev) => {
+        const fl = prev.floors.find((f) => f.id === selected.floorId);
+        const inst = fl?.units.find((u) => u.id === selected.id);
+        if (!inst) return prev;
+        const nextRot = (((inst.rotationDeg + deltaDeg) % 360) + 360) % 360;
+        return updateFloorUnitInProject(
+          prev,
+          selected.floorId,
+          selected.id,
+          { rotationDeg: nextRot },
+          syncFloors,
+        );
+      }, 'Rotação de unidade no pavimento');
     }
   };
 
@@ -973,19 +976,18 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
         ),
       }));
     } else if (selected.kind === 'unit_instance') {
-      onUpdateProject((prev) => ({
-        ...prev,
-        floors: prev.floors.map((fl) =>
-          fl.id === selected.floorId
-            ? {
-                ...fl,
-                units: fl.units.map((u) =>
-                  u.id === selected.id ? { ...u, mirrored: !u.mirrored } : u,
-                ),
-              }
-            : fl,
-        ),
-      }));
+      onUpdateProject((prev) => {
+        const fl = prev.floors.find((f) => f.id === selected.floorId);
+        const inst = fl?.units.find((u) => u.id === selected.id);
+        if (!inst) return prev;
+        return updateFloorUnitInProject(
+          prev,
+          selected.floorId,
+          selected.id,
+          { mirrored: !inst.mirrored },
+          syncFloors,
+        );
+      }, 'Espelhamento de unidade no pavimento');
     }
   };
 
@@ -2236,6 +2238,17 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
                 </button>
               )}
 
+              {project.floors.length > 1 && (
+                <label className="inline-flex items-center gap-1.5 text-[11px] text-sky-200 cursor-pointer px-1.5 py-0.5 rounded bg-[#14161A] border border-[#2A2F38]">
+                  <input
+                    type="checkbox"
+                    checked={syncFloors}
+                    onChange={(e) => setSyncFloors(e.target.checked)}
+                  />
+                  Sincronizar nos {project.floors.length} andares
+                </label>
+              )}
+
               {onOpenImplantation && (
                 <button
                   type="button"
@@ -2588,10 +2601,10 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
                         y={ut.depth - 0.25}
                         textAnchor="middle"
                         fill="#60A5FA"
-                        fontSize="0.26"
+                        fontSize="0.24"
                         fontFamily="JetBrains Mono, monospace"
                       >
-                        {inst.unitNumber}
+                        {inst.unitNumber} · {ut.code}{inst.mirrored ? ' · ESP' : ''}
                       </text>
                     </g>
                   );
@@ -4304,29 +4317,151 @@ export const FloorPlanEditor2D: React.FC<FloorPlanEditor2DProps> = ({
             </div>
           )}
 
-          {selectedInstance && (
-            <div className="space-y-3 text-xs">
-              <div className="font-semibold text-[#60A5FA]">
-                Unidade {selectedInstance.unitNumber}
+          {selectedInstance && (() => {
+            const instUt = project.unitTypes.find((t) => t.id === selectedInstance.unitTypeId);
+            const currEntry: EntrySide = instUt?.entrySide ?? 'frente';
+            const lotSideLabel = formatWorldEntrySideLabel(
+              getEffectiveWorldEntrySide(
+                currEntry,
+                selectedInstance.rotationDeg,
+                selectedInstance.mirrored,
+              ),
+            );
+            return (
+              <div className="space-y-3 text-xs">
+                <div className="flex items-center justify-between">
+                  <div className="font-semibold text-[#60A5FA]">
+                    Unidade {selectedInstance.unitNumber}
+                  </div>
+                  {instUt && (
+                    <span className="font-mono text-[10px] text-slate-400">
+                      {instUt.width}×{instUt.depth}m{selectedInstance.mirrored ? ' · ESP' : ''}
+                    </span>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-[10px] text-[#949BA8] mb-0.5">
+                    Tipologia / Modelo
+                  </label>
+                  <select
+                    value={selectedInstance.unitTypeId}
+                    onChange={(e) => {
+                      const nextUtId = e.target.value;
+                      onUpdateProject(
+                        (prev) =>
+                          updateFloorUnitInProject(
+                            prev,
+                            activeFloor?.id ?? selectedInstance.floorId,
+                            selectedInstance.id,
+                            { unitTypeId: nextUtId },
+                            syncFloors,
+                          ),
+                        `Troca de tipologia da unidade ${selectedInstance.unitNumber} no Editor 2D`,
+                      );
+                    }}
+                    className="w-full px-2 py-1 text-xs rounded bg-[#14161A] border border-[#2A2F38] text-white"
+                  >
+                    {project.unitTypes.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.code} — {t.name} ({t.width}×{t.depth}m)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] text-[#949BA8] mb-0.5">
+                    Entrada Principal P1 (modelo)
+                  </label>
+                  <select
+                    value={currEntry}
+                    onChange={(e) => {
+                      const nextEntry = e.target.value as EntrySide;
+                      onUpdateProject(
+                        (prev) => {
+                          const res = customizeUnitTypeForSlot(
+                            prev,
+                            activeFloor?.id ?? selectedInstance.floorId,
+                            selectedInstance.id,
+                            { entrySide: nextEntry },
+                            syncFloors,
+                          );
+                          return res ? res.project : prev;
+                        },
+                        `Entrada da unidade ${selectedInstance.unitNumber} alterada para ${nextEntry}`,
+                      );
+                    }}
+                    className="w-full px-2 py-1 text-xs rounded bg-[#14161A] border border-[#2A2F38] text-emerald-300"
+                  >
+                    <option value="frente">Frente</option>
+                    <option value="lateral_direita">Lat. Dir.</option>
+                    <option value="lateral_esquerda">Lat. Esq.</option>
+                  </select>
+                  <div className="mt-1 rounded bg-[#14161A] border border-emerald-500/30 px-2 py-1 text-[10px] text-emerald-300">
+                    Porta P1 no lote: <span className="font-semibold">{lotSideLabel}</span>
+                    {selectedInstance.mirrored && ' (espelhada)'}
+                  </div>
+                </div>
+
+                <div className="flex gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => handleRotateSelected(90)}
+                    className="flex-1 py-1.5 rounded border border-[#323844] bg-[#22262E] text-white flex items-center justify-center gap-1"
+                  >
+                    <RotateCw className="w-3.5 h-3.5" /> Girar 90°
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleMirrorSelected}
+                    className="flex-1 py-1.5 rounded border border-[#323844] bg-[#22262E] text-white flex items-center justify-center gap-1"
+                  >
+                    <FlipHorizontal2 className="w-3.5 h-3.5" /> Espelhar
+                  </button>
+                </div>
+
+                {project.floors.length > 1 && (
+                  <div className="space-y-1.5 pt-1 border-t border-[#252A33]">
+                    <label className="inline-flex items-center gap-1.5 text-[11px] text-slate-300 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={syncFloors}
+                        onChange={(e) => setSyncFloors(e.target.checked)}
+                      />
+                      Sincronizar edições nos {project.floors.length} andares
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onUpdateProject(
+                          (prev) =>
+                            updateFloorUnitInProject(
+                              prev,
+                              activeFloor?.id ?? selectedInstance.floorId,
+                              selectedInstance.id,
+                              {
+                                unitTypeId: selectedInstance.unitTypeId,
+                                rotationDeg: selectedInstance.rotationDeg,
+                                mirrored: selectedInstance.mirrored,
+                                x: selectedInstance.x,
+                                y: selectedInstance.y,
+                              },
+                              true,
+                            ),
+                          `Unidade ${selectedInstance.unitNumber} aplicada nos ${project.floors.length} andares`,
+                        )
+                      }
+                      className="w-full py-1.5 rounded border border-emerald-500/40 bg-emerald-600/15 text-emerald-200 hover:bg-emerald-600/30 flex items-center justify-center gap-1 text-[11px]"
+                    >
+                      <Copy className="w-3 h-3" />
+                      Aplicar esta unidade nos {project.floors.length} andares
+                    </button>
+                  </div>
+                )}
               </div>
-              <div className="flex gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => handleRotateSelected(90)}
-                  className="flex-1 py-1.5 rounded border border-[#323844] bg-[#22262E] text-white flex items-center justify-center gap-1"
-                >
-                  <RotateCw className="w-3.5 h-3.5" /> Girar 90°
-                </button>
-                <button
-                  type="button"
-                  onClick={handleMirrorSelected}
-                  className="flex-1 py-1.5 rounded border border-[#323844] bg-[#22262E] text-white flex items-center justify-center gap-1"
-                >
-                  <FlipHorizontal2 className="w-3.5 h-3.5" /> Espelhar
-                </button>
-              </div>
-            </div>
-          )}
+            );
+          })()}
         </aside>
       </div>
     </div>

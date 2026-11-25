@@ -547,18 +547,21 @@ test('Fixed door widths (80/60/70cm), all 3 entrySide orientations, Drywall SINA
 
 import {
   createDefaultImplantationConfig,
+  customizeUnitTypeForSlot,
   deleteUnitTypeFromProject,
   detectSharedWallsAndGaps,
   generateImplantationUnits,
+  getEffectiveWorldEntrySide,
   getLotBoundarySegments,
   normalizeSiteData,
   replicateGroundFloorToAllFloors,
   setProjectFloorCount,
+  updateFloorUnitInProject,
   updateUnitTypeInProject,
   validateImplantation,
 } from './implantation';
 import { generateTechnicalSheetPDFBlob } from './exporters';
-import { buildSheetTabulations } from './cadDrawings';
+import { buildSheetTabulations, unitLocalToWorld } from './cadDrawings';
 import type { ImplantationConfig, Project } from '../types/project';
 
 function makeQuickUnitType(code: string, width: number, depth: number, entrySide: 'frente' | 'lateral_direita' | 'lateral_esquerda' = 'frente') {
@@ -1754,6 +1757,107 @@ test('Typology edit & delete helpers preserve UnitInstance linkage across floors
   assert.equal(remainingUnits[0].id, 'inst-b-1');
   assert.equal(remainingUnits[0].unitTypeId, utB.id);
 });
+
+test('Floor unit typology & entrance edits sync across floors without stacking suffixes and preserve 2D-3D mirrored alignment', () => {
+  const utA = makeQuickUnitType('TIPO-A', 3.5, 4.5, 'lateral_direita');
+  const utB = makeQuickUnitType('TIPO-B', 3.5, 4.5, 'frente');
+  const blank = createBlankProject({
+    name: 'Residencial 2 Corredor Central',
+    client: '',
+    municipality: 'Rio de Janeiro',
+    state: 'RJ',
+    front: 12,
+    depth: 30,
+    floorsCount: 1,
+    methodId: 'alvenaria_convencional',
+  });
+
+  const cfg: ImplantationConfig = {
+    ...createDefaultImplantationConfig({ ...blank, unitTypes: [utA, utB] }),
+    primaryUnitTypeId: utA.id,
+    layoutPattern: 'duas_fileiras',
+    totalUnitsTarget: 4,
+    couplingMode: 'geminadas',
+  };
+  const groundUnits = generateImplantationUnits({ ...blank, unitTypes: [utA, utB] }, cfg, blank.floors[0].id);
+  const p2 = setProjectFloorCount(
+    {
+      ...blank,
+      unitTypes: [utA, utB],
+      implantation: cfg,
+      floors: [{ ...blank.floors[0], units: groundUnits }],
+    },
+    2,
+    true,
+  );
+  assert.equal(p2.floors.length, 2);
+  assert.equal(p2.floors[0].units.length, 4);
+  assert.equal(p2.floors[1].units.length, 4);
+
+  // 1. Customize entrance on unit 101 with syncAcrossFloors=true -> clones TIPO-A-101 and links both 101 & 201
+  const u101 = p2.floors[0].units[0];
+  const cust1 = customizeUnitTypeForSlot(
+    p2,
+    p2.floors[0].id,
+    u101.id,
+    { entrySide: 'lateral_esquerda' },
+    true,
+  );
+  assert.ok(cust1);
+  assert.equal(cust1.unitType.code, 'TIPO-A-101');
+  assert.equal(cust1.unitType.entrySide, 'lateral_esquerda');
+  assert.equal(cust1.project.floors[0].units[0].unitTypeId, cust1.unitType.id);
+  assert.equal(cust1.project.floors[1].units[0].unitTypeId, cust1.unitType.id);
+  // Other units keep TIPO-A
+  assert.equal(cust1.project.floors[0].units[2].unitTypeId, utA.id);
+  assert.equal(cust1.project.floors[1].units[2].unitTypeId, utA.id);
+
+  // 2. Re-edit 101 -> updates TIPO-A-101 IN PLACE (never stacks -101-101)
+  const cust2 = customizeUnitTypeForSlot(
+    cust1.project,
+    cust1.project.floors[0].id,
+    u101.id,
+    { entrySide: 'frente', width: 3.8, depth: 4.8 },
+    true,
+  );
+  assert.ok(cust2);
+  assert.equal(cust2.unitType.id, cust1.unitType.id);
+  assert.equal(cust2.unitType.code, 'TIPO-A-101');
+  assert.equal(cust2.unitType.entrySide, 'frente');
+  assert.equal(cust2.unitType.width, 3.8);
+  assert.equal(cust2.project.unitTypes.length, 3);
+
+  // 3. Cross-floor updateFloorUnitInProject propagates typology/rotation/mirror to matching upper unit
+  const synced = updateFloorUnitInProject(
+    cust2.project,
+    cust2.project.floors[0].id,
+    cust2.project.floors[0].units[1].id,
+    { unitTypeId: utB.id, mirrored: true, rotationDeg: 90 },
+    true,
+  );
+  assert.equal(synced.floors[0].units[1].unitTypeId, utB.id);
+  assert.equal(synced.floors[1].units[1].unitTypeId, utB.id);
+  assert.equal(synced.floors[1].units[1].mirrored, true);
+  assert.equal(synced.floors[1].units[1].rotationDeg, 90);
+
+  // 4. Effective world entrance side respects mirrored + rotationDeg and matches 3D wall vector angle
+  assert.equal(getEffectiveWorldEntrySide('lateral_esquerda', 0, true), 'direita');
+  assert.equal(getEffectiveWorldEntrySide('lateral_direita', 0, true), 'esquerda');
+  assert.equal(getEffectiveWorldEntrySide('frente', 90, false), 'esquerda');
+
+  // Verify opening world center lies on the mapped wall segment for mirrored & rotated unit
+  const mirInst = synced.floors[0].units[1];
+  const p1 = utB.openings.find((o) => o.code === 'P1')!;
+  const p1Wall = utB.walls.find((w) => w.id === p1.wallId)!;
+  const opLocal = getOpeningWorldPosition(p1Wall, p1);
+  const wA = unitLocalToWorld(mirInst, utB, p1Wall.start.x, p1Wall.start.y);
+  const wB = unitLocalToWorld(mirInst, utB, p1Wall.end.x, p1Wall.end.y);
+  const wC = unitLocalToWorld(mirInst, utB, opLocal.center.x, opLocal.center.y);
+  // Cross product (wC - wA) x (wB - wA) must be 0 (collinear on mapped wall)
+  const cross = (wC.x - wA.x) * (wB.y - wA.y) - (wC.y - wA.y) * (wB.x - wA.x);
+  assert.ok(Math.abs(cross) < 1e-6);
+});
+
 
 
 

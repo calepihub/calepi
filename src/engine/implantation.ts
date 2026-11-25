@@ -11,7 +11,9 @@ import {
   type Rect2D,
 } from './geometry';
 import { unitLocalToWorld } from './cadDrawings';
+import { generateParametricUnitLayout } from './parametricGenerator';
 import type {
+  EntrySide,
   Floor,
   ImplantationConfig,
   ImplantationZone,
@@ -1572,5 +1574,205 @@ export function deleteUnitTypeFromProject(
     unitTypes: nextUnitTypes,
     floors: nextFloors,
     ...(nextImplantation ? { implantation: nextImplantation } : {}),
+  };
+}
+
+export type WorldCardinalSide = 'baixo' | 'cima' | 'esquerda' | 'direita';
+
+/**
+ * Computes which world/lot side a unit's entrance (P1) faces given its local entrySide,
+ * rotationDeg, and mirrored state (ESP).
+ */
+export function getEffectiveWorldEntrySide(
+  entrySide: EntrySide = 'frente',
+  rotationDeg = 0,
+  mirrored = false,
+): WorldCardinalSide {
+  // Local unit coords: +Y is down (frente/bottom edge), +X is right, -X is left
+  let vx = 0;
+  let vy = 1;
+  if (entrySide === 'lateral_direita') {
+    vx = 1;
+    vy = 0;
+  } else if (entrySide === 'lateral_esquerda') {
+    vx = -1;
+    vy = 0;
+  }
+  if (mirrored) {
+    vx = -vx;
+  }
+  const rad = (rotationDeg * Math.PI) / 180;
+  const rx = vx * Math.cos(rad) - vy * Math.sin(rad);
+  const ry = vx * Math.sin(rad) + vy * Math.cos(rad);
+  if (Math.abs(rx) >= Math.abs(ry)) {
+    return rx >= 0 ? 'direita' : 'esquerda';
+  }
+  return ry >= 0 ? 'baixo' : 'cima';
+}
+
+export function formatWorldEntrySideLabel(side: WorldCardinalSide): string {
+  switch (side) {
+    case 'direita':
+      return 'Direita no lote';
+    case 'esquerda':
+      return 'Esquerda no lote';
+    case 'cima':
+      return 'Fundos (acima) no lote';
+    case 'baixo':
+    default:
+      return 'Frente (abaixo) no lote';
+  }
+}
+
+function findMatchingFloorUnitIds(
+  project: Project,
+  sourceFloorId: string,
+  sourceUnitId: string,
+  syncAcrossFloors: boolean,
+): Set<string> {
+  const matched = new Set<string>([sourceUnitId]);
+  if (!syncAcrossFloors) return matched;
+
+  const srcFloor = project.floors.find((f) => f.id === sourceFloorId);
+  if (!srcFloor) return matched;
+  const srcIdx = srcFloor.units.findIndex((u) => u.id === sourceUnitId);
+  const srcUnit = srcIdx >= 0 ? srcFloor.units[srcIdx] : undefined;
+  if (!srcUnit) return matched;
+
+  const srcSuffix =
+    srcUnit.unitNumber.length >= 2 ? srcUnit.unitNumber.slice(1) : srcUnit.unitNumber;
+
+  for (const fl of project.floors) {
+    if (fl.id === sourceFloorId) continue;
+    const bySuffix = fl.units.find(
+      (u) =>
+        (u.unitNumber.length >= 2 ? u.unitNumber.slice(1) : u.unitNumber) === srcSuffix,
+    );
+    if (bySuffix) {
+      matched.add(bySuffix.id);
+    } else if (srcIdx >= 0 && srcIdx < fl.units.length) {
+      matched.add(fl.units[srcIdx].id);
+    }
+  }
+  return matched;
+}
+
+/**
+ * Updates a UnitInstance on the selected floor and, when syncAcrossFloors=true,
+ * propagates the patch (typology, rotation, mirror, coordinates) to the matching
+ * unit slot on every other floor.
+ */
+export function updateFloorUnitInProject(
+  project: Project,
+  floorId: string,
+  unitId: string,
+  patch: Partial<Pick<UnitInstance, 'unitTypeId' | 'x' | 'y' | 'rotationDeg' | 'mirrored' | 'entranceOrientation'>>,
+  syncAcrossFloors = false,
+): Project {
+  const matchedIds = findMatchingFloorUnitIds(project, floorId, unitId, syncAcrossFloors);
+  return {
+    ...project,
+    floors: project.floors.map((fl) => ({
+      ...fl,
+      units: fl.units.map((u) => (matchedIds.has(u.id) ? { ...u, ...patch } : u)),
+    })),
+  };
+}
+
+/**
+ * Customizes a unit slot's dimensions and/or entrance orientation cleanly:
+ * - Updates the existing UnitType in place when no other unrelated unit slot uses it
+ *   (avoiding stacked suffixes like TIPO-A-101-101).
+ * - Clones a per-slot UnitType when other slots still share the base typology, preserving
+ *   mepProfile, finishStandard, and mezzanine parameters.
+ * - Optionally propagates the change to matching unit slots across all floors.
+ */
+export function customizeUnitTypeForSlot(
+  project: Project,
+  floorId: string,
+  unitId: string,
+  params: {
+    width?: number;
+    depth?: number;
+    entrySide: EntrySide;
+  },
+  syncAcrossFloors = true,
+): { project: Project; unitType: UnitType } | null {
+  const floor = project.floors.find((f) => f.id === floorId);
+  const inst = floor?.units.find((u) => u.id === unitId);
+  const baseUt = inst ? project.unitTypes.find((t) => t.id === inst.unitTypeId) : undefined;
+  if (!floor || !inst || !baseUt) return null;
+
+  const matchedIds = findMatchingFloorUnitIds(project, floorId, unitId, syncAcrossFloors);
+  const usedByOtherSlots = project.floors.some((fl) =>
+    fl.units.some((u) => !matchedIds.has(u.id) && u.unitTypeId === baseUt.id),
+  );
+
+  const customSuffix = `-${inst.unitNumber}`;
+  const cleanCode = usedByOtherSlots
+    ? baseUt.code.endsWith(customSuffix)
+      ? baseUt.code
+      : `${baseUt.code}${customSuffix}`
+    : baseUt.code;
+  const cleanName = usedByOtherSlots
+    ? baseUt.name.includes(`Unid. ${inst.unitNumber}`)
+      ? baseUt.name
+      : `${baseUt.name} (Unid. ${inst.unitNumber})`
+    : baseUt.name;
+
+  const nextUt = generateParametricUnitLayout({
+    ...(usedByOtherSlots ? {} : { id: baseUt.id }),
+    code: cleanCode,
+    name: cleanName,
+    width: Math.max(2.8, round2(params.width ?? baseUt.width)),
+    depth: Math.max(3.6, round2(params.depth ?? baseUt.depth)),
+    ceilingHeight: baseUt.ceilingHeight,
+    bedrooms: baseUt.bedrooms,
+    hasLaundry: baseUt.hasLaundry,
+    hasBalcony: baseUt.hasBalcony,
+    hasMezzanine: baseUt.hasMezzanine,
+    accessible: baseUt.accessible,
+    extWallThickness: project.constructionMethod.externalWallThickness,
+    intWallThickness:
+      baseUt.internalPartitionType === 'drywall'
+        ? 0.095
+        : project.constructionMethod.internalWallThickness,
+    constructionSystem: project.constructionMethod.methodId,
+    entrySide: params.entrySide,
+    internalPartitionType: baseUt.internalPartitionType ?? 'alvenaria',
+    mepProfile: baseUt.mepProfile ?? 'simples',
+    finishStandard: baseUt.finishStandard,
+    mezzanineZone: baseUt.mezzanine?.zone,
+    mezzanineElevationM: baseUt.mezzanine?.elevationM,
+    mezzanineSizingMode: baseUt.mezzanine?.sizingMode,
+    mezzanineCoverageRatio: baseUt.mezzanine?.coverageRatio,
+    mezzanineCustomWidthM: baseUt.mezzanine?.customWidthM,
+    mezzanineCustomDepthM: baseUt.mezzanine?.customDepthM,
+    mezzanineUsage: baseUt.mezzanine?.usage,
+    mezzanineStructureType: baseUt.mezzanine?.structureType,
+    mezzanineStairLayout: baseUt.mezzanine?.stairLayout,
+    mezzanineStairSide: baseUt.mezzanine?.stairSide,
+  });
+
+  const nextUnitTypes = usedByOtherSlots
+    ? [...project.unitTypes, nextUt]
+    : project.unitTypes.map((t) => (t.id === baseUt.id ? nextUt : t));
+
+  const nextFloors = project.floors.map((fl) => ({
+    ...fl,
+    units: fl.units.map((u) =>
+      matchedIds.has(u.id)
+        ? { ...u, unitTypeId: nextUt.id, entranceOrientation: params.entrySide }
+        : u,
+    ),
+  }));
+
+  return {
+    project: {
+      ...project,
+      unitTypes: nextUnitTypes,
+      floors: nextFloors,
+    },
+    unitType: nextUt,
   };
 }

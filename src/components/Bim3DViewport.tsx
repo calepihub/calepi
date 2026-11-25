@@ -22,7 +22,6 @@ import {
   findBestHostWallForOpening,
   getBoundingBox,
   getOpeningWorldPosition,
-  getWallAngleRad,
   getWallLength,
   round2,
 } from '../engine/geometry';
@@ -1245,12 +1244,49 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
     let maxBuildingZ = -Infinity;
     const computedUnitViews: typeof unitViewsRef.current = [];
 
+    // Precompute interior camera targets across ALL floors so upper-floor units can also be inspected
+    project.floors.forEach((fl, fIdx) => {
+      const fBaseY = fl.elevation + fIdx * explodedOffset;
+      fl.units.forEach((inst) => {
+        const ut = project.unitTypes.find((t) => t.id === inst.unitTypeId);
+        if (!ut) return;
+        const eyePt = mapUnitPt(
+          inst,
+          ut.width,
+          Math.max(0.55, ut.width - 0.55),
+          Math.max(0.75, ut.depth - 0.55),
+        );
+        const tgtPt = mapUnitPt(inst, ut.width, ut.width * 0.38, 1.45);
+        computedUnitViews.push({
+          id: inst.id,
+          unitNumber: inst.unitNumber,
+          utCode: ut.code,
+          eye: new THREE.Vector3(eyePt.x, fBaseY + fl.slabThickness + 1.52, eyePt.z),
+          target: new THREE.Vector3(tgtPt.x, fBaseY + fl.slabThickness + 0.92, tgtPt.z),
+        });
+      });
+    });
+
+    const allUnitFloorIndices = project.floors.flatMap((fl, fIdx) =>
+      fl.units.map(() => fIdx),
+    );
+    const activeInternalFloorIdx =
+      isInternalView && allUnitFloorIndices.length > 0
+        ? allUnitFloorIndices[
+            Math.min(selectedInternalUnitIdx, allUnitFloorIndices.length - 1)
+          ]
+        : 0;
+
     // 2. Floors & Unit Instances
     project.floors.forEach((floor, fIdx) => {
-      // In "interna" cutaway mode, show ground floor cleanly open from above so light & interior sightlines shine
-      if (isInternalView && fIdx > 0) return;
+      // In "interna" cutaway mode, hide floors above the inspected unit's floor so light & sightlines stay open
+      if (isInternalView && fIdx > activeInternalFloorIdx) return;
 
       const baseY = floor.elevation + fIdx * explodedOffset;
+      let floorMinX = Infinity;
+      let floorMaxX = -Infinity;
+      let floorMinZ = Infinity;
+      let floorMaxZ = -Infinity;
 
       floor.units.forEach((inst) => {
         const ut = project.unitTypes.find((t) => t.id === inst.unitTypeId);
@@ -1262,21 +1298,10 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
         maxBuildingX = Math.max(maxBuildingX, c0.x, c1.x);
         minBuildingZ = Math.min(minBuildingZ, c0.z, c1.z);
         maxBuildingZ = Math.max(maxBuildingZ, c0.z, c1.z);
-
-        // Compute clean interior studio camera anchor on floor 0
-        if (fIdx === 0) {
-          const eyePt = mapUnitPt(inst, ut.width, Math.max(0.55, ut.width - 0.55), Math.max(0.75, ut.depth - 0.55));
-          const tgtPt = mapUnitPt(inst, ut.width, ut.width * 0.38, 1.45);
-          const eyeY = baseY + floor.slabThickness + 1.52;
-          const tgtY = baseY + floor.slabThickness + 0.92;
-          computedUnitViews.push({
-            id: inst.id,
-            unitNumber: inst.unitNumber,
-            utCode: ut.code,
-            eye: new THREE.Vector3(eyePt.x, eyeY, eyePt.z),
-            target: new THREE.Vector3(tgtPt.x, tgtY, tgtPt.z),
-          });
-        }
+        floorMinX = Math.min(floorMinX, c0.x, c1.x);
+        floorMaxX = Math.max(floorMaxX, c0.x, c1.x);
+        floorMinZ = Math.min(floorMinZ, c0.z, c1.z);
+        floorMaxZ = Math.max(floorMaxZ, c0.z, c1.z);
 
         // Floor slab + architectural floor finish + wet-room ceramic + baseboards
         if (layers.arquitetura) {
@@ -1374,13 +1399,7 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
             }
 
             const wallOps = openingsByWall.get(w.id) ?? [];
-            const wallGeom = isArchRender
-              ? buildWallWithOpeningsGeometry(len, effectiveWallH, w.thickness, wallOps)
-              : (() => {
-                  const g = new THREE.BoxGeometry(len, effectiveWallH, w.thickness);
-                  g.translate(0, effectiveWallH / 2, 0);
-                  return g;
-                })();
+            const wallGeom = buildWallWithOpeningsGeometry(len, effectiveWallH, w.thickness, wallOps);
 
             const isDrywall =
               !w.isExternal && w.material.toLowerCase().includes('drywall');
@@ -1422,9 +1441,9 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
             if (!wall) continue;
             const pos = getOpeningWorldPosition(wall, op);
             const wp = mapUnitPt(inst, ut.width, pos.center.x, pos.center.y);
-            const wallAngle = getWallAngleRad(wall);
-            const totalAngle = wallAngle + (inst.rotationDeg * Math.PI) / 180;
-            const rotY = inst.mirrored ? totalAngle : -totalAngle;
+            const pA = mapUnitPt(inst, ut.width, wall.start.x, wall.start.y);
+            const pB = mapUnitPt(inst, ut.width, wall.end.x, wall.end.y);
+            const rotY = -Math.atan2(pB.z - pA.z, pB.x - pA.x);
             const baseOpY = baseY + floor.slabThickness + op.sillHeight;
             const opDragData = {
               unitTypeId: ut.id,
@@ -2022,12 +2041,12 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
         }
       });
 
-      // Corridor / Circulation slab
-      if (layers.arquitetura && Number.isFinite(minBuildingX)) {
+      // Corridor / Circulation slab (using current floor's bounds)
+      if (layers.arquitetura && Number.isFinite(floorMinX)) {
         const corrW = Math.max(1.2, floor.corridorWidth);
-        const corrD = Math.max(4, maxBuildingZ - minBuildingZ);
-        const corrX = (minBuildingX + maxBuildingX) / 2;
-        const corrZ = (minBuildingZ + maxBuildingZ) / 2;
+        const corrD = Math.max(4, floorMaxZ - floorMinZ);
+        const corrX = (floorMinX + floorMaxX) / 2;
+        const corrZ = (floorMinZ + floorMaxZ) / 2;
         const corrGeom = new THREE.BoxGeometry(corrW, floor.slabThickness, corrD);
         const corrMesh = new THREE.Mesh(corrGeom, matSlab);
         corrMesh.position.set(corrX, baseY + floor.slabThickness / 2, corrZ);
@@ -2486,24 +2505,29 @@ export const Bim3DViewport: React.FC<Bim3DViewportProps> = ({
               {label}
             </button>
           ))}
-          {activeCameraPreset === 'interna' && (project.floors[0]?.units.length ?? 0) > 0 && (
-            <select
-              value={Math.min(selectedInternalUnitIdx, (project.floors[0]?.units.length ?? 1) - 1)}
-              onChange={(e) => {
-                const idx = Number(e.target.value);
-                setSelectedInternalUnitIdx(idx);
-                setCameraPreset('interna', idx);
-              }}
-              aria-label="Selecionar unidade para vista interna"
-              className="rounded border border-[#2F7CF6] bg-[#14161A] px-1.5 py-1 text-[11px] text-white"
-            >
-              {project.floors[0].units.map((u, idx) => (
-                <option key={u.id} value={idx}>
-                  Unid. {u.unitNumber}
-                </option>
-              ))}
-            </select>
-          )}
+          {activeCameraPreset === 'interna' && totalUnitsPlaced > 0 && (() => {
+            const allFlatUnits = project.floors.flatMap((fl) =>
+              fl.units.map((u) => ({ floorName: fl.name, unit: u })),
+            );
+            return (
+              <select
+                value={Math.min(selectedInternalUnitIdx, Math.max(0, allFlatUnits.length - 1))}
+                onChange={(e) => {
+                  const idx = Number(e.target.value);
+                  setSelectedInternalUnitIdx(idx);
+                  setCameraPreset('interna', idx);
+                }}
+                aria-label="Selecionar unidade para vista interna"
+                className="rounded border border-[#2F7CF6] bg-[#14161A] px-1.5 py-1 text-[11px] text-white"
+              >
+                {allFlatUnits.map(({ floorName, unit }, idx) => (
+                  <option key={unit.id} value={idx}>
+                    Unid. {unit.unitNumber} ({floorName})
+                  </option>
+                ))}
+              </select>
+            );
+          })()}
           <button
             type="button"
             onClick={handleSaveRenderToProject}
